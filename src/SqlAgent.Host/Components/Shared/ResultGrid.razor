@@ -1,0 +1,37 @@
+@if (Result is { Success: true } r)
+{
+    <p class="meta">
+        @r.RowCount rows · @r.ElapsedMs ms
+        @if (r.Truncated)
+        {
+            <strong> · results truncated at the row cap</strong>
+        }
+    </p>
+
+    <div class="grid-scroll">
+        <table>
+            <thead>
+                <tr>@foreach (var c in r.Columns) { <th>@c</th> }</tr>
+            </thead>
+            <tbody>
+                @foreach (var row in r.Rows)
+                {
+                    <tr>
+                        @foreach (var value in row)
+                        {
+                            <td>@(value is null ? "NULL" : value.ToString())</td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+else if (Result is { } failed)
+{
+    <OutcomeMessage Code="@failed.ErrorCode" Message="@failed.ErrorMessage" />
+}
+
+@code {
+    [Parameter] public QueryExecutionResult? Result { get; set; }
+}
