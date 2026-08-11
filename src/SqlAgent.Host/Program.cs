@@ -26,7 +26,7 @@ builder.Services.AddScoped<LocalTokenAuthenticator>();
 builder.Services.AddScoped<ScopedRunner>();
 builder.Services.AddScoped<AppState>();
 
-// Fail-closed LLM seam: ask_database resolves to a stable llm_error until a vendor gateway is wired.
+// Fail-closed LLM seam: ask_database resolves to a stable llm_not_configured until a vendor gateway is wired.
 builder.Services.AddSingleton<ILlmSqlGateway, UnavailableLlmSqlGateway>();
 
 if (OperatingSystem.IsWindows())
@@ -61,8 +61,10 @@ app.Logger.LogInformation(
 
 await app.RunAsync();
 
-/// <summary>Placeholder until a real LLM gateway is wired. NlQueryService turns this into a stable,
-/// user-safe llm_error, so ask_database is contract-complete and fails closed rather than half-wired.</summary>
+/// <summary>Placeholder until a real LLM gateway is wired. Throwing <see cref="NotSupportedException"/> is
+/// the documented signal NlQueryService keys off to map this to the stable, user-safe llm_not_configured
+/// code (as opposed to llm_error, reserved for a configured provider's own call failures), so ask_database
+/// is contract-complete and fails closed rather than half-wired.</summary>
 internal sealed class UnavailableLlmSqlGateway : ILlmSqlGateway
 {
     public Task<LlmSqlResponse> GenerateSqlAsync(LlmSqlRequest request, CancellationToken ct = default) =>

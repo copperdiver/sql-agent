@@ -1,5 +1,6 @@
 @page "/"
 @rendermode InteractiveServer
+@implements IDisposable
 @inject ScopedRunner Runner
 @inject AppState State
 
@@ -48,6 +49,18 @@ else if (_tab == Tab.Chat)
     private bool _running;
     private QueryExecutionResult? _result;
     private CancellationTokenSource? _cts;
+
+    // SchemaRail and Workspace are siblings under MainLayout (not parent/child), so a connection
+    // picked from the rail's dropdown does not, by itself, cause Workspace to re-render — only the
+    // rail's own subtree re-renders. Subscribing here (mirroring SchemaRail's own subscription to
+    // the same event) is what makes selecting a connection actually update this pane immediately,
+    // rather than leaving it stuck on "Select a connection to start querying." until some unrelated
+    // interaction (like a tab click) happens to force a render.
+    protected override void OnInitialized() => State.Changed += OnStateChanged;
+
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => State.Changed -= OnStateChanged;
 
     private async Task RunAsync()
     {

@@ -68,6 +68,29 @@ public class WorkspaceTests : IDisposable
     }
 
     [Fact]
+    public async Task Selecting_a_connection_after_the_workspace_is_already_rendered_updates_it_without_further_interaction()
+    {
+        // SchemaRail and Workspace are siblings under MainLayout, not parent and child, so a
+        // connection picked from the rail's dropdown re-renders only the rail's own subtree unless
+        // Workspace itself listens for AppState.Changed. Every other test in this file (and in
+        // WorkspaceChatTests) calls SelectConnectionAsync BEFORE rendering Workspace, so Workspace
+        // always observes the connection on its own first render regardless of whether it
+        // subscribes — that blind spot is exactly why this went unnoticed. Here the order is
+        // deliberately reversed, and nothing else happens afterwards (no button click, no tab
+        // switch) that could force a render some other way.
+        var page = _ctx.RenderComponent<Workspace>();
+        Assert.Contains("Select a connection to start querying.", page.Markup);
+
+        using var scope = _ctx.Services.CreateScope();
+        var connections = scope.ServiceProvider.GetRequiredService<DatabaseConnectionService>();
+        var created = await connections.CreateAsync(
+            new DatabaseConnectionInput("c", DatabaseProviderType.Postgres, true), "cs");
+        _ctx.Services.GetRequiredService<AppState>().Select(created);
+
+        Assert.DoesNotContain("Select a connection to start querying.", page.Markup);
+    }
+
+    [Fact]
     public async Task Rendering_the_SQL_tab_with_a_connection_selected_creates_the_CodeMirror_editor()
     {
         // The create/setValue setups in the constructor only make bUnit's strict-mode JSInterop *allow*

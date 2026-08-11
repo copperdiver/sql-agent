@@ -88,6 +88,14 @@ public class NlQueryService(
         {
             throw; // Cancellation/timeout is the caller's signal, not an LLM failure.
         }
+        catch (NotSupportedException)
+        {
+            // The documented signal a gateway throws to mean "no provider is configured" (see
+            // UnavailableLlmSqlGateway in Program.cs), kept distinct from llm_error below so that once a
+            // real provider is wired, its own timeouts/network errors/malformed responses still surface
+            // as a genuine failure rather than being mistaken for "nothing is configured".
+            return NlQueryResult.Error("llm_not_configured", "No LLM provider is configured on this server.");
+        }
         catch (Exception)
         {
             return NlQueryResult.Error("llm_error", "The language model could not process the request.");

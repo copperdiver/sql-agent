@@ -27,9 +27,9 @@
             <p class="clarification">@r.ClarificationQuestion</p>
             break;
 
-        case NlResponseKind.Error when r.ErrorCode == "llm_error":
-            // No provider is wired yet, so this is the only outcome a user can currently reach.
-            // Showing the bare code would read as a bug in their question.
+        case NlResponseKind.Error when r.ErrorCode == "llm_not_configured":
+            // Distinct from llm_error (a configured provider's own call failing): this code means no
+            // provider is wired at all, so showing the bare code would read as a bug in their question.
             <div class="outcome" role="status">
                 <p>The LLM is not configured on this server, so natural-language questions cannot be
                    answered yet. Use the SQL tab, or see <code>docs/runbook.md</code> to configure a provider.</p>
