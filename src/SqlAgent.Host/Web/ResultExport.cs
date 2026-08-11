@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 
@@ -14,9 +15,26 @@ public static class ResultExport
         var sb = new StringBuilder();
         sb.Append(string.Join(',', columns.Select(Escape))).Append("\r\n");
         foreach (var row in rows)
-            sb.Append(string.Join(',', row.Select(v => Escape(v?.ToString())))).Append("\r\n");
+            sb.Append(string.Join(',', row.Select(v => Escape(FormatInvariant(v))))).Append("\r\n");
         return sb.ToString();
     }
+
+    /// <summary>
+    /// Renders a cell value the same way regardless of the host machine's locale, and preserves binary
+    /// data instead of losing it to a bare "System.Byte[]" from the default ToString(). JSON does not
+    /// need this: JsonSerializer resolves the runtime type itself (base64-encoding byte[]) and its
+    /// number/date formatting is culture-invariant by construction.
+    /// </summary>
+    private static string? FormatInvariant(object? value) => value switch
+    {
+        null => null,
+        byte[] bytes => Convert.ToBase64String(bytes),
+        // "O" is the round-trip format: fixed shape, no locale-dependent separators or ordering.
+        DateTime dt => dt.ToString("O", CultureInfo.InvariantCulture),
+        DateTimeOffset dto => dto.ToString("O", CultureInfo.InvariantCulture),
+        IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
+        _ => value.ToString(),
+    };
 
     public static string ToJson(IReadOnlyList<string> columns, IReadOnlyList<IReadOnlyList<object?>> rows)
     {

@@ -1,3 +1,4 @@
+using System.Globalization;
 using SqlAgent.Host.Web;
 
 namespace SqlAgent.Tests;
@@ -59,5 +60,57 @@ public class ResultExportTests
         var json = ResultExport.ToJson(["id", "id"], [new object?[] { 1, 2 }]);
 
         Assert.Equal("""[{"id":1,"id (2)":2}]""", json);
+    }
+
+    [Fact]
+    public void A_byte_array_cell_exports_as_base64_in_CSV_matching_the_JSON_encoding()
+    {
+        // varbinary/bytea/rowversion columns are byte[] at the ADO.NET level. Plain ToString() on a
+        // byte[] yields the literal text "System.Byte[]" and silently destroys the data; base64
+        // preserves it, and matching JsonSerializer's own byte[] encoding keeps the two exports in
+        // agreement for the same underlying value.
+        var bytes = new byte[] { 0, 1, 2, 250, 255 };
+        var expectedBase64 = Convert.ToBase64String(bytes);
+
+        var csv = ResultExport.ToCsv(["data"], [new object?[] { bytes }]);
+        var json = ResultExport.ToJson(["data"], [new object?[] { bytes }]);
+
+        Assert.Equal($"data\r\n{expectedBase64}\r\n", csv);
+        Assert.Contains($"\"{expectedBase64}\"", json);
+    }
+
+    [Fact]
+    public void Decimal_and_DateTime_values_export_invariantly_in_CSV_regardless_of_current_culture()
+    {
+        // On a comma-decimal locale, ToString() renders 1.5 as "1,5" — the CSV then only avoids
+        // corruption because the comma happens to trigger quoting. Formatting must be invariant so a
+        // CSV's numbers mean the same thing no matter which machine opened the app.
+        var original = CultureInfo.CurrentCulture;
+        CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("de-DE");
+        try
+        {
+            var csv = ResultExport.ToCsv(
+                ["price", "when"],
+                [new object?[] { 1.5m, new DateTime(2026, 8, 11, 13, 30, 0, DateTimeKind.Utc) }]);
+
+            Assert.Contains("1.5", csv);
+            Assert.DoesNotContain("1,5", csv);
+            // A round-trippable invariant format (the "O" specifier), not whatever de-DE would produce.
+            Assert.Contains("2026-08-11T13:30:00.0000000", csv);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = original;
+        }
+    }
+
+    [Fact]
+    public void Null_and_empty_string_still_collapse_to_an_empty_CSV_field()
+    {
+        // Guards the deliberate null/empty-string collapse (already covered above) against regressing
+        // while fixing the byte[] and culture issues in the same code path.
+        var csv = ResultExport.ToCsv(["a", "b"], [new object?[] { null, "" }]);
+
+        Assert.Equal("a,b\r\n,\r\n", csv);
     }
 }
