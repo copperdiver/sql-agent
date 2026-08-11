@@ -8,6 +8,15 @@ using SqlAgent.Storage;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// WebApplication.CreateBuilder only wires referenced packages' static web assets (blazor.web.js among
+// them) into the static-file provider when the hosting environment is Development. Nothing here sets
+// ASPNETCORE_ENVIRONMENT (there is no launchSettings.json, and the Windows-service/systemd hosts run in
+// Production deliberately), so without this call the Interactive Server script the whole UI depends on
+// 404s under an unpublished `dotnet run` — the exact command the docs tell an operator to use. A real
+// `dotnet publish` copies those assets into wwwroot regardless, so this only changes behavior for the
+// unpublished case, which is otherwise silently broken.
+builder.WebHost.UseStaticWebAssets();
+
 builder.Services.AddWindowsService(o => o.ServiceName = "SQL Agent").AddSystemd();
 
 builder.Services.AddDbContext<SqlAgentDbContext>(options =>

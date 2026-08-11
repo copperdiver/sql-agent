@@ -44,33 +44,54 @@ sudo systemctl enable --now sqlagent
 The non-Windows v1 host uses the in-memory secret store. Do not rely on it for
 durable production secrets until a Linux secret-store implementation is added.
 
-## Local-access token
+## Web UI
 
-The named-pipe API and the MCP server share one optional token (CD-76). **It is
-off by default**: with nothing configured, any process running as the same user
-can call every operation, including the configuration ones. Turn it on by giving
-the host an expected token:
+The host serves the web UI itself — there is no separate client to launch. Start it and open
+the URL it logs:
 
 ```bash
-SqlAgent__LocalAuth__Token='a-long-random-string' dotnet run --project src/SqlAgent.Host/SqlAgent.Host.csproj
+dotnet run --project src/SqlAgent.Host/SqlAgent.Host.csproj
 ```
 
-For the Windows service or the systemd unit, set the same variable in the
-service environment rather than on a shell line, so the token is not left in
-shell history.
+```
+info: SQL Agent UI: http://127.0.0.1:5099/?token=3f9c...  (64 hex characters)
+```
 
-The host writes the value into the encrypted secret store at startup. Clients
-then present it through the `SQLAGENT_AUTH_TOKEN` environment variable — that
-covers both the WPF client and any MCP host. Mismatched or missing tokens get a
-stable `unauthorized` error.
+`SqlAgent:Web:Port` (`SqlAgent__Web__Port` as an environment variable) picks the TCP port; it
+defaults to **5099**. The bind address is fixed at `127.0.0.1` and is not configurable — see
+`docs/web-ui.md` for why. Full screen-by-screen coverage, the manual regression checklist, and
+the export/chat behavior are in [`docs/web-ui.md`](web-ui.md).
+
+### The launch token
+
+The `?token=` query parameter on the logged URL is presented once; the server exchanges it for
+a session cookie, so subsequent requests in that browser don't need it again. Where the token's
+value comes from depends on configuration:
+
+- **`SqlAgent:LocalAuth:Token` set** — the host uses that exact value as the launch token, and
+  the MCP server (`SqlAgent.Api.Mcp`) persists the same setting into the shared encrypted secret
+  store at its own startup, so the identical token also unlocks MCP tool calls (presented there
+  via `SQLAGENT_AUTH_TOKEN`). Because it's a fixed, operator-chosen value, it survives host
+  restarts.
+- **`SqlAgent:LocalAuth:Token` unset** — the host generates a random 256-bit token at every
+  start and keeps it in memory only; it is never written to disk or to the secret store, is
+  printed once in the startup log, and is invalidated the moment the host restarts. This is the
+  default and needs no configuration.
+
+For the Windows service or the systemd unit, set `SqlAgent__LocalAuth__Token` in the service
+environment rather than on a shell line, so a fixed token is not left in shell history — and
+so an operator can watch the service log for the generated one if they leave it unset.
 
 Two operational notes:
 
-- Removing `SqlAgent__LocalAuth__Token` does **not** disable authentication. A
-  blank setting means "nothing to configure"; the previously stored token stays
-  in effect. Delete the `local-auth-token` secret to turn it off.
-- On Windows the token is DPAPI current-user scoped like every other secret, so
-  the service and the clients must run under the account that stored it.
+- A **blank** `SqlAgent:LocalAuth:Token` does **not** clear a token the MCP server already
+  persisted to its secret store from an earlier configured value — blank means "nothing to
+  configure," not "turn it off." Delete the `local-auth-token` secret to actually disable MCP
+  authentication.
+- On Windows the persisted secret is DPAPI current-user scoped like every other secret, so the
+  MCP server and any client presenting `SQLAGENT_AUTH_TOKEN` must run under the account that
+  stored it. The web UI's own launch token isn't DPAPI-scoped at all when generated — it lives
+  only in the host process's memory.
 
 ## Provider fixtures
 
@@ -108,6 +129,10 @@ to those schemas, so an existing database is not disturbed.
 
 - Host exits on startup: confirm the `SqlAgent__Storage__ConnectionString` path exists and the service account can write to it.
 - Windows service cannot read saved secrets: confirm it is running as the same Windows account that created them.
+- Browser gets a `401` opening the web UI: the URL was opened without its `?token=...` query
+  parameter — most often from typing or bookmarking the bare address, or reopening it in a
+  window that never presented the token to get a session cookie. Go back to the host's startup
+  log and open the full URL it printed, token included.
 - Provider fixture tests do nothing: confirm the `SQLAGENT_TEST_POSTGRES` and `SQLAGENT_TEST_SQLSERVER` variables are set in the test process.
 - Client or IDE host gets `unauthorized` on every call: a local-access token is configured on the host but the client presents none. Export `SQLAGENT_AUTH_TOKEN` for the client process and restart it.
 - SQL Server fixture fails to connect: wait for container startup to complete. SQL Server 2022 takes tens of seconds to finish recovery on first start, and it has no healthcheck in the fixture — watch `docker logs` for `Recovery is complete`.

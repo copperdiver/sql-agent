@@ -75,7 +75,7 @@ changing it. Without a matching token every tool returns `unauthorized`.
 ## `SQLAGENT_DB` and the policy boundary
 
 `SQLAGENT_DB` points the server at the local SQLite daemon store — the same
-config file the SQL Agent daemon and WPF client use (ADR-0004). Always give it
+config file the SQL Agent daemon and web UI use (ADR-0004). Always give it
 an absolute path so Codex finds the right store regardless of its working
 directory; if unset, the server falls back to `sqlagent.db` in the process
 directory.
