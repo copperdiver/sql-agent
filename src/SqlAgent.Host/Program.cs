@@ -42,6 +42,11 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
     await scope.ServiceProvider.GetRequiredService<SqlAgentDbContext>().Database.EnsureCreatedAsync();
 
+// Order matters: origin checks run before anything reads the token, so a hostile page cannot even
+// attempt an exchange.
+app.UseMiddleware<LocalOriginMiddleware>();
+app.UseMiddleware<TokenAuthMiddleware>();
+
 app.UseStaticFiles();
 app.UseAntiforgery();
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
