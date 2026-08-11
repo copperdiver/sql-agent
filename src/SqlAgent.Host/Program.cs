@@ -23,6 +23,8 @@ builder.Services.AddScoped<SchemaService>();
 builder.Services.AddScoped<TablePolicyService>();
 builder.Services.AddScoped<NlQueryService>();
 builder.Services.AddScoped<LocalTokenAuthenticator>();
+builder.Services.AddScoped<ScopedRunner>();
+builder.Services.AddScoped<AppState>();
 
 // Fail-closed LLM seam: ask_database resolves to a stable llm_error until a vendor gateway is wired.
 builder.Services.AddSingleton<ILlmSqlGateway, UnavailableLlmSqlGateway>();
