@@ -1,4 +1,4 @@
-# ADR 0002: Database provider boundary for SQL Agent v1
+# ADR 0005: Database provider boundary for SQL Agent v1
 
 ## Status
 

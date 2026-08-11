@@ -64,7 +64,11 @@ public class SchemaModelBuildTests
     public void Build_groups_index_columns_in_order_and_keeps_uniqueness()
     {
         var schema = SchemaModel.Build(
-            columns: [("dbo", "Orders", "CustomerId", "int", false), ("dbo", "Orders", "PlacedAt", "datetime", false)],
+            columns:
+            [
+                ("dbo", "Orders", "CustomerId", "int", false, null, 10, 0),
+                ("dbo", "Orders", "PlacedAt", "datetime", false, null, null, null),
+            ],
             primaryKeys: [],
             foreignKeys: [],
             indexes:
@@ -86,7 +90,7 @@ public class SchemaModelBuildTests
     public void Build_defaults_indexes_to_empty_when_provider_supplies_none()
     {
         var schema = SchemaModel.Build(
-            columns: [("dbo", "Orders", "Id", "int", false)],
+            columns: [("dbo", "Orders", "Id", "int", false, null, 10, 0)],
             primaryKeys: [],
             foreignKeys: []);
 
@@ -151,7 +155,11 @@ public class SchemaModelFilterTests
     public void Filter_keeps_indexes_of_visible_tables_and_drops_those_of_hidden_ones()
     {
         var schema = SchemaModel.Build(
-            columns: [("dbo", "Public", "Id", "int", false), ("dbo", "Secret", "Token", "text", false)],
+            columns:
+            [
+                ("dbo", "Public", "Id", "int", false, null, 10, 0),
+                ("dbo", "Secret", "Token", "text", false, null, null, null),
+            ],
             primaryKeys: [],
             foreignKeys: [],
             indexes:
