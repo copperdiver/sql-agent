@@ -46,8 +46,8 @@ public class SchemaServiceTests
     private static readonly DatabaseSchema Sample = SchemaModel.Build(
         columns:
         [
-            ("dbo", "Orders", "Id", "int", false),
-            ("dbo", "Secret", "Id", "int", false),
+            ("dbo", "Orders", "Id", "int", false, null, 10, 0),
+            ("dbo", "Secret", "Id", "int", false, null, 10, 0),
         ],
         primaryKeys: [],
         foreignKeys:

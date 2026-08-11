@@ -36,7 +36,8 @@ public class PostgresProvider : IDatabaseProvider
 
         var columns = await Query(conn, ct,
             $"""
-            SELECT c.table_schema, c.table_name, c.column_name, c.data_type, c.is_nullable
+            SELECT c.table_schema, c.table_name, c.column_name, c.data_type, c.is_nullable,
+                   c.character_maximum_length, c.numeric_precision, c.numeric_scale
             FROM information_schema.columns c
             JOIN information_schema.tables t
               ON t.table_schema = c.table_schema AND t.table_name = c.table_name
@@ -44,7 +45,8 @@ public class PostgresProvider : IDatabaseProvider
             ORDER BY c.table_schema, c.table_name, c.ordinal_position
             """,
             r => (r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3),
-                  string.Equals(r.GetString(4), "YES", StringComparison.OrdinalIgnoreCase)));
+                  string.Equals(r.GetString(4), "YES", StringComparison.OrdinalIgnoreCase),
+                  NullableInt(r, 5), NullableInt(r, 6), NullableInt(r, 7)));
 
         var pks = await Query(conn, ct,
             """
@@ -109,6 +111,10 @@ public class PostgresProvider : IDatabaseProvider
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         return await ResultSetReader.ReadAsync(reader, options.MaxRows, ct);
     }
+
+    // information_schema sizing columns are int/bigint and often NULL; normalize to int? regardless of width.
+    private static int? NullableInt(NpgsqlDataReader r, int ordinal)
+        => r.IsDBNull(ordinal) ? null : Convert.ToInt32(r.GetValue(ordinal));
 
     private static async Task<List<T>> Query<T>(
         NpgsqlConnection conn, CancellationToken ct, string sql, Func<NpgsqlDataReader, T> map)

@@ -31,7 +31,8 @@ public class SqlServerProvider : IDatabaseProvider
 
         var columns = await Query(conn, ct,
             """
-            SELECT c.TABLE_SCHEMA, c.TABLE_NAME, c.COLUMN_NAME, c.DATA_TYPE, c.IS_NULLABLE
+            SELECT c.TABLE_SCHEMA, c.TABLE_NAME, c.COLUMN_NAME, c.DATA_TYPE, c.IS_NULLABLE,
+                   c.CHARACTER_MAXIMUM_LENGTH, c.NUMERIC_PRECISION, c.NUMERIC_SCALE
             FROM INFORMATION_SCHEMA.COLUMNS c
             JOIN INFORMATION_SCHEMA.TABLES t
               ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME
@@ -39,7 +40,8 @@ public class SqlServerProvider : IDatabaseProvider
             ORDER BY c.TABLE_SCHEMA, c.TABLE_NAME, c.ORDINAL_POSITION
             """,
             r => (r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3),
-                  string.Equals(r.GetString(4), "YES", StringComparison.OrdinalIgnoreCase)));
+                  string.Equals(r.GetString(4), "YES", StringComparison.OrdinalIgnoreCase),
+                  NullableInt(r, 5), NullableInt(r, 6), NullableInt(r, 7)));
 
         var pks = await Query(conn, ct,
             """
@@ -64,6 +66,9 @@ public class SqlServerProvider : IDatabaseProvider
             JOIN sys.tables rtab ON rtab.object_id = fkc.referenced_object_id
             JOIN sys.schemas rsch ON rsch.schema_id = rtab.schema_id
             JOIN sys.columns rcol ON rcol.object_id = fkc.referenced_object_id AND rcol.column_id = fkc.referenced_column_id
+            -- constraint_object_id groups a composite FK; constraint_column_id orders its columns so
+            -- each local column lines up with its referenced column (CD-68: composite FKs, FK order).
+            ORDER BY sch.name, tab.name, fkc.constraint_object_id, fkc.constraint_column_id
             """,
             r => (r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3), r.GetString(4), r.GetString(5)));
 
@@ -93,6 +98,10 @@ public class SqlServerProvider : IDatabaseProvider
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         return await ResultSetReader.ReadAsync(reader, options.MaxRows, ct);
     }
+
+    // Catalog sizing columns are tinyint/smallint/int and often NULL; normalize to int? regardless of width.
+    private static int? NullableInt(SqlDataReader r, int ordinal)
+        => r.IsDBNull(ordinal) ? null : Convert.ToInt32(r.GetValue(ordinal));
 
     private static async Task<List<T>> Query<T>(
         SqlConnection conn, CancellationToken ct, string sql, Func<SqlDataReader, T> map)

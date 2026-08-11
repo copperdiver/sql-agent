@@ -12,7 +12,14 @@ public record SchemaTable(
     IReadOnlyList<ForeignKey> ForeignKeys,
     IReadOnlyList<SchemaIndex> Indexes);
 
-public record SchemaColumn(string Name, string DataType, bool IsNullable);
+/// <summary>
+/// One column. <paramref name="MaxLength"/> (character/binary length; -1 means MAX),
+/// <paramref name="Precision"/>, and <paramref name="Scale"/> are the raw catalog sizing values,
+/// null when the type carries no such facet (e.g. <c>int</c> has no length, <c>varchar</c> no scale).
+/// </summary>
+public record SchemaColumn(
+    string Name, string DataType, bool IsNullable,
+    int? MaxLength = null, int? Precision = null, int? Scale = null);
 
 /// <summary>A column pointing at another table — the "basic relationship" the model carries.</summary>
 public record ForeignKey(string Column, string ReferencedSchema, string ReferencedTable, string ReferencedColumn);
@@ -32,7 +39,8 @@ public static class SchemaModel
     /// so callers must ORDER BY ordinal position. Rows for unknown tables are grouped on (schema, name).
     /// </summary>
     public static DatabaseSchema Build(
-        IEnumerable<(string Schema, string Table, string Column, string DataType, bool Nullable)> columns,
+        IEnumerable<(string Schema, string Table, string Column, string DataType, bool Nullable,
+            int? MaxLength, int? Precision, int? Scale)> columns,
         IEnumerable<(string Schema, string Table, string Column)> primaryKeys,
         IEnumerable<(string Schema, string Table, string Column, string RefSchema, string RefTable, string RefColumn)> foreignKeys,
         // Index rows are (schema, table, index, column, ordinal, unique). Providers that don't expose index
@@ -62,7 +70,7 @@ public static class SchemaModel
             .Select(g => new SchemaTable(
                 g.Key.Schema,
                 g.Key.Table,
-                g.Select(c => new SchemaColumn(c.Column, c.DataType, c.Nullable)).ToList(),
+                g.Select(c => new SchemaColumn(c.Column, c.DataType, c.Nullable, c.MaxLength, c.Precision, c.Scale)).ToList(),
                 pkByTable.GetValueOrDefault(g.Key, []),
                 fkByTable.GetValueOrDefault(g.Key, []),
                 ixByTable.GetValueOrDefault(g.Key, [])))

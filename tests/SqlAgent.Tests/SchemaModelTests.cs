@@ -10,10 +10,10 @@ public class SchemaModelBuildTests
         var schema = SchemaModel.Build(
             columns:
             [
-                ("dbo", "Orders", "Id", "int", false),
-                ("dbo", "Orders", "CustomerId", "int", false),
-                ("dbo", "Customers", "Id", "int", false),
-                ("dbo", "Customers", "Name", "nvarchar", true),
+                ("dbo", "Orders", "Id", "int", false, null, 10, 0),
+                ("dbo", "Orders", "CustomerId", "int", false, null, 10, 0),
+                ("dbo", "Customers", "Id", "int", false, null, 10, 0),
+                ("dbo", "Customers", "Name", "nvarchar", true, 100, null, null),
             ],
             primaryKeys:
             [
@@ -34,7 +34,10 @@ public class SchemaModelBuildTests
 
         var customers = schema.Tables.Single(t => t.Name == "Customers");
         Assert.Empty(customers.ForeignKeys);
-        Assert.True(customers.Columns.Single(c => c.Name == "Name").IsNullable);
+        var name = customers.Columns.Single(c => c.Name == "Name");
+        Assert.True(name.IsNullable);
+        Assert.Equal(100, name.MaxLength);
+        Assert.Null(name.Precision);
     }
 
     [Fact]
@@ -42,7 +45,7 @@ public class SchemaModelBuildTests
     {
         // Each local column pairs with the referenced column at the same position — never a cross product.
         var schema = SchemaModel.Build(
-            columns: [("dbo", "OrderLine", "OrderId", "int", false), ("dbo", "OrderLine", "Sku", "varchar", false)],
+            columns: [("dbo", "OrderLine", "OrderId", "int", false, null, 10, 0), ("dbo", "OrderLine", "Sku", "varchar", false, 20, null, null)],
             primaryKeys: [],
             foreignKeys:
             [
@@ -94,7 +97,7 @@ public class SchemaModelBuildTests
     public void Build_handles_a_table_with_no_keys()
     {
         var schema = SchemaModel.Build(
-            columns: [("public", "logs", "msg", "text", true)],
+            columns: [("public", "logs", "msg", "text", true, null, null, null)],
             primaryKeys: [],
             foreignKeys: []);
 
@@ -109,8 +112,8 @@ public class SchemaModelFilterTests
     private static DatabaseSchema TwoTables() => SchemaModel.Build(
         columns:
         [
-            ("dbo", "Public", "Id", "int", false),
-            ("dbo", "Secret", "Id", "int", false),
+            ("dbo", "Public", "Id", "int", false, null, 10, 0),
+            ("dbo", "Secret", "Id", "int", false, null, 10, 0),
         ],
         primaryKeys: [],
         foreignKeys:
