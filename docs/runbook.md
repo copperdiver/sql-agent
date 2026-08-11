@@ -82,10 +82,34 @@ dotnet test tests/SqlAgent.Tests/SqlAgent.Tests.csproj --filter ProviderIntegrat
 docker compose -f tests/fixtures/docker-compose.yml down
 ```
 
+### Host ports
+
+Developer machines often already run something on 5432 or 1433, and a collision
+makes `docker compose up` fail rather than pick another port. Both host ports are
+overridable; the connection strings must use the same values:
+
+```bash
+export SQLAGENT_TEST_POSTGRES_PORT=55432
+export SQLAGENT_TEST_SQLSERVER_PORT=51433
+docker compose -f tests/fixtures/docker-compose.yml up -d
+export SQLAGENT_TEST_POSTGRES="Host=localhost;Port=$SQLAGENT_TEST_POSTGRES_PORT;Database=sqlagent;Username=sqlagent;Password=sqlagent_pw"
+export SQLAGENT_TEST_SQLSERVER="Server=localhost,$SQLAGENT_TEST_SQLSERVER_PORT;Database=master;User Id=sa;Password=SqlAgent_pw1;TrustServerCertificate=True"
+```
+
+Unset, they default to 5432 and 1433. Keep the same values exported for `down`,
+otherwise Compose resolves a different port mapping than the one it started.
+
+Any reachable Postgres or SQL Server works instead of the fixtures — point the
+two connection strings at it. The tests create their own `"CD-69 Sales"` and
+`sqlagent_ct` schemas and drop them in a `finally`, and every assertion is scoped
+to those schemas, so an existing database is not disturbed.
+
 ## Troubleshooting
 
 - Host exits on startup: confirm the `SqlAgent__Storage__ConnectionString` path exists and the service account can write to it.
 - Windows service cannot read saved secrets: confirm it is running as the same Windows account that created them.
 - Provider fixture tests do nothing: confirm the `SQLAGENT_TEST_POSTGRES` and `SQLAGENT_TEST_SQLSERVER` variables are set in the test process.
 - Client or IDE host gets `unauthorized` on every call: a local-access token is configured on the host but the client presents none. Export `SQLAGENT_AUTH_TOKEN` for the client process and restart it.
-- SQL Server fixture fails to connect: wait for container startup to complete and confirm port `1433` is not already bound.
+- SQL Server fixture fails to connect: wait for container startup to complete. SQL Server 2022 takes tens of seconds to finish recovery on first start, and it has no healthcheck in the fixture — watch `docker logs` for `Recovery is complete`.
+- `docker compose up` fails with `port is already allocated`: something else holds 5432 or 1433. Set `SQLAGENT_TEST_POSTGRES_PORT` / `SQLAGENT_TEST_SQLSERVER_PORT` as above instead of stopping the other service.
+- `docker exec` into the SQL Server container fails with a path like `C:/Program Files/Git/opt/mssql-tools18/...`: Git Bash rewrote the container path. Prefix the command with `MSYS_NO_PATHCONV=1`.
