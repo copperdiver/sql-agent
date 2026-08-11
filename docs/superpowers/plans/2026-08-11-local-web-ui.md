@@ -15,7 +15,11 @@
 - Target framework `net10.0` for every project. No `net10.0-windows` may remain in the solution.
 - **No Node, npm, or any JavaScript build step.** JS dependencies are vendored as pre-built files. This is why CodeMirror **5** is used, not 6 — v6 ships ES modules that require a bundler.
 - The HTTP listener binds `127.0.0.1` only. Port from `SqlAgent:Web:Port`, default `5099`.
-- Never render exception text in the UI — it can contain a connection string. Log it server-side instead.
+- Never render the text of an **unexpected** exception in the UI — it can contain a connection string. Those
+  go to the server log and the user sees a generic retry prompt. This does not cover values a Core service
+  deliberately returns as part of its contract: `ConnectionTestResult.Error` and the `ErrorMessage` on
+  `QueryExecutionResult` and `NlQueryResult` are domain results and are meant to be shown. Without the
+  reason, "Test connection" tells the user only that something failed.
 - Expected failures (policy denials, timeouts, missing secret, unconfigured LLM) are values with stable codes, not exceptions. Render them as content.
 - **Every task that adds behavior is TDD:** write the failing test, run it, watch it fail for the right
   reason, then implement. Four tasks are exempt because no failing test is possible for them, and each
