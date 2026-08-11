@@ -17,7 +17,12 @@
 - The HTTP listener binds `127.0.0.1` only. Port from `SqlAgent:Web:Port`, default `5099`.
 - Never render exception text in the UI — it can contain a connection string. Log it server-side instead.
 - Expected failures (policy denials, timeouts, missing secret, unconfigured LLM) are values with stable codes, not exceptions. Render them as content.
-- Every task is TDD: write the failing test, run it, watch it fail for the right reason, then implement.
+- **Every task that adds behavior is TDD:** write the failing test, run it, watch it fail for the right
+  reason, then implement. Four tasks are exempt because no failing test is possible for them, and each
+  says so at its own step: Task 1 (deleting projects and scaffolding a host), Task 4 (DI registrations),
+  Task 9 (JavaScript interop — bUnit has no JS engine, so the editor is verified manually in Task 11),
+  and Task 11 (documentation and packaging). Reviewers should treat these four as compliant; every other
+  task must show the red-then-green cycle.
 - Commit at the end of every task. Never use `--no-verify`.
 - All code, comments, and docs in English (matches the existing repository).
 
