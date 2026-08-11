@@ -6,7 +6,11 @@ namespace SqlAgent.Host.Web;
 /// <summary>
 /// Exchanges a one-time <c>?token=</c> query parameter for a session cookie, and refuses everything else
 /// with 401 — including WebSocket upgrades, so an unauthenticated caller cannot open a Blazor circuit.
-/// Framework assets are exempt: the browser must be able to load blazor.web.js before it can authenticate.
+/// Every path starting with <c>/_framework</c> is exempt, so the browser can load blazor.web.js before
+/// it can authenticate. That prefix covers whatever is registered under it, which today is both the
+/// static assets served by UseStaticFiles (blazor.web.js) and a routed endpoint,
+/// /_framework/opaque-redirect — not "static assets" exclusively. The Blazor circuit's own SignalR hub
+/// is mapped at /_blazor, a different prefix, so it is not covered by this exemption.
 /// </summary>
 public sealed class TokenAuthMiddleware(RequestDelegate next, LaunchToken token)
 {

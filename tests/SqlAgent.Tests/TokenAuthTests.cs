@@ -1,4 +1,5 @@
 using System.Net;
+using SqlAgent.Host.Web;
 
 namespace SqlAgent.Tests;
 
@@ -71,6 +72,74 @@ public class TokenAuthTests : IClassFixture<WebTestHost>
         var r = await _host.NewClient().SendAsync(request);
 
         Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode);
+    }
+
+    [Fact]
+    public async Task Origin_matching_the_servers_own_scheme_and_authority_is_accepted()
+    {
+        // Pins the fixed behavior: an Origin that is exactly this server's own bind address is
+        // accepted, not merely one that resolves to a loopback-family host name.
+        var host = $"127.0.0.1:{LoopbackUrl.DefaultPort}";
+        var request = new HttpRequestMessage(HttpMethod.Get, $"/?token={WebTestHost.Token}");
+        request.Headers.Host = host;
+        request.Headers.Add("Origin", $"http://{host}");
+
+        var r = await _host.NewClient().SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+    }
+
+    [Fact]
+    public async Task Origin_with_a_different_port_than_the_servers_own_is_rejected()
+    {
+        // Same host, different port. This is exactly the gap a host-only Origin check misses:
+        // SameSite cookie scoping ignores port, and a WebSocket handshake bypasses CORS entirely, so
+        // a sibling local process on another port could otherwise ride the session cookie into a
+        // circuit. Fails against the old host-only IsLocalOrigin implementation -- verified by
+        // temporarily reverting the fix, see the fix report.
+        var host = $"127.0.0.1:{LoopbackUrl.DefaultPort}";
+        var request = new HttpRequestMessage(HttpMethod.Get, $"/?token={WebTestHost.Token}");
+        request.Headers.Host = host;
+        request.Headers.Add("Origin", "http://127.0.0.1:44444");
+
+        var r = await _host.NewClient().SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode);
+    }
+
+    [Fact]
+    public async Task Authenticated_request_with_a_realistic_host_and_port_succeeds()
+    {
+        // WebApplicationFactory's default client sends a bare "localhost" Host header with no port,
+        // which every other test in this file relies on implicitly. That leaves a gap where the whole
+        // suite could be green while a real browser -- which always sends Host: 127.0.0.1:<port> --
+        // is rejected. Pin the realistic case explicitly.
+        var request = new HttpRequestMessage(HttpMethod.Get, $"/?token={WebTestHost.Token}");
+        request.Headers.Host = $"127.0.0.1:{LoopbackUrl.DefaultPort}";
+
+        var r = await _host.NewClient().SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+    }
+
+    [Fact]
+    public async Task Authenticated_negotiate_request_succeeds()
+    {
+        // Complements Blazor_circuit_negotiation_is_not_covered_by_the_framework_asset_exemption:
+        // that test proves negotiate is refused when unauthenticated, this proves it actually works
+        // once authenticated with a realistic host header, so the two together bound the behavior.
+        var host = $"127.0.0.1:{LoopbackUrl.DefaultPort}";
+        var client = _host.NewClient();
+
+        var login = new HttpRequestMessage(HttpMethod.Get, $"/?token={WebTestHost.Token}");
+        login.Headers.Host = host;
+        await client.SendAsync(login);   // client keeps the cookie
+
+        var negotiate = new HttpRequestMessage(HttpMethod.Post, "/_blazor/negotiate?negotiateVersion=1");
+        negotiate.Headers.Host = host;
+        var r = await client.SendAsync(negotiate);
+
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
     }
 
     [Fact]
