@@ -27,7 +27,12 @@ builder.Services.AddScoped<ISecretStore, DpapiSecretStore>();
 builder.Services.AddScoped<DatabaseConnectionService>();
 builder.Services.AddScoped<SchemaService>();
 builder.Services.AddScoped<QueryExecutionService>();
+builder.Services.AddScoped<LocalTokenAuthenticator>();
 builder.Services.AddScoped<McpToolService>();
+
+// Local-access token gate (CD-51 Story 1.7). The client presents its token via the SQLAGENT_AUTH_TOKEN env
+// var when it launches this stdio server; the expected token is configured under SqlAgent:LocalAuth:Token.
+builder.Services.AddSingleton(new McpClientToken(Environment.GetEnvironmentVariable("SQLAGENT_AUTH_TOKEN")));
 
 builder.Services
     .AddMcpServer()
@@ -38,7 +43,11 @@ var app = builder.Build();
 
 // First-run convenience: the SQLite config store shares the daemon's DB file (CD-50 ADR-0004).
 using (var scope = app.Services.CreateScope())
+{
     scope.ServiceProvider.GetRequiredService<SqlAgentDbContext>().Database.EnsureCreated();
+    await scope.ServiceProvider.GetRequiredService<LocalTokenAuthenticator>()
+        .ConfigureFromSettingAsync(builder.Configuration["SqlAgent:LocalAuth:Token"]);
+}
 
 await app.RunAsync();
 

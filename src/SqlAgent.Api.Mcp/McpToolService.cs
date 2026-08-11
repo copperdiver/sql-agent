@@ -17,7 +17,13 @@ public record DatabaseSummary(
 
 public record ListDatabasesResponse(
     [property: JsonPropertyName("ok")] bool Ok,
-    [property: JsonPropertyName("databases")] IReadOnlyList<DatabaseSummary> Databases);
+    [property: JsonPropertyName("databases")] IReadOnlyList<DatabaseSummary> Databases,
+    [property: JsonPropertyName("error_code")] string? ErrorCode = null,
+    [property: JsonPropertyName("error_message")] string? ErrorMessage = null);
+
+/// <summary>The local-access token this MCP process was started with (from the SQLAGENT_AUTH_TOKEN env var,
+/// the standard way an MCP stdio client passes a secret). Null when none was provided.</summary>
+public sealed record McpClientToken(string? Value);
 
 public record ColumnDescription(
     [property: JsonPropertyName("name")] string Name,
@@ -69,10 +75,24 @@ public record QueryDatabaseResponse(
 public class McpToolService(
     DatabaseConnectionService connections,
     SchemaService schemas,
-    QueryExecutionService executor)
+    QueryExecutionService executor,
+    LocalTokenAuthenticator authenticator,
+    McpClientToken clientToken)
 {
+    // Every tool authenticates the process-level client token (CD-51 Story 1.7) before doing any work; when
+    // no token is configured the gate passes through. ponytail: stdio MCP authenticates once per process via
+    // the launch env, not per call — fine for a local single-user surface.
+    private async Task<bool> AuthorizedAsync(CancellationToken ct) =>
+        LocalTokenAuthenticator.IsAllowed(await authenticator.AuthenticateAsync(clientToken.Value, ct));
+
+    private const string UnauthorizedCode = "unauthorized";
+    private const string UnauthorizedMessage = "A valid local-access token is required.";
+
     public async Task<ListDatabasesResponse> ListDatabasesAsync(CancellationToken ct = default)
     {
+        if (!await AuthorizedAsync(ct))
+            return new ListDatabasesResponse(Ok: false, [], UnauthorizedCode, UnauthorizedMessage);
+
         var items = await connections.ListAsync(ct);
         return new ListDatabasesResponse(Ok: true, items
             .Select(c => new DatabaseSummary(c.Id.ToString(), c.Name, ProviderName(c.ProviderType), c.IsReadOnly))
@@ -81,6 +101,9 @@ public class McpToolService(
 
     public async Task<DescribeSchemaResponse> DescribeSchemaAsync(string databaseId, CancellationToken ct = default)
     {
+        if (!await AuthorizedAsync(ct))
+            return SchemaError(UnauthorizedCode, UnauthorizedMessage);
+
         if (!Guid.TryParse(databaseId, out var id))
             return SchemaError("invalid_database_id", $"'{databaseId}' is not a valid database id.");
 
@@ -108,6 +131,9 @@ public class McpToolService(
 
     public async Task<QueryDatabaseResponse> QueryDatabaseAsync(string databaseId, string sql, CancellationToken ct = default)
     {
+        if (!await AuthorizedAsync(ct))
+            return new QueryDatabaseResponse(false, [], [], 0, false, 0, UnauthorizedCode, UnauthorizedMessage);
+
         if (!Guid.TryParse(databaseId, out var id))
             return new QueryDatabaseResponse(false, [], [], 0, false, 0,
                 "invalid_database_id", $"'{databaseId}' is not a valid database id.");

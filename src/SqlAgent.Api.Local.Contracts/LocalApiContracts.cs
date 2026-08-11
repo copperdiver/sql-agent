@@ -35,10 +35,14 @@ public static class ApiErrorCodes
     public const string DatabaseNotFound = "database_not_found";
     public const string ConnectionFailed = "connection_failed";
     public const string InternalError = "internal_error";
+    /// <summary>A local-access token is required but the request presented none or an invalid one (CD-51 Story 1.7).</summary>
+    public const string Unauthorized = "unauthorized";
 }
 
-/// <summary>A single request: an operation name and its raw params (decoded per-op by the dispatcher).</summary>
-public record LocalApiRequest(string Op, JsonElement? Params);
+/// <summary>A single request: an operation name, its raw params (decoded per-op by the dispatcher), and the
+/// optional local-access <see cref="Token"/>. The token is only required when the host has one configured;
+/// when it does not, it is ignored. Optional positional field, so existing callers compile unchanged.</summary>
+public record LocalApiRequest(string Op, JsonElement? Params, string? Token = null);
 
 /// <summary>A single response. Exactly one of <see cref="Data"/> / <see cref="Error"/> is set.</summary>
 public record LocalApiResponse(int Version, bool Ok, JsonElement? Data, ApiError? Error)

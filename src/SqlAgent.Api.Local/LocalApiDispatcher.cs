@@ -16,18 +16,24 @@ public class LocalApiDispatcher(
     SchemaService schema,
     QueryExecutionService queries,
     TablePolicyService tablePolicies,
-    NlQueryService nlQueries)
+    NlQueryService nlQueries,
+    LocalTokenAuthenticator authenticator)
 {
-    /// <summary>Parses, routes, and serializes one request. Never throws — failures become error responses.</summary>
+    /// <summary>Parses, routes, and serializes one request. Never throws — failures become error responses.
+    /// Every request is authenticated (CD-51 Story 1.7) before any operation runs; when no token is configured
+    /// the gate passes through.</summary>
     public async Task<string> HandleAsync(string requestJson, CancellationToken ct = default)
     {
         LocalApiResponse response;
         try
         {
             var request = JsonSerializer.Deserialize<LocalApiRequest>(requestJson, LocalApiContract.Json);
-            response = request is null
-                ? LocalApiResponse.Fail(ApiErrorCodes.BadRequest, "Empty or malformed request.")
-                : await RouteAsync(request, ct);
+            if (request is null)
+                response = LocalApiResponse.Fail(ApiErrorCodes.BadRequest, "Empty or malformed request.");
+            else if (!LocalTokenAuthenticator.IsAllowed(await authenticator.AuthenticateAsync(request.Token, ct)))
+                response = LocalApiResponse.Fail(ApiErrorCodes.Unauthorized, "A valid local-access token is required.");
+            else
+                response = await RouteAsync(request, ct);
         }
         catch (JsonException ex)
         {

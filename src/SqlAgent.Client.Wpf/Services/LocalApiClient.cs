@@ -19,7 +19,7 @@ public sealed class LocalApiException(string code, string message) : Exception(m
 /// response, and maps an error envelope to <see cref="LocalApiException"/>. The wire DTOs come straight from
 /// the shared contracts assembly, so the client and host can never drift on the shape.
 /// </summary>
-public class LocalApiClient(string pipeName = LocalApiContract.DefaultPipeName)
+public class LocalApiClient(string pipeName = LocalApiContract.DefaultPipeName, string? authToken = null)
 {
     private const int ConnectTimeoutMs = 3000;
 
@@ -75,7 +75,7 @@ public class LocalApiClient(string pipeName = LocalApiContract.DefaultPipeName)
         var paramsElement = @params is null
             ? (JsonElement?)null
             : JsonSerializer.SerializeToElement(@params, LocalApiContract.Json);
-        var requestLine = JsonSerializer.Serialize(new LocalApiRequest(op, paramsElement), LocalApiContract.Json);
+        var requestLine = JsonSerializer.Serialize(new LocalApiRequest(op, paramsElement, authToken), LocalApiContract.Json);
 
         // leaveOpen so disposing the reader/writer doesn't tear down the pipe before the other has flushed.
         await using var writer = new StreamWriter(pipe, new UTF8Encoding(false), 1024, leaveOpen: true) { AutoFlush = true };

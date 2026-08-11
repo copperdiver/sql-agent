@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using SqlAgent.Api.Mcp;
 using SqlAgent.Core;
 using SqlAgent.Storage;
@@ -37,13 +38,15 @@ public class McpToolServiceTests
     }
 
     private static (McpToolService tools, DatabaseConnectionService connections, SqlAgentDbContext db) Build(
-        SqlAgentDbContext db, IDatabaseProvider provider)
+        SqlAgentDbContext db, IDatabaseProvider provider, ISecretStore? secrets = null, string? presentedToken = null)
     {
-        var connections = new DatabaseConnectionService(db, new InMemorySecretStore());
+        secrets ??= new InMemorySecretStore();
+        var connections = new DatabaseConnectionService(db, secrets);
         var registry = new DatabaseProviderRegistry([provider]);
         var schemas = new SchemaService(connections, registry, db);
         var executor = new QueryExecutionService(connections, registry, db);
-        return (new McpToolService(connections, schemas, executor), connections, db);
+        var authenticator = new LocalTokenAuthenticator(secrets, NullLogger<LocalTokenAuthenticator>.Instance);
+        return (new McpToolService(connections, schemas, executor, authenticator, new McpClientToken(presentedToken)), connections, db);
     }
 
     [Fact]
@@ -196,6 +199,78 @@ public class McpToolServiceTests
 
         Assert.False(r.Ok);
         Assert.Equal("policy_denied_hidden_table", r.ErrorCode);
+        conn.Dispose();
+    }
+
+    // ---- CD-51 Story 1.7: local-access token enforcement ----
+
+    private static async Task<SqlAgentDbContext> StoreWithToken(SqliteConnection conn, ISecretStore secrets, string token)
+    {
+        var db = new SqlAgentDbContext(new DbContextOptionsBuilder<SqlAgentDbContext>().UseSqlite(conn).Options);
+        db.Database.EnsureCreated();
+        await secrets.SetAsync(LocalTokenAuthenticator.TokenSecretReference, token);
+        return db;
+    }
+
+    [Fact]
+    public async Task Tools_run_when_no_token_is_configured()
+    {
+        var (db, conn) = NewStore();
+        var (tools, _, _) = Build(db, new ToolFakeProvider()); // no token seeded, none presented
+        var r = await tools.ListDatabasesAsync();
+        Assert.True(r.Ok);
+        conn.Dispose();
+    }
+
+    [Fact]
+    public async Task Tools_run_with_a_valid_token()
+    {
+        var conn = new SqliteConnection("DataSource=:memory:");
+        conn.Open();
+        var secrets = new InMemorySecretStore();
+        var db = await StoreWithToken(conn, secrets, "s3cret");
+        var (tools, _, _) = Build(db, new ToolFakeProvider(), secrets, presentedToken: "s3cret");
+
+        var r = await tools.ListDatabasesAsync();
+
+        Assert.True(r.Ok);
+        Assert.Null(r.ErrorCode);
+        conn.Dispose();
+    }
+
+    [Fact]
+    public async Task Tools_reject_a_missing_token()
+    {
+        var conn = new SqliteConnection("DataSource=:memory:");
+        conn.Open();
+        var secrets = new InMemorySecretStore();
+        var db = await StoreWithToken(conn, secrets, "s3cret");
+        var (tools, _, _) = Build(db, new ToolFakeProvider(), secrets, presentedToken: null);
+
+        var list = await tools.ListDatabasesAsync();
+        var schema = await tools.DescribeSchemaAsync(Guid.NewGuid().ToString());
+        var query = await tools.QueryDatabaseAsync(Guid.NewGuid().ToString(), "SELECT 1");
+
+        Assert.False(list.Ok);
+        Assert.Equal("unauthorized", list.ErrorCode);
+        Assert.Equal("unauthorized", schema.ErrorCode);  // gate runs before id parsing
+        Assert.Equal("unauthorized", query.ErrorCode);
+        conn.Dispose();
+    }
+
+    [Fact]
+    public async Task Tools_reject_an_invalid_token()
+    {
+        var conn = new SqliteConnection("DataSource=:memory:");
+        conn.Open();
+        var secrets = new InMemorySecretStore();
+        var db = await StoreWithToken(conn, secrets, "s3cret");
+        var (tools, _, _) = Build(db, new ToolFakeProvider(), secrets, presentedToken: "wrong");
+
+        var r = await tools.ListDatabasesAsync();
+
+        Assert.False(r.Ok);
+        Assert.Equal("unauthorized", r.ErrorCode);
         conn.Dispose();
     }
 }

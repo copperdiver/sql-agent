@@ -2,6 +2,7 @@ using System.IO.Pipes;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using SqlAgent.Api.Local;
 using SqlAgent.Core;
 using SqlAgent.Storage;
@@ -28,7 +29,8 @@ public class NamedPipeApiServerTests
         conn.Open();
         var db = new SqlAgentDbContext(new DbContextOptionsBuilder<SqlAgentDbContext>().UseSqlite(conn).Options);
         db.Database.EnsureCreated();
-        var connections = new DatabaseConnectionService(db, new InMemorySecretStore());
+        var secrets = new InMemorySecretStore();
+        var connections = new DatabaseConnectionService(db, secrets);
         var registry = new DatabaseProviderRegistry(Array.Empty<IDatabaseProvider>());
         var schema = new SchemaService(connections, registry, db);
         var queries = new QueryExecutionService(connections, registry, db);
@@ -38,7 +40,8 @@ public class NamedPipeApiServerTests
             schema,
             queries,
             new TablePolicyService(connections, registry, db),
-            new NlQueryService(connections, schema, queries, new UnusedGateway()));
+            new NlQueryService(connections, schema, queries, new UnusedGateway()),
+            new LocalTokenAuthenticator(secrets, NullLogger<LocalTokenAuthenticator>.Instance));
     }
 
     [Fact]

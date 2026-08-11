@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -30,6 +31,7 @@ builder.Services.AddScoped<ConnectionTester>();
 builder.Services.AddScoped<SchemaService>();
 builder.Services.AddScoped<TablePolicyService>();
 builder.Services.AddScoped<NlQueryService>();
+builder.Services.AddScoped<LocalTokenAuthenticator>();
 builder.Services.AddScoped<LocalApiDispatcher>();
 
 // ponytail: fail-closed LLM seam so ask_database resolves and returns a stable llm_error. Swap for the real
@@ -65,6 +67,11 @@ internal sealed class SqlAgentWorker(
         {
             var db = scope.ServiceProvider.GetRequiredService<SqlAgentDbContext>();
             await db.Database.EnsureCreatedAsync(stoppingToken);
+
+            // Load the configured local-access token into the secret store (CD-51 Story 1.7). Blank = auth off.
+            var config = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+            await scope.ServiceProvider.GetRequiredService<LocalTokenAuthenticator>()
+                .ConfigureFromSettingAsync(config["SqlAgent:LocalAuth:Token"], stoppingToken);
 
             var connections = scope.ServiceProvider.GetRequiredService<DatabaseConnectionService>();
             var configuredConnections = (await connections.ListAsync(stoppingToken)).Count;

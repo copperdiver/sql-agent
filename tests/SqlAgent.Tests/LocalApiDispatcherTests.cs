@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using SqlAgent.Api.Local;
 using SqlAgent.Core;
 using SqlAgent.Storage;
@@ -43,14 +44,15 @@ file sealed class ApiFakeGateway(LlmSqlResponse? response = null, Exception? thr
 public class LocalApiDispatcherTests
 {
     private static (LocalApiDispatcher dispatcher, DatabaseConnectionService connections, SqlAgentDbContext db, SqliteConnection conn)
-        NewDispatcher(IDatabaseProvider provider, ILlmSqlGateway? gateway = null)
+        NewDispatcher(IDatabaseProvider provider, ILlmSqlGateway? gateway = null, ISecretStore? secrets = null)
     {
         var conn = new SqliteConnection("DataSource=:memory:");
         conn.Open();
         var db = new SqlAgentDbContext(new DbContextOptionsBuilder<SqlAgentDbContext>().UseSqlite(conn).Options);
         db.Database.EnsureCreated();
 
-        var connections = new DatabaseConnectionService(db, new InMemorySecretStore());
+        secrets ??= new InMemorySecretStore();
+        var connections = new DatabaseConnectionService(db, secrets);
         var registry = new DatabaseProviderRegistry([provider]);
         var schema = new SchemaService(connections, registry, db);
         var queries = new QueryExecutionService(connections, registry, db);
@@ -60,7 +62,8 @@ public class LocalApiDispatcherTests
             schema,
             queries,
             new TablePolicyService(connections, registry, db),
-            new NlQueryService(connections, schema, queries, gateway ?? new ApiFakeGateway()));
+            new NlQueryService(connections, schema, queries, gateway ?? new ApiFakeGateway()),
+            new LocalTokenAuthenticator(secrets, NullLogger<LocalTokenAuthenticator>.Instance));
         return (dispatcher, connections, db, conn);
     }
 
@@ -390,6 +393,69 @@ public class LocalApiDispatcherTests
         Assert.False(r.Ok);
         Assert.Equal(ApiErrorCodes.BadRequest, r.Error!.Code);
 
+        conn.Dispose();
+    }
+
+    // ---- CD-51 Story 1.7: local-access token enforcement ----
+
+    /// <summary>Sends a request carrying an explicit token (the disabled-token tests above omit it).</summary>
+    private static async Task<LocalApiResponse> CallWithTokenAsync(LocalApiDispatcher d, string op, string? token)
+    {
+        var request = JsonSerializer.Serialize(new { op, token }, LocalApiContract.Json);
+        var json = await d.HandleAsync(request);
+        return JsonSerializer.Deserialize<LocalApiResponse>(json, LocalApiContract.Json)!;
+    }
+
+    [Fact]
+    public async Task Unconfigured_token_allows_requests()
+    {
+        // No token seeded => auth disabled => the op runs even though the request presents none.
+        var (d, _, _, conn) = NewDispatcher(new ApiFakeProvider(DatabaseProviderType.Postgres));
+
+        var r = await CallAsync(d, "list_databases");
+
+        Assert.True(r.Ok);
+        conn.Dispose();
+    }
+
+    [Fact]
+    public async Task Configured_token_with_valid_token_allows_requests()
+    {
+        var secrets = new InMemorySecretStore();
+        await secrets.SetAsync(LocalTokenAuthenticator.TokenSecretReference, "s3cret");
+        var (d, _, _, conn) = NewDispatcher(new ApiFakeProvider(DatabaseProviderType.Postgres), secrets: secrets);
+
+        var r = await CallWithTokenAsync(d, "list_databases", "s3cret");
+
+        Assert.True(r.Ok);
+        conn.Dispose();
+    }
+
+    [Fact]
+    public async Task Configured_token_with_missing_token_is_unauthorized()
+    {
+        var secrets = new InMemorySecretStore();
+        await secrets.SetAsync(LocalTokenAuthenticator.TokenSecretReference, "s3cret");
+        var (d, _, _, conn) = NewDispatcher(new ApiFakeProvider(DatabaseProviderType.Postgres), secrets: secrets);
+
+        var r = await CallWithTokenAsync(d, "list_databases", null);
+
+        Assert.False(r.Ok);
+        Assert.Equal(ApiErrorCodes.Unauthorized, r.Error!.Code);
+        conn.Dispose();
+    }
+
+    [Fact]
+    public async Task Configured_token_with_invalid_token_is_unauthorized()
+    {
+        var secrets = new InMemorySecretStore();
+        await secrets.SetAsync(LocalTokenAuthenticator.TokenSecretReference, "s3cret");
+        var (d, _, _, conn) = NewDispatcher(new ApiFakeProvider(DatabaseProviderType.Postgres), secrets: secrets);
+
+        var r = await CallWithTokenAsync(d, "list_databases", "wrong");
+
+        Assert.False(r.Ok);
+        Assert.Equal(ApiErrorCodes.Unauthorized, r.Error!.Code);
         conn.Dispose();
     }
 }
