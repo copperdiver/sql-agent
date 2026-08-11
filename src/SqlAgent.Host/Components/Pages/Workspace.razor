@@ -26,6 +26,19 @@ else if (_tab == Tab.Sql)
 
     <ResultGrid Result="_result" />
 }
+else if (_tab == Tab.Chat)
+{
+    <div class="transcript">
+        @foreach (var entry in _transcript)
+        {
+            <p class="question">@entry.Question</p>
+            <ChatOutcome Result="entry.Result" OnOpenInEditor="OpenInEditor" />
+        }
+    </div>
+
+    <input @bind="_question" @bind:event="oninput" placeholder="Ask a question about this database" />
+    <button @onclick="AskAsync" disabled="@(_asking || string.IsNullOrWhiteSpace(_question))">Ask</button>
+}
 
 @code {
     private enum Tab { Sql, Chat }
@@ -65,4 +78,41 @@ else if (_tab == Tab.Sql)
     }
 
     private void Cancel() => _cts?.Cancel();
+
+    private record TranscriptEntry(string Question, NlQueryResult Result);
+
+    private readonly List<TranscriptEntry> _transcript = [];
+    private string _question = "";
+    private bool _asking;
+
+    private async Task AskAsync()
+    {
+        // Mirrors RunAsync's guard, and for the same reason: the Ask button's disabled attribute is not
+        // the only thing that can call this method reentrantly in test/edge scenarios (e.g. a fast
+        // short-circuiting question racing a slow in-flight one), and without an explicit guard here a
+        // second overlapping call's `finally` could reset _asking = false while the first is still
+        // running, re-enabling the button early and allowing a third call to start concurrently with the
+        // first. Guarding here makes overlapping calls impossible rather than merely unlikely.
+        if (_asking || State.ConnectionId is not { } id || string.IsNullOrWhiteSpace(_question)) return;
+        _asking = true;
+        var question = _question;
+        _question = "";
+        try
+        {
+            // AskAsync runs generated SQL through the same validate-then-execute path as the SQL tab,
+            // so policy still applies to whatever the model produced.
+            var result = await Runner.RunAsync<NlQueryService, NlQueryResult>(s => s.AskAsync(id, question));
+            _transcript.Add(new TranscriptEntry(question, result));
+        }
+        finally
+        {
+            _asking = false;
+        }
+    }
+
+    private void OpenInEditor(string sql)
+    {
+        _sql = sql;
+        _tab = Tab.Sql;
+    }
 }

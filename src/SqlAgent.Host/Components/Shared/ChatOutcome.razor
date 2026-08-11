@@ -1,0 +1,48 @@
+@if (Result is { } r)
+{
+    @if (!string.IsNullOrEmpty(r.GeneratedSql))
+    {
+        <pre class="generated-sql">@r.GeneratedSql</pre>
+        <button @onclick="() => OnOpenInEditor.InvokeAsync(r.GeneratedSql)">Open in editor</button>
+    }
+
+    @switch (r.Kind)
+    {
+        case NlResponseKind.QueryResult:
+            <p class="meta">@r.RowCount rows · @r.ElapsedMs ms @(r.Truncated ? "· results truncated" : "")</p>
+            <div class="grid-scroll">
+                <table>
+                    <thead><tr>@foreach (var c in r.Columns) { <th>@c</th> }</tr></thead>
+                    <tbody>
+                        @foreach (var row in r.Rows)
+                        {
+                            <tr>@foreach (var v in row) { <td>@(v is null ? "NULL" : v.ToString())</td> }</tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            break;
+
+        case NlResponseKind.ClarificationRequired:
+            <p class="clarification">@r.ClarificationQuestion</p>
+            break;
+
+        case NlResponseKind.Error when r.ErrorCode == "llm_error":
+            // No provider is wired yet, so this is the only outcome a user can currently reach.
+            // Showing the bare code would read as a bug in their question.
+            <div class="outcome" role="status">
+                <p>The LLM is not configured on this server, so natural-language questions cannot be
+                   answered yet. Use the SQL tab, or see <code>docs/runbook.md</code> to configure a provider.</p>
+            </div>
+            break;
+
+        case NlResponseKind.Error:
+            <OutcomeMessage Code="@r.ErrorCode" Message="@r.ErrorMessage" />
+            break;
+    }
+}
+
+@code {
+    [Parameter] public NlQueryResult? Result { get; set; }
+    [Parameter] public EventCallback<string> OnOpenInEditor { get; set; }
+}

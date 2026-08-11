@@ -9,6 +9,7 @@ using SqlAgent.Host.Components.Pages;
 using SqlAgent.Host.Components.Shared;
 using SqlAgent.Host.Web;
 using SqlAgent.Storage;
+using static SqlAgent.Tests.AsyncTestHelpers;
 
 namespace SqlAgent.Tests;
 
@@ -285,19 +286,8 @@ public class WorkspaceTests : IDisposable
         Assert.False(FindButton(page, "Run").HasAttribute("disabled"));
     }
 
-    // Stand-in for bUnit's own WaitForStateAsync (see the comment above the cancel-path tests for why
-    // that one isn't usable here). Polls a predicate without blocking the thread, so the render Blazor
-    // performs when the awaited handler under test hits its own await point can actually happen.
-    private static async Task WaitForConditionAsync(Func<bool> predicate, int timeoutMs = 5000)
-    {
-        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
-        while (!predicate())
-        {
-            if (DateTime.UtcNow > deadline)
-                throw new TimeoutException("Condition was not met within the timeout.");
-            await Task.Delay(10);
-        }
-    }
+    // WaitForConditionAsync (the bUnit WaitForStateAsync stand-in referenced above) now lives in
+    // AsyncTestHelpers so WorkspaceChatTests can share it instead of carrying its own copy.
 
     private static AngleSharp.Dom.IElement FindButton(IRenderedComponent<Workspace> page, string text) =>
         page.FindAll("button").First(b => b.TextContent.Trim() == text);
