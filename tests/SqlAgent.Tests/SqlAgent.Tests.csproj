@@ -24,6 +24,7 @@
     <ProjectReference Include="..\..\src\SqlAgent.Api.Mcp\SqlAgent.Api.Mcp.csproj" />
     <ProjectReference Include="..\..\src\SqlAgent.Providers.Postgres\SqlAgent.Providers.Postgres.csproj" />
     <ProjectReference Include="..\..\src\SqlAgent.Providers.SqlServer\SqlAgent.Providers.SqlServer.csproj" />
+    <ProjectReference Include="..\..\src\SqlAgent.Host\SqlAgent.Host.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using SqlAgent.Core;
 using SqlAgent.Host.Components;
+using SqlAgent.Host.Web;
 using SqlAgent.Providers.Postgres;
 using SqlAgent.Providers.SqlServer;
 using SqlAgent.Storage;
@@ -33,6 +34,9 @@ else
 
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();
 
+builder.Services.AddSingleton<LaunchToken>();
+builder.WebHost.UseUrls(LoopbackUrl.Resolve(builder.Configuration));
+
 var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
@@ -41,6 +45,12 @@ using (var scope = app.Services.CreateScope())
 app.UseStaticFiles();
 app.UseAntiforgery();
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
+
+// Print the ready-to-click URL the way Jupyter does: the token is required only for the first request,
+// which then exchanges it for a session cookie.
+var launchToken = app.Services.GetRequiredService<LaunchToken>();
+app.Logger.LogInformation(
+    "SQL Agent UI: {Url}/?token={Token}", LoopbackUrl.Resolve(app.Configuration), launchToken.Value);
 
 await app.RunAsync();
 
