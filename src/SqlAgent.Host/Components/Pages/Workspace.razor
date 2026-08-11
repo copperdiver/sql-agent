@@ -14,7 +14,7 @@
 }
 else if (_tab == Tab.Sql)
 {
-    <textarea rows="8" @bind="_sql" @bind:event="oninput" placeholder="SELECT ..."></textarea>
+    <SqlEditor @bind-Value="_sql" OnRun="RunAsync" />
 
     <div class="actions">
         <button @onclick="RunAsync" disabled="@(_running || string.IsNullOrWhiteSpace(_sql))">Run</button>

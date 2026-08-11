@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SqlAgent.Core;
 using SqlAgent.Host.Components.Pages;
+using SqlAgent.Host.Components.Shared;
 using SqlAgent.Host.Web;
 using SqlAgent.Storage;
 
@@ -38,6 +39,17 @@ public class WorkspaceTests : IDisposable
 
         using var scope = _ctx.Services.CreateScope();
         scope.ServiceProvider.GetRequiredService<SqlAgentDbContext>().Database.EnsureCreated();
+
+        // SqlEditor calls sqlAgentEditor.create on first render (see SqlEditor.razor). bUnit's JSInterop
+        // defaults to strict mode, so every test that renders the SQL tab needs this planned. The `_ =>
+        // true` matcher accepts any arguments — an exact-argument match would be coupled to the
+        // ElementReference bUnit assigns internally, which a test can't predict. setValue is planned too:
+        // it fires whenever the parent pushes a Value the editor didn't just report itself (see
+        // OnAfterRenderAsync's _lastPushed check) — TypeSqlAsync below keeps _lastPushed in sync so it
+        // isn't expected to fire in these tests, but planning it keeps a future test free to exercise
+        // "open in editor"-style updates.
+        _ctx.JSInterop.SetupVoid("sqlAgentEditor.create", _ => true);
+        _ctx.JSInterop.SetupVoid("sqlAgentEditor.setValue", _ => true);
     }
 
     // --- gaps the brief's ResultGridTests leaves uncovered -----------------------------------------
@@ -49,7 +61,7 @@ public class WorkspaceTests : IDisposable
         var page = _ctx.RenderComponent<Workspace>();
 
         Assert.Contains("Select a connection to start querying.", page.Markup);
-        Assert.Empty(page.FindAll("textarea"));
+        Assert.Empty(page.FindComponents<SqlEditor>());
     }
 
     [Fact]
@@ -215,10 +227,15 @@ public class WorkspaceTests : IDisposable
     private static AngleSharp.Dom.IElement FindButton(IRenderedComponent<Workspace> page, string text) =>
         page.FindAll("button").First(b => b.TextContent.Trim() == text);
 
-    // The textarea binds via @bind:event="oninput", so bUnit's event must be raised as "oninput"
-    // (InputAsync), not "onchange" (ChangeAsync) — the two are dispatched to different handlers.
+    // The SQL tab no longer has a textarea to drive: CodeMirror owns the DOM node, and bUnit has no
+    // JS engine to run it (see SqlEditor.razor / sql-editor.js). SqlEditor.OnEditorChanged is the exact
+    // [JSInvokable] the browser calls on every keystroke (wired up in sql-editor.js's 'change' handler),
+    // so invoking it directly on the component instance drives the identical code path a real keystroke
+    // would — it updates Value and raises ValueChanged, same as if CodeMirror had called it. The call is
+    // routed through the renderer via InvokeAsync so the ValueChanged-triggered re-render of Workspace
+    // happens on the correct synchronization context, the same way ClickAsync does for button clicks.
     private static Task TypeSqlAsync(IRenderedComponent<Workspace> page, string sql) =>
-        page.Find("textarea").InputAsync(new ChangeEventArgs { Value = sql });
+        page.InvokeAsync(() => page.FindComponent<SqlEditor>().Instance.OnEditorChanged(sql));
 
     private static Task ClickAsync(AngleSharp.Dom.IElement button) =>
         button.ClickAsync(new MouseEventArgs());
