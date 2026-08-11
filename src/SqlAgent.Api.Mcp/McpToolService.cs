@@ -25,10 +25,16 @@ public record ListDatabasesResponse(
 /// the standard way an MCP stdio client passes a secret). Null when none was provided.</summary>
 public sealed record McpClientToken(string? Value);
 
+/// <summary>One column. <c>data_type</c> stays the bare catalog type name; the sizing facets are appended as
+/// separate optional fields (<c>-1</c> on <c>max_length</c> means MAX) and are dropped from the payload when
+/// the type declares none, so the tool output an agent reads stays compact.</summary>
 public record ColumnDescription(
     [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("data_type")] string DataType,
-    [property: JsonPropertyName("nullable")] bool Nullable);
+    [property: JsonPropertyName("nullable")] bool Nullable,
+    [property: JsonPropertyName("max_length"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? MaxLength = null,
+    [property: JsonPropertyName("precision"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? Precision = null,
+    [property: JsonPropertyName("scale"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? Scale = null);
 
 public record ForeignKeyDescription(
     [property: JsonPropertyName("column")] string Column,
@@ -148,7 +154,8 @@ public class McpToolService(
 
     private static TableDescription ToTable(SchemaTable t) => new(
         t.Schema, t.Name,
-        t.Columns.Select(c => new ColumnDescription(c.Name, c.DataType, c.IsNullable)).ToList(),
+        t.Columns.Select(c => new ColumnDescription(
+            c.Name, c.DataType, c.IsNullable, c.MaxLength, c.Precision, c.Scale)).ToList(),
         t.PrimaryKey,
         t.ForeignKeys.Select(f => new ForeignKeyDescription(
             f.Column, f.ReferencedSchema, f.ReferencedTable, f.ReferencedColumn)).ToList());

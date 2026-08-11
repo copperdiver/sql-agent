@@ -132,6 +132,55 @@ public class McpToolServiceTests
     }
 
     [Fact]
+    public async Task DescribeSchema_carries_column_sizing_and_omits_it_where_the_type_has_none()
+    {
+        var (db, conn) = NewStore();
+        var schema = new DatabaseSchema([
+            new SchemaTable("public", "orders",
+                [
+                    new SchemaColumn("code", "varchar", false, MaxLength: 20),
+                    new SchemaColumn("total", "numeric", true, Precision: 10, Scale: 2),
+                    new SchemaColumn("placed_at", "timestamp", false),
+                ],
+                ["code"], [], []),
+        ]);
+        var (tools, connections, _) = Build(db, new ToolFakeProvider(schema));
+        var created = await connections.CreateAsync(
+            new DatabaseConnectionInput("c", DatabaseProviderType.Postgres, IsReadOnly: true), "cs");
+
+        var r = await tools.DescribeSchemaAsync(created.Id.ToString());
+
+        var columns = Assert.Single(r.Tables!).Columns;
+        var code = columns.Single(c => c.Name == "code");
+        Assert.Equal(20, code.MaxLength);
+        Assert.Null(code.Precision);
+
+        var total = columns.Single(c => c.Name == "total");
+        Assert.Equal(10, total.Precision);
+        Assert.Equal(2, total.Scale);
+
+        // A type with no sizing facets carries nulls, so the serialized tool output stays compact.
+        var placedAt = columns.Single(c => c.Name == "placed_at");
+        Assert.Null(placedAt.MaxLength);
+        Assert.Null(placedAt.Precision);
+        Assert.Null(placedAt.Scale);
+        conn.Dispose();
+    }
+
+    [Fact]
+    public void ColumnDescription_serializes_sizing_only_when_the_type_declares_it()
+    {
+        var sized = System.Text.Json.JsonSerializer.Serialize(
+            new ColumnDescription("code", "varchar", false, MaxLength: 20));
+        var plain = System.Text.Json.JsonSerializer.Serialize(
+            new ColumnDescription("placed_at", "timestamp", false));
+
+        Assert.Contains("\"max_length\":20", sized);
+        Assert.DoesNotContain("precision", sized);      // absent facets never reach the wire
+        Assert.DoesNotContain("max_length", plain);
+    }
+
+    [Fact]
     public async Task QueryDatabase_invalid_id_returns_invalid_database_id()
     {
         var (db, conn) = NewStore();

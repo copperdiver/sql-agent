@@ -163,6 +163,33 @@ public class LocalApiDispatcherTests
     }
 
     [Fact]
+    public async Task Describe_schema_carries_column_sizing()
+    {
+        var schema = new DatabaseSchema([
+            new SchemaTable("public", "orders",
+                [
+                    new SchemaColumn("code", "varchar", false, MaxLength: 20),
+                    new SchemaColumn("total", "numeric", true, Precision: 10, Scale: 2),
+                    new SchemaColumn("placed_at", "timestamp", false),
+                ],
+                ["code"], [], []),
+        ]);
+        var (d, connections, _, conn) = NewDispatcher(new ApiFakeProvider(DatabaseProviderType.Postgres, schema: schema));
+        var created = await connections.CreateAsync(new DatabaseConnectionInput("c", DatabaseProviderType.Postgres, true), "cs");
+
+        var r = await CallAsync(d, "describe_schema", new { id = created.Id });
+
+        Assert.True(r.Ok);
+        var columns = Assert.Single(Data<SchemaDto>(r).Tables).Columns;
+        Assert.Equal(20, columns.Single(c => c.Name == "code").MaxLength);
+        Assert.Equal(10, columns.Single(c => c.Name == "total").Precision);
+        Assert.Equal(2, columns.Single(c => c.Name == "total").Scale);
+        Assert.Null(columns.Single(c => c.Name == "placed_at").MaxLength);
+
+        conn.Dispose();
+    }
+
+    [Fact]
     public async Task Refresh_schema_caches_and_returns_the_filtered_description()
     {
         var schema = new DatabaseSchema([

@@ -196,7 +196,7 @@ public class LocalApiDispatcher(
 
     private static SchemaDto ToDto(DatabaseSchema s) => new(s.Tables.Select(t => new TableDto(
         t.Schema, t.Name,
-        t.Columns.Select(c => new ColumnDto(c.Name, c.DataType, c.IsNullable)).ToList(),
+        t.Columns.Select(c => new ColumnDto(c.Name, c.DataType, c.IsNullable, c.MaxLength, c.Precision, c.Scale)).ToList(),
         t.PrimaryKey,
         t.ForeignKeys.Select(f => new ForeignKeyDto(f.Column, f.ReferencedSchema, f.ReferencedTable, f.ReferencedColumn)).ToList()))
         .ToList());

@@ -110,6 +110,8 @@ public class NlQueryService(
     /// <summary>
     /// Compact DDL text for the LLM, built only from the already-filtered schema (hidden tables are gone
     /// before this point). One line per table with columns/types/nullability, a PK line, and FK lines.
+    /// Types carry their declared size (<c>varchar(20)</c>, <c>decimal(10,2)</c>) via
+    /// <see cref="SchemaColumn.TypeText"/> — without it the model cannot size literals or predicates.
     /// ponytail: deliberately simple; caching and context-budget-aware compaction are CD-75's job.
     /// </summary>
     private static string FormatSchema(DatabaseSchema schema)
@@ -119,7 +121,7 @@ public class NlQueryService(
         var sb = new StringBuilder();
         foreach (var t in schema.Tables)
         {
-            var cols = string.Join(", ", t.Columns.Select(c => $"{c.Name} {c.DataType}{(c.IsNullable ? "" : " NOT NULL")}"));
+            var cols = string.Join(", ", t.Columns.Select(c => $"{c.Name} {c.TypeText}{(c.IsNullable ? "" : " NOT NULL")}"));
             sb.Append(t.Schema).Append('.').Append(t.Name).Append('(').Append(cols).Append(')').AppendLine();
             if (t.PrimaryKey.Count > 0)
                 sb.Append("  PK: ").AppendLine(string.Join(", ", t.PrimaryKey));

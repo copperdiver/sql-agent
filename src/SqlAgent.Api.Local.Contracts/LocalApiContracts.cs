@@ -97,7 +97,12 @@ public record SchemaDto(IReadOnlyList<TableDto> Tables);
 public record TableDto(
     string Schema, string Name, IReadOnlyList<ColumnDto> Columns,
     IReadOnlyList<string> PrimaryKey, IReadOnlyList<ForeignKeyDto> ForeignKeys);
-public record ColumnDto(string Name, string DataType, bool IsNullable);
+/// <summary>One column. The sizing facets are the raw catalog values and are omitted from the wire when the
+/// type carries none (<c>-1</c> on <see cref="MaxLength"/> means MAX). Appended after the original three
+/// fields, so a v1 client that ignores them keeps working.</summary>
+public record ColumnDto(
+    string Name, string DataType, bool IsNullable,
+    int? MaxLength = null, int? Precision = null, int? Scale = null);
 public record ForeignKeyDto(string Column, string ReferencedSchema, string ReferencedTable, string ReferencedColumn);
 
 /// <summary>Query result. <see cref="Truncated"/> is how a too-large result surfaces: rows are capped, not errored.</summary>

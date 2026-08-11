@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SqlAgent.Core;
 
 /// <summary>Provider-neutral description of a database's structure (CD-50 T4).</summary>
@@ -19,7 +21,28 @@ public record SchemaTable(
 /// </summary>
 public record SchemaColumn(
     string Name, string DataType, bool IsNullable,
-    int? MaxLength = null, int? Precision = null, int? Scale = null);
+    int? MaxLength = null, int? Precision = null, int? Scale = null)
+{
+    /// <summary>
+    /// The declared type as a reader would write it — <c>varchar(20)</c>, <c>varchar(max)</c>,
+    /// <c>decimal(10,2)</c> — so every surface renders sizing identically. Length wins when a type reports
+    /// both facets. Precision and scale are appended only for exact numerics: both catalogs report
+    /// precision 10 / scale 0 for <c>int</c>, and "int(10,0)" is neither valid SQL nor useful in a prompt.
+    /// [JsonIgnore] keeps it out of the cached schema JSON — it is derived, not stored.
+    /// </summary>
+    [JsonIgnore]
+    public string TypeText => MaxLength switch
+    {
+        -1 => $"{DataType}(max)",
+        int length => $"{DataType}({length})",
+        null when IsExactNumeric && Precision is int p => $"{DataType}({p},{Scale ?? 0})",
+        _ => DataType,
+    };
+
+    private bool IsExactNumeric =>
+        DataType.Equals("decimal", StringComparison.OrdinalIgnoreCase) ||
+        DataType.Equals("numeric", StringComparison.OrdinalIgnoreCase);
+}
 
 /// <summary>A column pointing at another table — the "basic relationship" the model carries.</summary>
 public record ForeignKey(string Column, string ReferencedSchema, string ReferencedTable, string ReferencedColumn);

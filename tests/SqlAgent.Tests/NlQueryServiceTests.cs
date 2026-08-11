@@ -202,6 +202,30 @@ public class NlQueryServiceTests
     }
 
     [Fact]
+    public async Task Prompt_context_includes_column_sizing()
+    {
+        var (db, conn) = NewStore();
+        var sized = new DatabaseSchema([
+            new SchemaTable("public", "orders",
+                [
+                    new SchemaColumn("code", "varchar", false, MaxLength: 20),
+                    new SchemaColumn("total", "numeric", true, Precision: 10, Scale: 2),
+                ],
+                ["code"], [], []),
+        ]);
+        var gateway = new FakeGateway(LlmSqlResponse.Clarify("?"));
+        var (svc, connections) = Build(db, new NlFakeProvider(sized), gateway);
+        var id = await AddConnectionAsync(connections);
+
+        await svc.AskAsync(id, "anything");
+
+        // Without declared sizes the model cannot tell varchar(20) from varchar(max) when writing predicates.
+        Assert.Contains("varchar(20)", gateway.LastRequest!.SchemaContext);
+        Assert.Contains("numeric(10,2)", gateway.LastRequest.SchemaContext);
+        conn.Dispose();
+    }
+
+    [Fact]
     public async Task Empty_question_short_circuits()
     {
         var (db, conn) = NewStore();
