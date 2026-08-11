@@ -1,0 +1,125 @@
+@page "/connections"
+@rendermode InteractiveServer
+@inject ScopedRunner Runner
+@inject AppState State
+
+<h1>Connections</h1>
+
+<table>
+    <thead><tr><th>Name</th><th>Provider</th><th>Mode</th><th></th></tr></thead>
+    <tbody>
+        @foreach (var c in _connections)
+        {
+            <tr>
+                <td>@c.Name</td>
+                <td>@c.ProviderType</td>
+                <td>@(c.IsReadOnly ? "read-only" : "read-write")</td>
+                <td>
+                    <button @onclick="() => Edit(c)">Edit</button>
+                    <button @onclick="() => TestAsync(c.Id)">Test</button>
+                    <button @onclick="() => DeleteAsync(c.Id)">Delete</button>
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+<h2>@(_editingId is null ? "New connection" : "Edit connection")</h2>
+
+<label>Name <input @bind="_name" /></label>
+<label>Provider
+    <select @bind="_provider">
+        @foreach (var p in Enum.GetValues<DatabaseProviderType>())
+        {
+            <option value="@p">@p</option>
+        }
+    </select>
+</label>
+<label>Read-only <input type="checkbox" @bind="_isReadOnly" /></label>
+<label>Connection string
+    <input type="password" @bind="_connectionString"
+           placeholder="@(_editingId is null ? "" : "leave blank to keep the stored secret")" />
+</label>
+
+<button @onclick="SaveAsync">Save</button>
+<button @onclick="NewConnection">New</button>
+
+@if (_status is not null)
+{
+    <p role="status">@_status</p>
+}
+
+@code {
+    private IReadOnlyList<DatabaseConnectionInfo> _connections = [];
+    private Guid? _editingId;
+    private string _name = "";
+    private DatabaseProviderType _provider = DatabaseProviderType.Postgres;
+    private bool _isReadOnly = true;
+    private string _connectionString = "";
+    private string? _status;
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync() =>
+        _connections = await Runner.RunAsync<DatabaseConnectionService, IReadOnlyList<DatabaseConnectionInfo>>(
+            s => s.ListAsync());
+
+    private void Edit(DatabaseConnectionInfo c)
+    {
+        _editingId = c.Id;
+        _name = c.Name;
+        _provider = c.ProviderType;
+        _isReadOnly = c.IsReadOnly;
+        _connectionString = "";     // never populated from the server; blank means "keep the stored secret"
+        _status = null;
+    }
+
+    private void NewConnection()
+    {
+        _editingId = null;
+        _name = "";
+        _provider = DatabaseProviderType.Postgres;
+        _isReadOnly = true;
+        _connectionString = "";
+        _status = null;
+    }
+
+    private async Task SaveAsync()
+    {
+        var input = new DatabaseConnectionInput(_name, _provider, _isReadOnly);
+        if (_editingId is { } id)
+        {
+            var secret = string.IsNullOrWhiteSpace(_connectionString) ? null : _connectionString;
+            await Runner.RunAsync<DatabaseConnectionService>(s => s.UpdateAsync(id, input, secret));
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(_connectionString))
+            {
+                _status = "A connection string is required for a new connection.";
+                return;
+            }
+            await Runner.RunAsync<DatabaseConnectionService>(s => s.CreateAsync(input, _connectionString));
+        }
+        _connectionString = "";
+        _status = "Saved.";
+        await ReloadAsync();
+    }
+
+    private async Task DeleteAsync(Guid id)
+    {
+        await Runner.RunAsync<DatabaseConnectionService>(s => s.DeleteAsync(id));
+        if (State.ConnectionId == id) State.Select(null);
+        if (_editingId == id) NewConnection();
+        await ReloadAsync();
+    }
+
+    private async Task TestAsync(Guid id)
+    {
+        var result = await Runner.RunAsync<ConnectionTester, ConnectionTestResult?>(t => t.TestSavedAsync(id));
+        // A rejecting-but-reachable server is a normal outcome here, not an error to throw.
+        _status = result is null ? "Connection or its secret is missing."
+            : result.Success ? $"Connection OK ({result.ServerVersion}, {result.ElapsedMs} ms)"
+            : $"Connection failed: {result.Error}";
+    }
+}
