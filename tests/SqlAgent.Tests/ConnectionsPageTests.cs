@@ -28,6 +28,8 @@ public class ConnectionsPageTests : IDisposable
         _ctx.Services.AddScoped<ConnectionTester>();
         _ctx.Services.AddScoped<ScopedRunner>();
         _ctx.Services.AddScoped<AppState>();
+        // The page logs the exceptions it now catches instead of letting them escape to the boundary.
+        _ctx.Services.AddLogging();
 
         using var scope = _ctx.Services.CreateScope();
         scope.ServiceProvider.GetRequiredService<SqlAgentDbContext>().Database.EnsureCreated();
@@ -81,6 +83,11 @@ public class ConnectionsPageTests : IDisposable
         var page = _ctx.RenderComponent<Connections>();
         FindButton(page, "Edit").Click();
 
+        // This is the assertion the write-only test could not make: it never clicked Edit, so it only
+        // ever inspected a blank *new*-connection form. Clicking Edit is the one path that could
+        // populate the secret field from the server, and it must leave it empty.
+        Assert.True(string.IsNullOrEmpty(page.Find("input[type=password]").GetAttribute("value")));
+
         // Change the name but leave the connection-string field blank.
         var nameInput = page.Find("input");
         nameInput.Change("prod-analytics-renamed");
@@ -91,6 +98,43 @@ public class ConnectionsPageTests : IDisposable
 
         var stored = GetStoredSecretAsync(id).GetAwaiter().GetResult();
         Assert.Equal("Host=localhost;Password=super-secret", stored);
+    }
+
+    [Fact]
+    public void A_successful_create_clears_the_form_so_pressing_Save_again_cannot_duplicate_the_row()
+    {
+        var page = _ctx.RenderComponent<Connections>();
+
+        page.Find("input").Change("new-conn");
+        page.Find("input[type=password]").Change("Host=localhost;Password=super-secret");
+        FindButton(page, "Save").Click();
+
+        Assert.Contains("Saved.", page.Markup);
+        // The form used to keep the values just saved, so Save again attempted an identical second
+        // connection — blocked only incidentally by the blank-secret check, not by design.
+        Assert.Equal("", page.Find("input").GetAttribute("value"));
+        Assert.True(string.IsNullOrEmpty(page.Find("input[type=password]").GetAttribute("value")));
+
+        FindButton(page, "Save").Click();
+
+        Assert.Contains("connection_string_required", page.Markup);
+        Assert.Single(GetSavedConnectionsAsync().GetAwaiter().GetResult());
+    }
+
+    [Fact]
+    public void An_expected_refusal_is_rendered_through_OutcomeMessage_with_its_code()
+    {
+        var page = _ctx.RenderComponent<Connections>();
+
+        page.Find("input").Change("new-conn");
+        FindButton(page, "Save").Click();
+
+        // Not hand-built prose in a bare <p role="status">: this page routes refusals through the same
+        // component the SQL and Chat tabs use, so the user sees a stable code and can tell a
+        // deliberate refusal from a crash.
+        var outcome = page.Find(".outcome");
+        Assert.Contains("A connection string is required for a new connection.", outcome.TextContent);
+        Assert.Equal("connection_string_required", page.Find(".outcome .outcome-code").TextContent);
     }
 
     [Fact]

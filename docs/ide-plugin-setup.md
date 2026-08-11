@@ -56,12 +56,15 @@ or the web UI first (see `docs/web-ui.md`).
 
 **Authentication is off by default.** With no token configured, the MCP server
 accepts every caller — the v1 trust boundary is "whoever can run processes as
-this user" (ADR-0003). The web UI's own launch token is a separate mechanism,
-but not an independent one: leave `SqlAgent:LocalAuth:Token` unset and the web
-UI generates a fresh random token every start; set it and the web UI uses that
-exact fixed value instead, same as the MCP server does. See `docs/web-ui.md`.
-Configure `SqlAgent:LocalAuth:Token` when the MCP trust boundary alone is not
-good enough.
+this user" (described in ADR-0003, which is Superseded for the deleted named-pipe
+client but still states the MCP server's own posture accurately). The web UI does
+not share that boundary: it is loopback HTTP, reachable by any local account, and
+is guarded by `Host`/`Origin` validation plus a launch token — see
+`docs/web-ui.md`. Its launch token is a separate mechanism, but not an
+independent one: leave `SqlAgent:LocalAuth:Token` unset and the web UI generates
+a fresh random token every start; set it and the web UI uses that exact fixed
+value instead, same as the MCP server does. Configure
+`SqlAgent:LocalAuth:Token` when the MCP trust boundary alone is not good enough.
 
 Set the expected token on the process that serves the tools, using the
 `SqlAgent:LocalAuth:Token` configuration key. As an environment variable that is

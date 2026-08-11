@@ -4,8 +4,10 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SqlAgent.Core;
 using SqlAgent.Host.Components.Layout;
+using SqlAgent.Host.Components.Pages;
 using SqlAgent.Host.Web;
 using SqlAgent.Storage;
+using static SqlAgent.Tests.AsyncTestHelpers;
 
 namespace SqlAgent.Tests;
 
@@ -24,8 +26,12 @@ public class SchemaRailTests : IDisposable
         _ctx.Services.AddSingleton<IDatabaseProviderRegistry, DatabaseProviderRegistry>();
         _ctx.Services.AddScoped<DatabaseConnectionService>();
         _ctx.Services.AddScoped<TablePolicyService>();
+        // The propagation tests below render the real Connections page alongside the rail rather than
+        // poking AppState directly, because the seam under test is the one between them.
+        _ctx.Services.AddScoped<ConnectionTester>();
         _ctx.Services.AddScoped<ScopedRunner>();
         _ctx.Services.AddScoped<AppState>();
+        _ctx.Services.AddLogging();
 
         using var scope = _ctx.Services.CreateScope();
         scope.ServiceProvider.GetRequiredService<SqlAgentDbContext>().Database.EnsureCreated();
@@ -136,6 +142,86 @@ public class SchemaRailTests : IDisposable
         Assert.DoesNotContain("secrets", rail.Markup);
     }
 
+    // --- the post-mount blind spot ----------------------------------------------------------------
+    //
+    // Every test above creates its connections in the constructor, before RenderComponent<SchemaRail>,
+    // so the rail always observes them on its first render whether or not it ever listens for a later
+    // change. That is the same shape as the Task 10 Critical (Workspace never subscribing to
+    // AppState.Changed) and it hid the same bug twice: the rail reads its picker list once in
+    // OnInitializedAsync and then lives in MainLayout for the whole circuit, which no route
+    // navigation recreates. These three drive the real Connections page after the rail is already on
+    // screen, which is the only order in which the propagation exists at all.
+
+    [Fact]
+    public async Task A_connection_created_after_the_rail_is_rendered_appears_in_its_picker()
+    {
+        var rail = _ctx.RenderComponent<SchemaRail>();
+        Assert.DoesNotContain("added-later", rail.Markup);
+
+        var page = _ctx.RenderComponent<Connections>();
+        page.Find("input").Change("added-later");
+        page.Find("input[type=password]").Change("cs2");
+        FindButton(page, "Save").Click();
+
+        await WaitForConditionAsync(() => rail.Markup.Contains("added-later"));
+    }
+
+    [Fact]
+    public async Task A_connection_deleted_after_the_rail_is_rendered_stops_being_offered()
+    {
+        var rail = _ctx.RenderComponent<SchemaRail>();
+        Assert.NotEmpty(rail.FindAll($"option[value='{_connectionId}']"));
+
+        var page = _ctx.RenderComponent<Connections>();
+        FindButton(page, "Delete").Click();
+
+        await WaitForConditionAsync(() => rail.FindAll($"option[value='{_connectionId}']").Count == 0);
+    }
+
+    [Fact]
+    public async Task Editing_the_already_selected_connection_updates_what_the_rail_shows_about_it()
+    {
+        var rail = _ctx.RenderComponent<SchemaRail>();
+        Assert.Contains("read-only", rail.Markup);
+
+        var page = _ctx.RenderComponent<Connections>();
+        FindButton(page, "Edit").Click();
+        page.Find("input[type=checkbox]").Change(false);     // the Read-only checkbox
+        FindButton(page, "Save").Click();
+
+        // The rail's meta line reads AppState.Connection, not its own list. AppState.Select used to
+        // early-return on an unchanged id, so editing the row that was already selected left the rail
+        // describing the connection as it was before the edit, forever.
+        await WaitForConditionAsync(() => rail.Markup.Contains("read-write"));
+    }
+
+    [Fact]
+    public void Switching_the_connection_clears_the_table_filter()
+    {
+        Guid secondId;
+        using (var scope = _ctx.Services.CreateScope())
+        {
+            var connections = scope.ServiceProvider.GetRequiredService<DatabaseConnectionService>();
+            secondId = connections.CreateAsync(
+                new DatabaseConnectionInput("c2", DatabaseProviderType.Postgres, true), "cs2")
+                .GetAwaiter().GetResult().Id;
+        }
+
+        var rail = _ctx.RenderComponent<SchemaRail>();
+        rail.Find("input[type=search]").Change("secr");
+        Assert.DoesNotContain("orders", rail.Markup);
+
+        rail.Find("select").Change(secondId.ToString());
+
+        // A filter typed against one connection's tables means nothing against the next one's; leaving
+        // it in place silently hid most of the new tree with no visible cause.
+        Assert.Contains("orders", rail.Markup);
+        Assert.Equal("", rail.Find("input[type=search]").GetAttribute("value"));
+    }
+
+    private static AngleSharp.Dom.IElement FindButton(IRenderedComponent<Connections> page, string text) =>
+        page.FindAll("button").First(b => b.TextContent.Trim() == text);
+
     [Fact]
     public void Disposing_the_rail_unsubscribes_from_AppState_Changed()
     {
@@ -153,9 +239,25 @@ public class SchemaRailTests : IDisposable
         Assert.Equal(0, SubscriberCount(state));
     }
 
-    private static int SubscriberCount(AppState state)
+    private static int SubscriberCount(AppState state) => SubscriberCount(state, "Changed");
+
+    [Fact]
+    public void Disposing_the_rail_unsubscribes_from_AppState_ConnectionsChanged()
     {
-        var field = typeof(AppState).GetField("Changed",
+        _ctx.RenderComponent<SchemaRail>();
+        var state = _ctx.Services.GetRequiredService<AppState>();
+
+        Assert.Equal(1, SubscriberCount(state, "ConnectionsChanged"));
+
+        _ctx.DisposeComponents();
+
+        // Same leak as the Changed subscription, and a second event means a second chance to forget.
+        Assert.Equal(0, SubscriberCount(state, "ConnectionsChanged"));
+    }
+
+    private static int SubscriberCount(AppState state, string eventName)
+    {
+        var field = typeof(AppState).GetField(eventName,
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
         var handler = (Delegate?)field!.GetValue(state);
         return handler?.GetInvocationList().Length ?? 0;

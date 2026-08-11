@@ -1,4 +1,3 @@
-@rendermode InteractiveServer
 @using Microsoft.JSInterop
 @implements IAsyncDisposable
 @inject IJSRuntime JS
@@ -58,8 +57,14 @@
             {
                 // The circuit is already gone (e.g. the browser tab closed) — nothing left to detach.
             }
-
-            _self.Dispose();
+            finally
+            {
+                // In a finally, not after the try/catch: any other interop failure would otherwise
+                // skip this line and leak the DotNetObjectReference for the life of the circuit, on
+                // top of the exception it throws out of disposal.
+                _self.Dispose();
+                _self = null;
+            }
         }
     }
 }

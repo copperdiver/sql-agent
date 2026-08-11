@@ -38,14 +38,15 @@ public class WorkAreaBoundaryTests
     public void Clicking_retry_after_a_trip_renders_the_child_content_again()
     {
         using var ctx = new Bunit.TestContext();
-        FlakyChild.ShouldThrow = true;
+        var condition = new FlakyCondition();
 
-        var area = ctx.RenderComponent<WorkArea>(p => p.AddChildContent<FlakyChild>());
+        var area = ctx.RenderComponent<WorkArea>(
+            p => p.AddChildContent<FlakyChild>(c => c.Add(x => x.Condition, condition)));
         Assert.Contains("Something went wrong", area.Markup);
 
         // The underlying condition has cleared; Retry calls ErrorBoundary.Recover(), which is the
         // only thing that makes Blazor try ChildContent again — new ChildContent alone does not.
-        FlakyChild.ShouldThrow = false;
+        condition.ShouldThrow = false;
         area.Find("button").Click();
 
         Assert.DoesNotContain("Something went wrong", area.Markup);
@@ -56,15 +57,16 @@ public class WorkAreaBoundaryTests
     public void A_location_change_clears_a_tripped_boundary()
     {
         using var ctx = new Bunit.TestContext();
-        FlakyChild.ShouldThrow = true;
+        var condition = new FlakyCondition();
 
-        var area = ctx.RenderComponent<WorkArea>(p => p.AddChildContent<FlakyChild>());
+        var area = ctx.RenderComponent<WorkArea>(
+            p => p.AddChildContent<FlakyChild>(c => c.Add(x => x.Condition, condition)));
         Assert.Contains("Something went wrong", area.Markup);
 
         // MainLayout, which hosts WorkArea, is not recreated across route navigation. The only thing
         // that keeps a page failure from taking down every page reached afterward via the header nav
         // is the boundary recovering on its own when the location changes, not only on an explicit Retry.
-        FlakyChild.ShouldThrow = false;
+        condition.ShouldThrow = false;
         var nav = ctx.Services.GetRequiredService<FakeNavigationManager>();
         nav.NavigateTo("connections");
 
@@ -109,6 +111,17 @@ file sealed class ThrowingChild : ComponentBase
 }
 
 /// <summary>
+/// Per-test failure switch for <see cref="FlakyChild"/>. This used to be a <c>static bool</c> on the
+/// component itself, which no fixture reset — so whether a test saw a throwing or a healthy child
+/// depended on which test ran before it, and the last test in the file only passed because the two
+/// recovery tests happened to leave it true. Each test now owns its own instance.
+/// </summary>
+file sealed class FlakyCondition
+{
+    public bool ShouldThrow { get; set; } = true;
+}
+
+/// <summary>
 /// Stands in for a component whose failure condition can clear between renders, so recovery (retry or
 /// navigation) can be observed actually re-running ChildContent, not just hiding stale markup.
 /// </summary>
@@ -116,11 +129,12 @@ file sealed class FlakyChild : ComponentBase
 {
     public const string RecoveredMarker = "flaky-child-recovered";
 
-    public static bool ShouldThrow = true;
+    /// <summary>Defaults to a throwing condition, so a test that does not care can omit it.</summary>
+    [Parameter] public FlakyCondition Condition { get; set; } = new();
 
     protected override void OnParametersSet()
     {
-        if (ShouldThrow) throw new InvalidOperationException("transient failure");
+        if (Condition.ShouldThrow) throw new InvalidOperationException("transient failure");
     }
 
     protected override void BuildRenderTree(RenderTreeBuilder builder) => builder.AddContent(0, RecoveredMarker);

@@ -35,6 +35,14 @@ public sealed class TokenAuthMiddleware(RequestDelegate next, LaunchToken token)
             context.Response.Cookies.Append(CookieName, token.Value, new CookieOptions
             {
                 HttpOnly = true,
+                // PHASE 3 DEPENDENCY — READ BEFORE CHANGING EITHER OF THE NEXT TWO LINES.
+                // LocalOriginMiddleware deliberately lets a request through when it carries no Origin
+                // header at all, because ordinary top-level navigation sends none. A cross-site GET
+                // also sends none, so the only thing that stops a hostile page from driving this UI
+                // over that path is SameSite=Strict withholding this cookie. Phase 3 (TLS) has to
+                // flip Secure to true on this same cookie; if SameSite is relaxed in that same edit —
+                // to Lax or None, as TLS work often does to make redirects survive — the absent-Origin
+                // hole silently opens with nothing else covering it.
                 SameSite = SameSiteMode.Strict,
                 Secure = false,     // phase 1 is plain HTTP on loopback; phase 3 adds TLS
                 IsEssential = true,

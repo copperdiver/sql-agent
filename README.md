@@ -10,9 +10,11 @@ Run the host with:
 dotnet run --project src/SqlAgent.Host/SqlAgent.Host.csproj
 ```
 
-It creates the local SQLite store, then logs a URL with a `?token=` required on the first
-request only, e.g. `http://127.0.0.1:5099/?token=...`. Open that URL in a browser — the token
-is exchanged for a session cookie on first use. The host listens on `127.0.0.1` only, on port 5099 by default
+It creates the local SQLite store, then writes a URL with a `?token=` required on the first
+request only — e.g. `http://127.0.0.1:5099/?token=...` — to `launch-url.txt` beside that store,
+readable only by the account the host runs as. The startup log names the file but never the token.
+Open the URL from the file in a browser; the token is exchanged for a session cookie on first use.
+The host listens on `127.0.0.1` only, on port 5099 by default
 (`SqlAgent:Web:Port` to change it). Details on the three screens, the token, and the manual
 regression checklist for the parts automated tests can't reach are in
 [`docs/web-ui.md`](docs/web-ui.md).

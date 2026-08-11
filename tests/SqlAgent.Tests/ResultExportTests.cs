@@ -104,13 +104,19 @@ public class ResultExportTests
         }
     }
 
-    [Fact]
-    public void Null_and_empty_string_still_collapse_to_an_empty_CSV_field()
-    {
-        // Guards the deliberate null/empty-string collapse (already covered above) against regressing
-        // while fixing the byte[] and culture issues in the same code path.
-        var csv = ResultExport.ToCsv(["a", "b"], [new object?[] { null, "" }]);
+    // Csv_writes_null_as_an_empty_field_not_the_text_NULL above already pins the null/empty-string
+    // collapse. A second copy of it (identical body and assertion, added while fixing the byte[] and
+    // culture issues) used to sit here and is removed: it could only ever fail at the same moment.
 
-        Assert.Equal("a,b\r\n,\r\n", csv);
+    [Fact]
+    public void A_duplicate_column_does_not_collide_with_a_real_column_already_named_like_the_suffix()
+    {
+        // A projection can legitimately produce a column literally named "id (2)". Suffixing the
+        // second "id" from a per-name counter regenerated exactly that name, and ToDictionary threw
+        // ArgumentException straight out of the Export JSON button. Every key must be distinct, and
+        // no value may be dropped.
+        var json = ResultExport.ToJson(["id (2)", "id", "id"], [new object?[] { 1, 2, 3 }]);
+
+        Assert.Equal("""[{"id (2)":1,"id":2,"id (3)":3}]""", json);
     }
 }

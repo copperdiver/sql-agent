@@ -92,8 +92,15 @@ public class ResultGridTests
         Assert.Equal(payload, grid.Find("td").TextContent);
     }
 
+    // The two export tests below are wiring tests, and their names say so. They assert the payload
+    // equals ResultExport.ToCsv/ToJson of the rows on screen — computed by the very function the
+    // component calls — so a bug inside that function changes both sides and leaves them green. What
+    // they do pin is that the button reaches sqlAgentDownload at all, with the right filename, the
+    // right mime type, and the rows currently displayed rather than a re-query or a stale result.
+    // The serialization itself is pinned by ResultExportTests, which uses literal expected strings.
+
     [Fact]
-    public void Export_CSV_button_asks_the_browser_to_download_the_csv_serialization_of_the_rows_on_screen()
+    public void Export_CSV_button_is_wired_to_sqlAgentDownload_with_the_csv_of_the_rows_on_screen()
     {
         // bUnit has no JS engine: this only proves the component asks the browser to download the right
         // filename, mime type, and payload. It does not prove a file actually lands on disk in a real browser.
@@ -111,7 +118,7 @@ public class ResultGridTests
     }
 
     [Fact]
-    public void Export_JSON_button_asks_the_browser_to_download_the_json_serialization_of_the_rows_on_screen()
+    public void Export_JSON_button_is_wired_to_sqlAgentDownload_with_the_json_of_the_rows_on_screen()
     {
         using var ctx = new Bunit.TestContext();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;

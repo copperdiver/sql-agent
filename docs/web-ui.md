@@ -10,16 +10,40 @@ start the host, open the URL it prints, and the browser is the client.
 dotnet run --project src/SqlAgent.Host/SqlAgent.Host.csproj
 ```
 
-On startup the host logs a single ready-to-click line:
+On startup the host logs where to find the URL, but **not the URL itself**:
 
 ```
-SQL Agent UI: http://127.0.0.1:5099/?token=<64 hex characters>
+SQL Agent UI: http://127.0.0.1:5099 — open the URL (token included) written to /var/lib/sqlagent/launch-url.txt
 ```
 
-Open that exact URL. The `token` query parameter is required on the first request only; the
-server exchanges it for an `HttpOnly` session cookie (`sqlagent_session`) and every request
-after that rides the cookie instead. Opening the bare URL — `http://127.0.0.1:5099/` — without
-the token, in a window that never presented one, gets a `401`.
+The tokenized URL goes into `launch-url.txt` beside the SQLite store, restricted to the account
+the host runs as (mode `600` on Linux/macOS; on Windows an explicit ACL granting only that account
+and `BUILTIN\Administrators`, with inheritance switched off). Read that file and open the URL it
+contains:
+
+```bash
+cat /var/lib/sqlagent/launch-url.txt
+```
+
+```powershell
+Get-Content "C:\ProgramData\SqlAgent\launch-url.txt"
+```
+
+The token is **not** logged, at any level. With the named pipe gone it is the entire trust boundary
+around a TCP port that every local account can reach, and this host attaches log providers that are
+not private to it: `AddWindowsService()` writes to the Windows Event Log and `AddSystemd()` puts
+stdout in the journal, both readable by a wider set of principals than the service account. (As a
+second layer, `appsettings.json` also caps the Event Log provider at `Warning`, so nothing logged at
+`Information` can reach it even if a future change tries.)
+
+The `token` query parameter is required on the first request only; the server exchanges it for an
+`HttpOnly` session cookie (`sqlagent_session`) and every request after that rides the cookie
+instead. Opening the bare URL — `http://127.0.0.1:5099/` — without the token, in a window that never
+presented one, gets a `401`.
+
+If the file cannot be written (a read-only deployment directory, say) the host logs an error saying
+so and still starts, but a *generated* token then has no retrieval path at all — set
+`SqlAgent:LocalAuth:Token` to a value of your own instead, as described in the runbook.
 
 See [`docs/runbook.md`](runbook.md) for where the token comes from, how to pin it to a fixed
 value, and Windows service / systemd packaging.
@@ -78,6 +102,12 @@ identically on another. JSON serialization gets the same base64/invariant behavi
 `JsonSerializer`. Files download through the browser's normal download mechanism, not a page
 navigation.
 
+Values are written verbatim, which means a cell whose text begins with `=`, `+`, `-`, or `@` may be
+interpreted as a formula when the CSV is opened in a spreadsheet (CWE-1236). Mitigating it would
+mean altering the user's own data on the way out, so it is a deliberate non-goal here rather than an
+oversight — treat an exported CSV from an untrusted database the way you would treat any other
+untrusted spreadsheet.
+
 ## Chat needs an LLM provider — and none ships configured
 
 Every `ask_database` call up through the CD-51 contract terminates in a provider seam
@@ -108,7 +138,9 @@ files under `wwwroot/js/`:
 
 | Check | Expected |
 |---|---|
-| Open the logged URL | Workspace loads |
+| Open the URL from `launch-url.txt` | Workspace loads |
+| Navigate Workspace → Connections → Workspace via the header | Both pages render and stay interactive; no full page reload |
+| Create a connection while the Workspace is open | It appears in the rail's picker without reloading the tab |
 | Open `http://127.0.0.1:5099/` with no token in a private window | 401 |
 | Create a connection, then test it | Version and elapsed time reported |
 | Reopen the connection for editing | Connection-string field is empty |
@@ -120,6 +152,24 @@ files under `wwwroot/js/`:
 | Export CSV, then JSON | Both files download and open cleanly |
 | Ask a question on the Chat tab | "LLM is not configured" explanation, not a raw code |
 | Start a slow query, press Cancel | `execution_canceled` |
+
+## Approved scope that was consciously dropped
+
+Two items the design spec described are **not** in this build. Both were left out on purpose, not
+missed, and neither is scheduled:
+
+- **Schema detail in the rail.** The spec called for a schema → table → column tree showing each
+  column's declared type in full (`total numeric(10,2)`), PK/FK markers, and the table's indexes.
+  What shipped is a flat list of `schema.table` entries, each with the visibility checkbox and the
+  name filter. The rail's job here is configuration — deciding what the agent may see — and the
+  checkbox is what does that; column detail is a browsing feature that the SQL tab already covers by
+  querying. `SchemaColumn.TypeText` and the key/index data are all still extracted and still reach
+  the LLM, so adding the detail later is a rendering change, not a data change.
+- **Copy SQL.** The spec listed copy-SQL alongside export CSV/JSON on the SQL tab. There is no such
+  button: the editor holds the text and the browser's own selection and clipboard already do the
+  job, whereas a copy button needs clipboard interop and a permissions story of its own. The chat
+  tab's "open in editor" covers the one case where the SQL is somewhere the user cannot easily
+  select it.
 
 ## Out of scope (tracked for later phases)
 

@@ -62,11 +62,31 @@ app.UseStaticFiles();
 app.UseAntiforgery();
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
 
-// Print the ready-to-click URL the way Jupyter does: the token is required only for the first request,
-// which then exchanges it for a session cookie.
+// The token is required only for the first request, which exchanges it for a session cookie. It is
+// NOT logged: with the named pipe gone, this token is the entire trust boundary around a TCP port
+// that every local account can reach, and the log providers this host attaches are not private to the
+// service account — AddWindowsService() writes to the Windows Event Log and AddSystemd() puts stdout
+// in the journal. It goes to a file beside the store instead, readable only by this account and local
+// administrators. See docs/runbook.md for the retrieval path.
 var launchToken = app.Services.GetRequiredService<LaunchToken>();
-app.Logger.LogInformation(
-    "SQL Agent UI: {Url}/?token={Token}", LoopbackUrl.Resolve(app.Configuration), launchToken.Value);
+var launchUrl = LoopbackUrl.Resolve(app.Configuration);
+try
+{
+    var launchUrlPath = LaunchUrlFile.Write(
+        LaunchUrlFile.ResolveDirectory(app.Configuration), $"{launchUrl}/?token={launchToken.Value}");
+    app.Logger.LogInformation(
+        "SQL Agent UI: {Url} — open the URL (token included) written to {LaunchUrlFile}", launchUrl, launchUrlPath);
+}
+catch (Exception ex)
+{
+    // Fail soft and stay silent about the value: a read-only deployment directory must not stop the
+    // host, and must not tempt this into logging the token as a fallback either. Setting
+    // SqlAgent:LocalAuth:Token gives the operator a value they already know.
+    app.Logger.LogError(ex,
+        "SQL Agent UI: {Url} — the launch URL file could not be written, so the generated token cannot be "
+        + "retrieved. Set SqlAgent:LocalAuth:Token to a value of your own, or make {Directory} writable.",
+        launchUrl, LaunchUrlFile.ResolveDirectory(app.Configuration));
+}
 
 await app.RunAsync();
 

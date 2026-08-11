@@ -35,9 +35,18 @@ public sealed class LocalOriginMiddleware(RequestDelegate next)
         // WebSocket handshake is not subject to CORS at all. A host-only check would therefore also
         // accept any other local HTTP surface on a different port or scheme -- a dev server, an
         // Electron app, a local service reflecting attacker-controlled content -- letting it open a
-        // Blazor circuit at /_blazor carrying the user's session cookie. Require the presented Origin
-        // to equal this server's own scheme and authority exactly, so only the process actually bound
-        // to this port is accepted.
+        // Blazor circuit at /_blazor carrying the user's session cookie.
+        //
+        // The expected origin is built from this request's OWN authority, i.e. the check is
+        // "Origin equals the authority the client addressed", not "Origin equals a fixed bind
+        // authority". That is deliberate, and it is why the Host check above has to run first: Host
+        // is already constrained to a loopback name there, and a browser sets Host itself from the
+        // URL being fetched, so a page served by anything other than this listener cannot make the
+        // two agree -- it would present its own scheme/port in Origin against ours in Host. Comparing
+        // against a literal LoopbackUrl.Resolve(...) value instead would reject the equally valid
+        // http://localhost:5099 and http://[::1]:5099 spellings of this very server, which browsers
+        // will happily produce, while buying nothing against a browser-borne attacker. A non-browser
+        // client can forge both headers either way, and is stopped by the launch token, not by this.
         var expectedOrigin = $"{request.Scheme}://{request.Host.Value}";
         return string.Equals(origin, expectedOrigin, StringComparison.OrdinalIgnoreCase);
     }

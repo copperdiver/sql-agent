@@ -55,22 +55,26 @@ public static class ResultExport
         return $"\"{value.Replace("\"", "\"\"")}\"";
     }
 
-    /// <summary>A JSON object cannot hold duplicate keys, so repeats get a " (n)" suffix.</summary>
+    /// <summary>
+    /// A JSON object cannot hold duplicate keys, so repeats get a " (n)" suffix. The suffix is chosen
+    /// against the names already taken rather than from a per-name counter: a counter can generate a
+    /// name that a *real* column already occupies (columns `id (2)`, `id`, `id` produced `id (2)`
+    /// twice), and ToDictionary then threw ArgumentException out of an export button. Advancing n
+    /// until the candidate is free cannot collide by construction.
+    /// </summary>
     private static List<string> Disambiguate(IReadOnlyList<string> columns)
     {
-        var seen = new Dictionary<string, int>();
+        var taken = new HashSet<string>(StringComparer.Ordinal);
         var result = new List<string>(columns.Count);
         foreach (var raw in columns)
         {
             var name = string.IsNullOrEmpty(raw) ? "(column)" : raw;
-            if (seen.TryGetValue(name, out var n))
+            if (!taken.Add(name))
             {
-                seen[name] = n + 1;
-                name = $"{name} ({n + 1})";
-            }
-            else
-            {
-                seen[name] = 1;
+                var n = 2;
+                string candidate;
+                do { candidate = $"{name} ({n++})"; } while (!taken.Add(candidate));
+                name = candidate;
             }
             result.Add(name);
         }

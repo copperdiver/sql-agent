@@ -147,7 +147,7 @@ public class WorkspaceTests : IDisposable
     }
 
     [Fact]
-    public async Task A_successful_query_enables_the_grid_and_clears_after_a_new_run_starts()
+    public async Task A_successful_query_fills_the_grid_and_the_old_result_is_gone_while_the_next_run_is_in_flight()
     {
         await SelectConnectionAsync(isReadOnly: true);
         _providerStub.NextResult = new QueryResultSet(["id"], [new object?[] { 1 }], Truncated: false);
@@ -157,6 +157,20 @@ public class WorkspaceTests : IDisposable
         await ClickAsync(FindButton(page, "Run"));
 
         Assert.Contains("1 rows", page.Markup);
+
+        // The second half of the name used to be a claim, not a test. Blocking the *second* provider
+        // call (the stub's counter is cumulative, so CallsToBlock = 2 lets call #1 through and
+        // suspends call #2) holds the component at RunAsync's await point, which is the only moment
+        // where "cleared" is observable: RunAsync sets _result = null before awaiting, so a stale grid
+        // must not still be sitting there looking like the answer to the query now running.
+        _providerStub.CallsToBlock = 2;
+        var secondRun = ClickAsync(FindButton(page, "Run"));
+        await WaitForConditionAsync(() => page.FindAll("button").Any(b => b.TextContent == "Cancel"));
+
+        Assert.DoesNotContain("1 rows", page.Markup);
+
+        await ClickAsync(FindButton(page, "Cancel"));
+        await secondRun;
     }
 
     // --- the cancel path -----------------------------------------------------------------------
