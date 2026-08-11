@@ -44,6 +44,34 @@ sudo systemctl enable --now sqlagent
 The non-Windows v1 host uses the in-memory secret store. Do not rely on it for
 durable production secrets until a Linux secret-store implementation is added.
 
+## Local-access token
+
+The named-pipe API and the MCP server share one optional token (CD-76). **It is
+off by default**: with nothing configured, any process running as the same user
+can call every operation, including the configuration ones. Turn it on by giving
+the host an expected token:
+
+```bash
+SqlAgent__LocalAuth__Token='a-long-random-string' dotnet run --project src/SqlAgent.Host/SqlAgent.Host.csproj
+```
+
+For the Windows service or the systemd unit, set the same variable in the
+service environment rather than on a shell line, so the token is not left in
+shell history.
+
+The host writes the value into the encrypted secret store at startup. Clients
+then present it through the `SQLAGENT_AUTH_TOKEN` environment variable — that
+covers both the WPF client and any MCP host. Mismatched or missing tokens get a
+stable `unauthorized` error.
+
+Two operational notes:
+
+- Removing `SqlAgent__LocalAuth__Token` does **not** disable authentication. A
+  blank setting means "nothing to configure"; the previously stored token stays
+  in effect. Delete the `local-auth-token` secret to turn it off.
+- On Windows the token is DPAPI current-user scoped like every other secret, so
+  the service and the clients must run under the account that stored it.
+
 ## Provider fixtures
 
 ```bash
@@ -59,4 +87,5 @@ docker compose -f tests/fixtures/docker-compose.yml down
 - Host exits on startup: confirm the `SqlAgent__Storage__ConnectionString` path exists and the service account can write to it.
 - Windows service cannot read saved secrets: confirm it is running as the same Windows account that created them.
 - Provider fixture tests do nothing: confirm the `SQLAGENT_TEST_POSTGRES` and `SQLAGENT_TEST_SQLSERVER` variables are set in the test process.
+- Client or IDE host gets `unauthorized` on every call: a local-access token is configured on the host but the client presents none. Export `SQLAGENT_AUTH_TOKEN` for the client process and restart it.
 - SQL Server fixture fails to connect: wait for container startup to complete and confirm port `1433` is not already bound.

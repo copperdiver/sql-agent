@@ -15,7 +15,9 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
-        var api = new LocalApiClient();
+        // Same env var the MCP server reads (CD-51 Story 1.7). Null when unset, which is exactly what a host
+        // with no configured token expects — but without this the client is locked out of a host that has one.
+        var api = new LocalApiClient(authToken: Environment.GetEnvironmentVariable("SQLAGENT_AUTH_TOKEN"));
         IVoiceInputService voice = new NullVoiceInputService();
         var main = new MainViewModel(api, voice);
 

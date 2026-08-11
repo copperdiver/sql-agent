@@ -20,6 +20,11 @@ SqlAgent__Storage__ConnectionString="Data Source=/path/to/sqlagent.db" dotnet ru
 Windows service and systemd packaging examples are in `packaging/`. Operator
 startup, fixture, and troubleshooting notes are in `docs/runbook.md`.
 
+The local API and the MCP server share an optional local-access token. It is
+**off by default** — set `SqlAgent__LocalAuth__Token` on the host to require one,
+and give clients the same value through `SQLAGENT_AUTH_TOKEN`. Details and the
+disable procedure are in [`docs/runbook.md`](docs/runbook.md).
+
 ## Claude Code (MCP)
 
 Register the SQL Agent MCP server with Claude Code to query databases from your

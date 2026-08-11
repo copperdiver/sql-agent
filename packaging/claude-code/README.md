@@ -43,6 +43,13 @@ approve it. `${CLAUDE_PROJECT_DIR}` resolves to the repo root, and
 
 Point `SQLAGENT_DB` at an absolute path if your store lives outside the repo.
 
+**If the server has a local-access token configured** (`SqlAgent:LocalAuth:Token`
+— off by default, see [`../../docs/runbook.md`](../../docs/runbook.md)), export
+`SQLAGENT_AUTH_TOKEN` with the same value before launching Claude Code. The
+committed `.mcp.json` passes it through when set and leaves it empty otherwise.
+With the CLI, add `--env SQLAGENT_AUTH_TOKEN=…` alongside `--env SQLAGENT_DB=…`.
+Without a matching token every tool returns `unauthorized`.
+
 ## 3. Smoke test
 
 1. Run `claude` in the project and check the server is connected: `/mcp`
@@ -60,7 +67,7 @@ Point `SQLAGENT_DB` at an absolute path if your store lives outside the repo.
 
 ## Stable error codes (surfaced unchanged from Core)
 
-`invalid_database_id`, `connection_not_found`, `connection_secret_missing`,
+`unauthorized`, `invalid_database_id`, `connection_not_found`, `connection_secret_missing`,
 `schema_extraction_error`, `policy_denied_readonly`, `policy_denied_hidden_table`,
 `execution_timeout`, `execution_canceled`, `execution_error`.
 
@@ -72,3 +79,6 @@ Point `SQLAGENT_DB` at an absolute path if your store lives outside the repo.
   wrong file. Confirm the path and seed a connection per `docs/runbook.md`.
 - **Secrets lost after restart on Linux/macOS:** expected in v1 (DPAPI is
   Windows-only). Use Windows for durable secrets.
+- **Every tool returns `unauthorized`:** the server has a token configured and
+  `SQLAGENT_AUTH_TOKEN` is missing or wrong. It is read once at process launch,
+  so export it and restart Claude Code.

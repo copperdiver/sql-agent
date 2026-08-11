@@ -20,7 +20,8 @@ Add `sql-agent` to user-level `~/.gemini/settings.json` or a project-level
       ],
       "cwd": "/path/to/sql-agent",
       "env": {
-        "SQLAGENT_DB": "/absolute/path/to/sqlagent.db"
+        "SQLAGENT_DB": "/absolute/path/to/sqlagent.db",
+        "SQLAGENT_AUTH_TOKEN": "$SQLAGENT_AUTH_TOKEN"
       },
       "timeout": 60000,
       "trust": false
@@ -31,6 +32,12 @@ Add `sql-agent` to user-level `~/.gemini/settings.json` or a project-level
 
 Use an absolute `SQLAGENT_DB` path. For packaged installs, replace `command` and
 `args` with the published `SqlAgent.Api.Mcp` executable path.
+
+`SQLAGENT_AUTH_TOKEN` only matters when the server has a local-access token
+configured (off by default — see
+[`ide-plugin-setup.md`](ide-plugin-setup.md#local-access-token-sqlagent_auth_token)).
+Drop the line if you are not using one; keep it and every tool call fails with
+`unauthorized` unless the value matches.
 
 ## Smoke test
 

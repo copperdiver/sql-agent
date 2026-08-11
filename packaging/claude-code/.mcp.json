@@ -6,7 +6,8 @@
         "${CLAUDE_PROJECT_DIR:-.}/src/SqlAgent.Api.Mcp/bin/Release/net10.0/SqlAgent.Api.Mcp.dll"
       ],
       "env": {
-        "SQLAGENT_DB": "${SQLAGENT_DB:-sqlagent.db}"
+        "SQLAGENT_DB": "${SQLAGENT_DB:-sqlagent.db}",
+        "SQLAGENT_AUTH_TOKEN": "${SQLAGENT_AUTH_TOKEN:-}"
       }
     }
   }

@@ -52,6 +52,46 @@ The MCP process calls `EnsureCreated` for the SQLite store at startup. It does
 not seed database connections; configure connections through the SQL Agent Core
 or WPF client first.
 
+## Local-access token (`SQLAGENT_AUTH_TOKEN`)
+
+**Authentication is off by default.** With no token configured, both the MCP
+server and the local named-pipe API accept every caller — the v1 trust boundary
+is "whoever can run processes as this user" (ADR-0003). Configure a token when
+that is not good enough.
+
+Set the expected token on the process that serves the tools, using the
+`SqlAgent:LocalAuth:Token` configuration key. As an environment variable that is
+`SqlAgent__LocalAuth__Token` (double underscores):
+
+```bash
+SqlAgent__LocalAuth__Token='a-long-random-string'
+```
+
+At startup the value is written to the secret store under `local-auth-token`,
+encrypted like any connection secret, and every subsequent call is checked
+against it.
+
+Each MCP host then presents the same token through `SQLAGENT_AUTH_TOKEN` in the
+env block of its server entry:
+
+```bash
+SQLAGENT_AUTH_TOKEN='a-long-random-string'
+```
+
+A stdio MCP server authenticates once per process, from the environment it was
+launched with — there is no per-call credential. Calls that present no token or
+the wrong one fail with `unauthorized` on every tool.
+
+Two things to know before enabling it:
+
+- **Clearing the setting does not turn authentication back off.** The token
+  lives in the secret store once written; a blank `SqlAgent:LocalAuth:Token` is
+  treated as "nothing to configure", not "delete the stored token". To disable
+  authentication, remove the `local-auth-token` secret from the store.
+- **On Windows the secret is DPAPI current-user scoped**, so the process that
+  reads the token must run as the account that wrote it — the same constraint
+  that applies to connection secrets.
+
 ## Host connection paths
 
 | Host | Supported v1 path | Notes |
@@ -70,6 +110,7 @@ All tool responses include `ok`. Failed calls return stable `error_code` and
 
 Common stable error codes:
 
+- `unauthorized`
 - `invalid_database_id`
 - `connection_not_found`
 - `connection_secret_missing`
@@ -121,3 +162,7 @@ tool surface.
 - **A table is missing or denied:** expected when table visibility hides it.
   Core omits hidden tables from `describe_schema` and denies direct queries with
   `policy_denied_hidden_table`.
+- **Every tool returns `unauthorized`:** the server has a local-access token
+  configured and the host is not presenting a matching one. Add
+  `SQLAGENT_AUTH_TOKEN` to the host's env block and restart the host — the token
+  is read once at process launch, so a running server will not pick it up.

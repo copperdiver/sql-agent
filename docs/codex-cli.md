@@ -55,6 +55,23 @@ env = { SQLAGENT_DB = "C:\\path\\to\\sqlagent.db" }
 codex mcp add sql-agent -- dotnet src/SqlAgent.Api.Mcp/bin/Release/net10.0/SqlAgent.Api.Mcp.dll
 ```
 
+## Local-access token
+
+If the server has a local-access token configured (off by default — see
+[`ide-plugin-setup.md`](ide-plugin-setup.md#local-access-token-sqlagent_auth_token)),
+add it to the same `env` table:
+
+```toml
+[mcp_servers.sql-agent]
+command = "C:\\path\\to\\SqlAgent.Api.Mcp.exe"
+env = { SQLAGENT_DB = "C:\\path\\to\\sqlagent.db", SQLAGENT_AUTH_TOKEN = "a-long-random-string" }
+```
+
+Or with the CLI: `codex mcp add sql-agent --env SQLAGENT_AUTH_TOKEN=… …`.
+
+The token is read once when Codex launches the server, so restart Codex after
+changing it. Without a matching token every tool returns `unauthorized`.
+
 ## `SQLAGENT_DB` and the policy boundary
 
 `SQLAGENT_DB` points the server at the local SQLite daemon store — the same

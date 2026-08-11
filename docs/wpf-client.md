@@ -28,6 +28,10 @@ Voice input is behind `IVoiceInputService`; the shipped `NullVoiceInputService` 
 If the host is **not** running, the client still opens; every call simply reports
 `Error (connection_failed): The SQL Agent host is not running` on the status line — no crash.
 
+If the host has a local-access token configured (`SqlAgent__LocalAuth__Token`, off by default),
+export `SQLAGENT_AUTH_TOKEN` with the same value before launching the client — `App.OnStartup`
+reads it and passes it to `LocalApiClient`. Without it every call reports `unauthorized`.
+
 ## Manual test checklist
 
 | Area | Steps | Expected |
