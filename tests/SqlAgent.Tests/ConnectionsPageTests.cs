@@ -13,13 +13,16 @@ public class ConnectionsPageTests : IDisposable
 {
     private readonly SqliteConnection _conn = new("DataSource=:memory:");
     private readonly Bunit.TestContext _ctx = new();
+    private readonly PostgresProviderStub _providerStub = new();
 
     public ConnectionsPageTests()
     {
         _conn.Open();
         _ctx.Services.AddDbContext<SqlAgentDbContext>(o => o.UseSqlite(_conn));
         _ctx.Services.AddSingleton<ISecretStore, InMemorySecretStore>();
-        _ctx.Services.AddSingleton<IDatabaseProvider, PostgresProviderStub>();
+        // Registered as a fixed instance (not by type) so individual tests can reach in and change
+        // what TestConnectionAsync returns — see PostgresProviderStub.Result below.
+        _ctx.Services.AddSingleton<IDatabaseProvider>(_providerStub);
         _ctx.Services.AddSingleton<IDatabaseProviderRegistry, DatabaseProviderRegistry>();
         _ctx.Services.AddScoped<DatabaseConnectionService>();
         _ctx.Services.AddScoped<ConnectionTester>();
@@ -110,6 +113,25 @@ public class ConnectionsPageTests : IDisposable
     }
 
     [Fact]
+    public void Deleting_the_row_open_in_the_edit_form_resets_the_form_to_new_connection()
+    {
+        var id = SeedAsync("prod-analytics", isReadOnly: true).GetAwaiter().GetResult();
+
+        var page = _ctx.RenderComponent<Connections>();
+        FindButton(page, "Edit").Click();
+        Assert.Contains("Edit connection", page.Markup);
+
+        FindButton(page, "Delete").Click();
+
+        Assert.Contains("New connection", page.Markup);
+        Assert.DoesNotContain("Edit connection", page.Markup);
+        // The name field must have been cleared, not left holding the deleted row's name — that
+        // would be a form still effectively bound to the id that no longer exists.
+        var nameInput = page.Find("input");
+        Assert.Equal("", nameInput.GetAttribute("value"));
+    }
+
+    [Fact]
     public void Testing_a_saved_connection_shows_the_provider_result_without_leaking_the_secret()
     {
         SeedAsync("prod-analytics", isReadOnly: true).GetAwaiter().GetResult();
@@ -119,6 +141,35 @@ public class ConnectionsPageTests : IDisposable
 
         Assert.Contains("Connection OK (PostgreSQL 16.0, 12 ms)", page.Markup);
         Assert.DoesNotContain("super-secret", page.Markup);
+    }
+
+    [Fact]
+    public void Testing_a_reachable_but_rejecting_server_shows_the_failure_reason()
+    {
+        SeedAsync("prod-analytics", isReadOnly: true).GetAwaiter().GetResult();
+        _providerStub.Result = () => ConnectionTestResult.Fail("password authentication failed", 8);
+
+        var page = _ctx.RenderComponent<Connections>();
+        FindButton(page, "Test").Click();
+
+        Assert.Contains("Connection failed: password authentication failed", page.Markup);
+    }
+
+    [Fact]
+    public void Testing_a_connection_with_no_stored_secret_reports_it_is_missing_not_a_connection_failure()
+    {
+        var id = SeedAsync("prod-analytics", isReadOnly: true).GetAwaiter().GetResult();
+        // Construct the "secret missing" state honestly through the real storage services: create a
+        // normal connection (which writes a secret), then remove only the secret, leaving the
+        // DatabaseConnection row in place — exactly the shape ConnectionTester.TestSavedAsync needs
+        // to hit its second null-return branch (info found, connectionString resolves to null).
+        RemoveStoredSecretAsync(id).GetAwaiter().GetResult();
+
+        var page = _ctx.RenderComponent<Connections>();
+        FindButton(page, "Test").Click();
+
+        Assert.Contains("Connection or its secret is missing.", page.Markup);
+        Assert.DoesNotContain("Connection failed", page.Markup);
     }
 
     private static AngleSharp.Dom.IElement FindButton(IRenderedComponent<Connections> page, string text) =>
@@ -148,6 +199,21 @@ public class ConnectionsPageTests : IDisposable
         return await connections.ResolveConnectionStringAsync(id);
     }
 
+    /// <summary>
+    /// Deletes only the secret behind a saved connection, via the real ISecretStore and the real
+    /// DatabaseConnection row's ConnectionStringSecretRef — leaving the connection itself intact.
+    /// This is the exact state ConnectionTester.TestSavedAsync needs to see to return null because
+    /// ResolveConnectionStringAsync resolves to null, distinct from the connection not existing at all.
+    /// </summary>
+    private async Task RemoveStoredSecretAsync(Guid id)
+    {
+        using var scope = _ctx.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<SqlAgentDbContext>();
+        var secrets = scope.ServiceProvider.GetRequiredService<ISecretStore>();
+        var entity = await db.DatabaseConnections.FindAsync(id);
+        await secrets.DeleteAsync(entity!.ConnectionStringSecretRef);
+    }
+
     public void Dispose()
     {
         _ctx.Dispose();
@@ -155,12 +221,20 @@ public class ConnectionsPageTests : IDisposable
     }
 }
 
-/// <summary>Provider double: the page never reaches a real database in these tests.</summary>
-file sealed class PostgresProviderStub : IDatabaseProvider
+/// <summary>
+/// Provider double: the page never reaches a real database in these tests. <see cref="Result"/> is
+/// settable per test so both success and reachable-but-rejecting outcomes can be pinned, not just
+/// the always-Ok default. Not `file`-scoped (unlike the original) because a private field of
+/// <see cref="ConnectionsPageTests"/> now needs to reference this type, and C# forbids file-local
+/// types in any member signature of a non-file-local type.
+/// </summary>
+sealed class PostgresProviderStub : IDatabaseProvider
 {
+    public Func<ConnectionTestResult> Result { get; set; } = () => ConnectionTestResult.Ok("PostgreSQL 16.0", 12);
+
     public DatabaseProviderType ProviderType => DatabaseProviderType.Postgres;
     public Task<ConnectionTestResult> TestConnectionAsync(string cs, CancellationToken ct = default)
-        => Task.FromResult(ConnectionTestResult.Ok("PostgreSQL 16.0", 12));
+        => Task.FromResult(Result());
     public Task<DatabaseSchema> GetSchemaAsync(string cs, CancellationToken ct = default)
         => Task.FromResult(new DatabaseSchema([]));
     public Task<QueryResultSet> ExecuteQueryAsync(string cs, string sql, QueryExecutionOptions o, CancellationToken ct = default)
