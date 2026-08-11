@@ -1,0 +1,87 @@
+@rendermode InteractiveServer
+@implements IDisposable
+@inject ScopedRunner Runner
+@inject AppState State
+
+<aside class="rail">
+    <label class="label">Connection</label>
+    <select @onchange="OnConnectionChanged">
+        <option value="">— select —</option>
+        @foreach (var c in _connections)
+        {
+            <option value="@c.Id" selected="@(c.Id == State.ConnectionId)">@c.Name</option>
+        }
+    </select>
+
+    @if (State.Connection is { } active)
+    {
+        <p class="meta">@active.ProviderType · @(active.IsReadOnly ? "read-only" : "read-write")</p>
+
+        <label class="label">Schema</label>
+        <input type="search" placeholder="Filter tables" value="@_filter" @onchange="OnFilterChanged" />
+
+        <ul class="tree">
+            @foreach (var t in Filtered())
+            {
+                <li data-table="@($"{t.Schema}.{t.Table}")" class="@(t.IsVisible ? "" : "hidden")">
+                    <input type="checkbox" checked="@t.IsVisible"
+                           @onchange="e => ToggleAsync(t, (bool)(e.Value ?? false))" />
+                    <span>@($"{t.Schema}.{t.Table}")</span>
+                </li>
+            }
+        </ul>
+    }
+</aside>
+
+@code {
+    private IReadOnlyList<DatabaseConnectionInfo> _connections = [];
+    private IReadOnlyList<TableVisibility> _tables = [];
+    private string _filter = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.Changed += OnStateChanged;
+        _connections = await Runner.RunAsync<DatabaseConnectionService, IReadOnlyList<DatabaseConnectionInfo>>(
+            s => s.ListAsync());
+        await LoadTablesAsync();
+    }
+
+    // A method rather than an inline lambda: a lambda assigning a string literal inside a Razor
+    // attribute needs escaped quotes, which the Razor parser handles badly.
+    private void OnFilterChanged(ChangeEventArgs e) => _filter = e.Value?.ToString() ?? string.Empty;
+
+    private IEnumerable<TableVisibility> Filtered() =>
+        string.IsNullOrWhiteSpace(_filter)
+            ? _tables
+            : _tables.Where(t => t.Table.Contains(_filter, StringComparison.OrdinalIgnoreCase));
+
+    private async Task LoadTablesAsync()
+    {
+        if (State.ConnectionId is not { } id) { _tables = []; return; }
+        // ListAsync returns every live table with its effective visibility — including hidden ones,
+        // which SchemaService deliberately omits. The rail needs them to offer the toggle back.
+        _tables = await Runner.RunAsync<TablePolicyService, IReadOnlyList<TableVisibility>?>(
+            s => s.ListAsync(id)) ?? [];
+    }
+
+    private async Task OnConnectionChanged(ChangeEventArgs e)
+    {
+        var raw = e.Value?.ToString();
+        State.Select(Guid.TryParse(raw, out var id) ? _connections.FirstOrDefault(c => c.Id == id) : null);
+        await LoadTablesAsync();
+    }
+
+    private async Task ToggleAsync(TableVisibility table, bool isVisible)
+    {
+        if (State.ConnectionId is not { } id) return;
+        // SetVisibilityAsync clears the cached schema itself, so the next agent read re-extracts
+        // under the new policy; the rail only has to re-read its own list.
+        await Runner.RunAsync<TablePolicyService>(
+            s => s.SetVisibilityAsync(id, table.Schema, table.Table, isVisible));
+        await LoadTablesAsync();
+    }
+
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => State.Changed -= OnStateChanged;
+}

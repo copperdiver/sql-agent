@@ -1,0 +1,14 @@
+<ErrorBoundary>
+    <ChildContent>@ChildContent</ChildContent>
+    <ErrorContent>
+        <div class="outcome" role="alert">
+            <p>Something went wrong. Try the action again — the details are in the server log.</p>
+        </div>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    // ErrorContent deliberately ignores the exception argument: its message can carry a connection
+    // string. Blazor already logs the exception server-side.
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}
