@@ -147,9 +147,14 @@ public class TokenAuthTests : IClassFixture<WebTestHost>
     {
         // Documents the positive side of the /_framework exemption: the browser must be able to fetch
         // blazor.web.js before it has a token to present. This test would fail (401) if the exemption
-        // were ever narrowed or removed by mistake.
+        // were ever narrowed or removed by mistake. It must also actually find the file: asserting only
+        // "not 401" previously let a 404 (the file not being wired into the static file provider at all —
+        // see Program.cs's builder.WebHost.UseStaticWebAssets() call) pass silently, which is exactly the
+        // bug that shipped undetected. Asserting OK plus a non-empty body rules that out.
         var r = await _host.NewClient().GetAsync("/_framework/blazor.web.js");
-        Assert.NotEqual(HttpStatusCode.Unauthorized, r.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        var body = await r.Content.ReadAsByteArrayAsync();
+        Assert.NotEmpty(body);
     }
 
     [Fact]

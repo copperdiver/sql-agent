@@ -6,8 +6,8 @@
 dotnet run --project src/SqlAgent.Host/SqlAgent.Host.csproj
 ```
 
-The host initializes the SQLite store and logs the number of configured database
-connections. Stop it with `Ctrl+C`.
+The host initializes the SQLite store and logs the web UI's URL, launch token included (see
+[Web UI](#web-ui) below). Stop it with `Ctrl+C`.
 
 Override the store path:
 
