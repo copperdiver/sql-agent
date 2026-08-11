@@ -44,7 +44,22 @@
 
     public async ValueTask DisposeAsync()
     {
-        _self?.Dispose();
-        await ValueTask.CompletedTask;
+        if (_self is not null)
+        {
+            try
+            {
+                // Detach the CodeMirror instance and its 'change' listener before releasing the .NET
+                // reference those closures hold — otherwise a stray event after disposal (the tab
+                // switching away mid-keystroke, for instance) could try to invoke a method on an object
+                // .NET has already let go of. See sql-editor.js's destroy for what this tears down.
+                await JS.InvokeVoidAsync("sqlAgentEditor.destroy", _host);
+            }
+            catch (JSDisconnectedException)
+            {
+                // The circuit is already gone (e.g. the browser tab closed) — nothing left to detach.
+            }
+
+            _self.Dispose();
+        }
     }
 }

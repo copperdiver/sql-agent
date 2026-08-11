@@ -47,9 +47,11 @@ public class WorkspaceTests : IDisposable
         // it fires whenever the parent pushes a Value the editor didn't just report itself (see
         // OnAfterRenderAsync's _lastPushed check) — TypeSqlAsync below keeps _lastPushed in sync so it
         // isn't expected to fire in these tests, but planning it keeps a future test free to exercise
-        // "open in editor"-style updates.
+        // "open in editor"-style updates. destroy is planned too: SqlEditor.DisposeAsync calls it, and
+        // _ctx.Dispose() (in this class's own Dispose, below) tears every rendered component down.
         _ctx.JSInterop.SetupVoid("sqlAgentEditor.create", _ => true);
         _ctx.JSInterop.SetupVoid("sqlAgentEditor.setValue", _ => true);
+        _ctx.JSInterop.SetupVoid("sqlAgentEditor.destroy", _ => true);
     }
 
     // --- gaps the brief's ResultGridTests leaves uncovered -----------------------------------------
@@ -62,6 +64,23 @@ public class WorkspaceTests : IDisposable
 
         Assert.Contains("Select a connection to start querying.", page.Markup);
         Assert.Empty(page.FindComponents<SqlEditor>());
+    }
+
+    [Fact]
+    public async Task Rendering_the_SQL_tab_with_a_connection_selected_creates_the_CodeMirror_editor()
+    {
+        // The create/setValue setups in the constructor only make bUnit's strict-mode JSInterop *allow*
+        // these calls; they don't prove the calls actually happen. Without this VerifyInvoke, a
+        // regression that dropped the JS.InvokeVoidAsync("sqlAgentEditor.create", ...) call entirely
+        // (or passed the wrong initial value) would leave every other test in this file green.
+        await SelectConnectionAsync(isReadOnly: true);
+
+        _ctx.RenderComponent<Workspace>();
+
+        var invocation = _ctx.JSInterop.VerifyInvoke("sqlAgentEditor.create");
+        // Arguments are (ElementReference host, DotNetObjectReference<SqlEditor> self, string initialValue)
+        // — see SqlEditor.OnAfterRenderAsync. _sql starts as "", so that's what should reach the editor.
+        Assert.Equal("", invocation.Arguments[2]);
     }
 
     [Fact]
@@ -210,6 +229,62 @@ public class WorkspaceTests : IDisposable
         Assert.False(FindButton(page, "Run").HasAttribute("disabled"));
     }
 
+    // --- Ctrl+Enter must carry the same guards the Run button carries -------------------------
+    //
+    // Before this task the Run button's disabled="@(_running || string.IsNullOrWhiteSpace(_sql))"
+    // attribute was the *only* way into RunAsync, so RunAsync itself never needed to re-check either
+    // condition — the button made both states unreachable. SqlEditor's Ctrl+Enter (OnRun) is a second
+    // entry point that calls RunAsync directly, bypassing the button's disabled attribute entirely, so
+    // RunAsync must guard itself now. These two tests were red against the unguarded RunAsync: the
+    // whitespace test failed because Assert.DoesNotContain("policy_denied_empty", ...) found the code
+    // (SqlPolicyValidator.Validate denies blank SQL, but only *after* RunAsync's body ran and set
+    // _result, which the guard now prevents from happening at all), and the double-dispatch test failed
+    // because _providerStub.CallCount came back 2, not 1.
+
+    [Fact]
+    public async Task Ctrl_Enter_with_whitespace_SQL_runs_nothing()
+    {
+        await SelectConnectionAsync(isReadOnly: true);
+        var page = _ctx.RenderComponent<Workspace>();
+        await TypeSqlAsync(page, "   ");
+
+        await PressCtrlEnterAsync(page);
+
+        Assert.False(_providerStub.WasCalled);
+        // Not just "no rows shown" — no execution attempt at all, so no deny message either. If RunAsync
+        // let this through, ExecuteSqlAsync would deny it as policy_denied_empty and that code would show
+        // up in the markup even though the provider itself was still never reached.
+        Assert.DoesNotContain("policy_denied_empty", page.Markup);
+    }
+
+    [Fact]
+    public async Task A_second_Ctrl_Enter_while_a_query_is_in_flight_does_not_start_a_second_execution()
+    {
+        await SelectConnectionAsync(isReadOnly: true);
+        _providerStub.CallsToBlock = 1;
+
+        var page = _ctx.RenderComponent<Workspace>();
+        await TypeSqlAsync(page, "SELECT id FROM orders");
+
+        var firstRun = PressCtrlEnterAsync(page);
+        await WaitForConditionAsync(() => page.FindAll("button").Any(b => b.TextContent == "Cancel"));
+
+        // Reachable via plain OS key repeat while a query is in flight. Must be a no-op: only one
+        // execution should ever reach the provider, and the first call's _cts must not be reassigned or
+        // disposed by a second, unguarded RunAsync invocation.
+        await PressCtrlEnterAsync(page);
+
+        Assert.Equal(1, _providerStub.CallCount);
+
+        // Prove the first run's own cancellation still works cleanly — if the second Ctrl+Enter had
+        // reassigned _cts, Cancel here would target the wrong (or an already-disposed) token source.
+        await ClickAsync(FindButton(page, "Cancel"));
+        await firstRun;
+
+        Assert.Contains("execution_canceled", page.Markup);
+        Assert.False(FindButton(page, "Run").HasAttribute("disabled"));
+    }
+
     // Stand-in for bUnit's own WaitForStateAsync (see the comment above the cancel-path tests for why
     // that one isn't usable here). Polls a predicate without blocking the thread, so the render Blazor
     // performs when the awaited handler under test hits its own await point can actually happen.
@@ -236,6 +311,12 @@ public class WorkspaceTests : IDisposable
     // happens on the correct synchronization context, the same way ClickAsync does for button clicks.
     private static Task TypeSqlAsync(IRenderedComponent<Workspace> page, string sql) =>
         page.InvokeAsync(() => page.FindComponent<SqlEditor>().Instance.OnEditorChanged(sql));
+
+    // Mirrors TypeSqlAsync: SqlEditor.RunFromEditor is the exact [JSInvokable] sql-editor.js's
+    // 'Ctrl-Enter'/'Cmd-Enter' extraKeys call, so invoking it directly drives the identical path a real
+    // Ctrl+Enter keystroke would, without needing a JS engine to press the key in a live editor.
+    private static Task PressCtrlEnterAsync(IRenderedComponent<Workspace> page) =>
+        page.InvokeAsync(() => page.FindComponent<SqlEditor>().Instance.RunFromEditor());
 
     private static Task ClickAsync(AngleSharp.Dom.IElement button) =>
         button.ClickAsync(new MouseEventArgs());
@@ -269,6 +350,9 @@ sealed class WorkspaceProviderStub : IDatabaseProvider
     public bool WasCalled { get; private set; }
     public int CallsToBlock { get; set; }
     public QueryResultSet NextResult { get; set; } = new([], [], false);
+
+    /// <summary>Total number of times <see cref="ExecuteQueryAsync"/> was actually invoked.</summary>
+    public int CallCount => _calls;
 
     private int _calls;
 

@@ -39,6 +39,13 @@ else if (_tab == Tab.Sql)
     private async Task RunAsync()
     {
         if (State.ConnectionId is not { } id) return;
+        // The Run button's disabled="@(_running || string.IsNullOrWhiteSpace(_sql))" attribute used to be
+        // the only way into this method, so these two conditions were unreachable here. SqlEditor's
+        // Ctrl+Enter (OnRun) is a second entry point that calls RunAsync directly, bypassing that
+        // attribute entirely — trivially reachable via OS key repeat while a query is already running, or
+        // by pressing it over blank/whitespace SQL. Guarding here (not just on the button) makes both
+        // entry points obey the same rule instead of relying on the button to gatekeep for both.
+        if (_running || string.IsNullOrWhiteSpace(_sql)) return;
         _running = true;
         _result = null;
         _cts = new CancellationTokenSource();
