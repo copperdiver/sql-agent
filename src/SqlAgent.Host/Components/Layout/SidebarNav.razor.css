@@ -1,5 +1,10 @@
 .sidebar-nav { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--space-4); }
-.nav-row {
+/* NavLink is a component, not an HTML element: Blazor's scoped CSS only stamps the scope attribute
+   onto elements this file's own markup renders, so a bare .nav-row selector never matches the <a>
+   NavLink emits. .sidebar-nav is a plain <nav>, so it carries the scope attribute, and ::deep reaches
+   through it into NavLink's rendered anchor — same technique as .brand ::deep .brand-mark in
+   SidebarHeader.razor.css. */
+.sidebar-nav ::deep .nav-row {
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -8,6 +13,6 @@
   color: var(--text-100);
   font-weight: 500;
 }
-.nav-row:hover { background: var(--background-soft-100); color: var(--title-50); text-decoration: none; }
-.nav-row.active { background: var(--primary-50); color: var(--primary-500); }
+.sidebar-nav ::deep .nav-row:hover { background: var(--background-soft-100); color: var(--title-50); text-decoration: none; }
+.sidebar-nav ::deep .nav-row.active { background: var(--primary-50); color: var(--primary-500); }
 .nav-label { white-space: nowrap; overflow: hidden; }

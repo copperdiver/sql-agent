@@ -1,7 +1,9 @@
 @using Microsoft.Extensions.Logging
 @using Microsoft.JSInterop
+@implements IDisposable
 @inject IJSRuntime JS
 @inject ILogger<Sidebar> Logger
+@inject NavigationManager Nav
 
 @if (_drawerOpen)
 {
@@ -39,6 +41,15 @@
 
     private bool _collapsed;
     private bool _drawerOpen;
+
+    // On a phone: tap the hamburger, tap a nav row, and the route changes behind a still-open drawer
+    // and scrim unless something closes it. Same pattern as WorkArea's LocationChanged subscription —
+    // MainLayout (which hosts this component) is not recreated across route navigation, so nothing else
+    // would ever clear _drawerOpen after the first navigation.
+    protected override void OnInitialized() => Nav.LocationChanged += OnLocationChanged;
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e) =>
+        InvokeAsync(() => { _drawerOpen = false; StateHasChanged(); });
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -82,4 +93,6 @@
     private void OpenDrawer() => _drawerOpen = true;
 
     private void CloseDrawer() => _drawerOpen = false;
+
+    public void Dispose() => Nav.LocationChanged -= OnLocationChanged;
 }

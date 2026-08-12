@@ -10,11 +10,6 @@
   transition: width .25s, flex-basis .25s, transform .25s;
 }
 .sidebar.collapsed { width: var(--sidebar-collapsed-width); flex-basis: var(--sidebar-collapsed-width); }
-/* Labels disappear, icons stay: a collapsed rail of icons is navigable, a rail of clipped words is not. */
-.sidebar.collapsed ::deep .nav-label,
-.sidebar.collapsed ::deep .brand-name,
-.sidebar.collapsed .sidebar-body,
-.sidebar.collapsed .sidebar-foot { display: none; }
 
 .sidebar-body { flex: 1; min-height: 0; overflow-y: auto; }
 .sidebar-foot { margin-top: var(--space-4); }
@@ -42,4 +37,12 @@
 @media (min-width: 1024px) {
   .drawer-trigger { display: none; }
   .sidebar-scrim { display: none; }
+  /* Labels disappear, icons stay: a collapsed rail of icons is navigable, a rail of clipped words is
+     not. Scoped to wide viewports only: below 1024px the collapsed sidebar is the drawer's own width
+     (see the max-width block above), and hiding the body/foot there would strand a drawer user with no
+     SchemaRail and no way back to the collapse toggle, which is itself display:none on narrow screens. */
+  .sidebar.collapsed ::deep .nav-label,
+  .sidebar.collapsed ::deep .brand-name,
+  .sidebar.collapsed .sidebar-body,
+  .sidebar.collapsed .sidebar-foot { display: none; }
 }

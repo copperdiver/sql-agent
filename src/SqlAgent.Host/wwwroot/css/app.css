@@ -248,6 +248,28 @@ th { color: var(--text-100); font-weight: 500; font-size: var(--text-xs); text-t
   padding: var(--space-6);
 }
 
+/* The pre-paint half of the comment above: theme.js sets html.sidebar-collapsed before first paint
+   (Routes prerenders, so the initial server-rendered <aside> otherwise carries no "collapsed" class at
+   all), but nothing read that class until now, so every collapsed user watched the sidebar animate
+   300px -> 72px on first render once the circuit connected and Sidebar's own OnAfterRenderAsync
+   read-back added the class. These rules belong in app.css rather than Sidebar.razor.css because
+   Sidebar's own stylesheet is scoped ([b-xxxxx]) and can never match a plain "html.sidebar-collapsed"
+   ancestor selector. Specificity matters here: App.razor links SqlAgent.Host.styles.css (the scoped
+   bundle) AFTER app.css, so a same-specificity rule here would lose the source-order tie against
+   Sidebar.razor.css's scoped ".sidebar[b-xxxxx]" (0,2,0). "html.sidebar-collapsed .app aside.sidebar"
+   is (0,3,2), which wins outright regardless of source order. Guarded to wide viewports to match
+   Sidebar.razor.css's own min-width: 1024px guard on the same rules (see FINDING 2 in the Task 5
+   review): below 1024px the collapsed state must not hide the drawer's body/foot/labels, or a user who
+   collapsed on desktop and later opens the drawer on a narrow screen loses SchemaRail entirely with no
+   way back in, since the collapse toggle that would undo it is itself hidden below 1024px. */
+@media (min-width: 1024px) {
+  html.sidebar-collapsed .app aside.sidebar { width: var(--sidebar-collapsed-width); flex-basis: var(--sidebar-collapsed-width); }
+  html.sidebar-collapsed .nav-label,
+  html.sidebar-collapsed .brand-name,
+  html.sidebar-collapsed .sidebar-body,
+  html.sidebar-collapsed .sidebar-foot { display: none; }
+}
+
 /* ============================================================================
    Shared surfaces used by existing components
    ========================================================================== */
