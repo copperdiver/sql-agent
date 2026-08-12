@@ -131,16 +131,22 @@ These are real gaps found during this phase's reviews, not undiscovered bugs —
 nobody spends time rediscovering them:
 
 - **Escape does not close the user menu in Safari via mouse click.** Safari does not focus a
-  `<button>` on a plain mouse click (unlike every other browser), and the menu's Escape handler
-  relies on focus being inside it. Tabbing into the menu instead of clicking it works fine, and
-  every other browser is unaffected either way. There is no interop-free fix — reaching for one
-  would mean adding JS just to work around one browser's focus model for one dismissal path.
-- **The theme toggle briefly shows "System" after a fresh load.** The app prerenders on the
-  server, where there is no `localStorage` to read, so the toggle's Blazor-side state starts at
-  the default ("System") and is corrected to the stored value only after the circuit connects and
-  JS interop can read it back. This is a one-frame flash of the *control's label*, not the page
-  background — `theme.js` in `<head>` already applies the real color before first paint (see
-  above), so the page itself never flashes.
+  `<button>` on a plain mouse click — this is a macOS platform convention (System Settings has a
+  "Use keyboard navigation to move focus" toggle for it), not something unique to Safari as a
+  rendering engine — and the menu's Escape handler relies on focus being inside it. Tabbing into
+  the menu instead of clicking it works fine. There is no interop-free fix — reaching for one
+  would mean adding JS just to work around this platform's focus model for one dismissal path.
+- **The theme toggle shows "System" from first paint until the circuit connects, and can stay
+  that way if interop never succeeds.** The app prerenders on the server, where there is no
+  `localStorage` to read, so the toggle's Blazor-side state starts at the default ("System") and
+  stays there for the whole prerendered window — not one frame, but however long it takes the
+  circuit to connect, which on a slow or blocked connection is user-visible. If
+  `sqlAgentUi.getTheme` never succeeds at all (blocked WebSocket, private-mode storage throwing,
+  a disconnected circuit), `ThemeToggle.razor`'s `OnAfterRenderAsync` catches the failure, logs it
+  at Debug, and leaves the control on "System" permanently — it does not retry. Either way this is
+  only the *control's label* misreporting, not the page background: `theme.js` in `<head>` already
+  applies the real color before first paint (see above), so a page that is actually dark with the
+  toggle stuck on "System" is this known issue, not evidence the theme itself failed to apply.
 - **The user menu backdrop and the About dialog misbehave on a narrow viewport.** Below 1024px the
   sidebar becomes a drawer positioned with a CSS `transform`, and a `transform` on an ancestor
   makes any `position: fixed` descendant resolve against that ancestor instead of the viewport.
@@ -236,7 +242,7 @@ files under `wwwroot/js/`:
 | Narrow the window below 1024px | Sidebar becomes a drawer; the hamburger opens it; the scrim closes it |
 | Open the user menu, adjust the theme from its row | Theme changes and the menu stays open |
 | Open About from the user menu | Version, bind URL, port, and store path are correct |
-| Tab through the sidebar and the composer | Focus ring is visible on every control |
+| Tab through the sidebar and the Chat tab's question input | Focus ring is visible on every control |
 | Load the UI with `wwwroot/fonts/DMSans-Variable.woff2` removed | Text renders in the system sans-serif, not a serif |
 
 ## Approved scope that was consciously dropped

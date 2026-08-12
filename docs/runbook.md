@@ -153,15 +153,18 @@ Two operational notes:
 
 **No LLM provider ships configured in this build.** The host wires a placeholder
 `ILlmSqlGateway` that always reports `IsConfigured = false` and fails closed, so every
-`ask_database` call — from the Chat tab or from an MCP client — returns the stable
-`llm_not_configured` outcome by design, not as a bug to work around. `/settings` shows this as
-a "No model configured" badge under Language model, and the Chat tab shows the same fact as an
-explanatory panel instead of a raw error code.
+`ask_database` call returns the stable `llm_not_configured` outcome by design, not as a bug to
+work around. `/settings` shows this as a "No model configured" badge under Language model, and
+the Chat tab shows the same fact as an explanatory panel instead of a raw error code. The MCP
+surface has no natural-language tool at all yet — it exposes `list_databases`,
+`describe_schema`, and `query_database` only, so there is nothing there for
+`ILlmSqlGateway` to unblock; an MCP client will simply never see an `ask_database` tool to call.
 
-There is no configuration key here to set — `SqlAgent:LocalAuth:Token` and
-`SqlAgent:Web:Port` are the only host settings this phase defines, and neither one wires an
-LLM provider. Connecting a real vendor behind `ILlmSqlGateway` is planned for a later phase;
-when it lands, its own configuration keys and setup steps belong in this section.
+There is no configuration key here to set for the language model — `SqlAgent:LocalAuth:Token`,
+`SqlAgent:Web:Port`, and `SqlAgent:Storage:ConnectionString` are the host settings this phase
+defines, and none of them wires an LLM provider. Connecting a real vendor behind
+`ILlmSqlGateway` is planned for a later phase; when it lands, its own configuration keys and
+setup steps belong in this section.
 
 ## Provider fixtures
 
