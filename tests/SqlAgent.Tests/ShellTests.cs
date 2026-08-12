@@ -3,6 +3,7 @@ using Bunit.TestDoubles;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.JSInterop;
 using SqlAgent.Core;
@@ -30,8 +31,12 @@ public class ShellTests : IDisposable
         _ctx.Services.AddScoped<ScopedRunner>();
         _ctx.Services.AddScoped<AppState>();
         _ctx.Services.AddLogging();
+        // Sidebar now renders UserCard (Task 6), which resolves HostInfo and mounts a ThemeToggle.
+        _ctx.Services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        _ctx.Services.AddSingleton<HostInfo>();
         _ctx.JSInterop.Mode = JSRuntimeMode.Loose;
         _ctx.JSInterop.Setup<string>("sqlAgentUi.getSidebar").SetResult("expanded");
+        _ctx.JSInterop.Setup<string>("sqlAgentUi.getTheme").SetResult("system");
 
         using var scope = _ctx.Services.CreateScope();
         scope.ServiceProvider.GetRequiredService<SqlAgentDbContext>().Database.EnsureCreated();
@@ -75,8 +80,11 @@ public class ShellTests : IDisposable
         ctx.Services.AddScoped<ScopedRunner>();
         ctx.Services.AddScoped<AppState>();
         ctx.Services.AddLogging();
+        ctx.Services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        ctx.Services.AddSingleton<HostInfo>();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
         ctx.JSInterop.Setup<string>("sqlAgentUi.getSidebar").SetResult("collapsed");
+        ctx.JSInterop.Setup<string>("sqlAgentUi.getTheme").SetResult("system");
 
         var sidebar = ctx.RenderComponent<Sidebar>();
 
@@ -198,6 +206,40 @@ public class ShellTests : IDisposable
         Assert.DoesNotContain(".sidebar-body", narrowBlock);
         Assert.DoesNotContain(".sidebar-foot", narrowBlock);
         Assert.DoesNotContain(".nav-label", narrowBlock);
+    }
+
+    // --- Task 6 review findings ---------------------------------------------------------------
+
+    [Fact]
+    public void The_sidebar_itself_does_not_clip_so_the_user_menu_can_escape_it()
+    {
+        // UserCard (Task 6) puts a Menu in .sidebar-foot, and Menu's .menu-panel is
+        // position:absolute. An ancestor with overflow other than visible clips an
+        // absolutely-positioned descendant, so a hidden .sidebar would cut off the user menu at the
+        // sidebar's edge -- and since it opens upward (MenuPlacement.Top), at the top too. bUnit runs
+        // no CSS engine, so this can only be pinned on the stylesheet source, the same way the other
+        // Sidebar.razor.css facts in this file are.
+        var css = File.ReadAllText(RepoPaths.Find("src/SqlAgent.Host/Components/Layout/Sidebar.razor.css"));
+
+        var baseRule = ExtractBlock(css, ".sidebar {");
+        Assert.DoesNotContain("overflow", baseRule);
+    }
+
+    [Fact]
+    public void The_collapsed_rails_own_clip_moves_to_where_it_is_still_needed()
+    {
+        // Removing .sidebar's blanket overflow:hidden (see the fact above) must not silently reopen the
+        // bleed it was guarding against: at the 72px collapsed rail width, SidebarHeader's brand icon
+        // and collapse-toggle button no longer fit side by side, and flexbox's default min-width:auto
+        // refuses to shrink them below their own content size, so without a clip they would spill out
+        // of the aside into the main content area. The replacement clip is scoped to
+        // ".sidebar.collapsed" inside the wide-viewport media query specifically because .sidebar-foot
+        // (the only descendant with a position:absolute popup) is display:none in that exact state, so
+        // nothing that needs to escape the box is ever visible while this clip is active.
+        var css = File.ReadAllText(RepoPaths.Find("src/SqlAgent.Host/Components/Layout/Sidebar.razor.css"));
+
+        var wideBlock = ExtractBlock(css, "@media (min-width: 1024px)");
+        Assert.Contains(".sidebar.collapsed { overflow: hidden; }", wideBlock);
     }
 
     [Fact]

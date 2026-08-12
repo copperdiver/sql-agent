@@ -1,0 +1,53 @@
+@inject HostInfo Info
+
+@* Below 1024px .sidebar carries a `transform` (it becomes the mobile drawer), and a CSS transform
+   makes `position: fixed` descendants resolve against the transformed element instead of the
+   viewport. Menu's .menu-backdrop is `position: fixed`, so on a phone it only covers this drawer, not
+   the whole screen — tapping outside the drawer (but still on the page) will not dismiss this menu.
+   Fixing that properly needs a portal (rendering the backdrop/panel outside the transformed ancestor),
+   which is out of scope for this phase. *@
+<Menu Placement="MenuPlacement.Top">
+    <Trigger>
+        <div class="user-card-trigger">
+            <span class="avatar" aria-hidden="true">@Info.Initials</span>
+            <span class="user-text">
+                <span class="user-name truncate">@Info.AccountName</span>
+                <span class="user-host truncate">@Info.MachineName</span>
+            </span>
+            <Icon Name="chevron-down" Size="16" />
+        </div>
+    </Trigger>
+    <ChildContent>
+        @* No Sign out: the only session concept is the cookie the launch token is exchanged for, and
+           there is no user record to sign out of. An item that looked like one would misrepresent the
+           security model. *@
+        <MenuItem Icon="settings" OnClick="GoToSettings">Settings</MenuItem>
+        <MenuItem Icon="sun">
+            <ChildContent>Theme</ChildContent>
+            <Trailing><ThemeToggle /></Trailing>
+        </MenuItem>
+        <MenuItem Icon="info" OnClick="ShowAbout">About</MenuItem>
+    </ChildContent>
+</Menu>
+
+@if (_aboutOpen)
+{
+    <Modal Title="About SQL Agent" OnClose="() => _aboutOpen = false">
+        <dl class="about">
+            <dt>Version</dt><dd>@Info.Version</dd>
+            <dt>Listening on</dt><dd>@Info.BindUrl (port @Info.Port)</dd>
+            <dt>Store</dt><dd class="mono">@Info.StoreDirectory</dd>
+            <dt>Account</dt><dd>@Info.AccountName on @Info.MachineName</dd>
+        </dl>
+    </Modal>
+}
+
+@code {
+    [Inject] private NavigationManager Nav { get; set; } = default!;
+
+    private bool _aboutOpen;
+
+    private void GoToSettings() => Nav.NavigateTo("/settings");
+
+    private void ShowAbout() => _aboutOpen = true;
+}

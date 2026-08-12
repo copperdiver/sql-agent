@@ -29,16 +29,11 @@
     </div>
 
     <div class="sidebar-foot">
-        @* UserCard arrives in Task 6. *@
-        @UserSlot
+        <UserCard />
     </div>
 </aside>
 
 @code {
-    /// <summary>Filled by Task 6 with <c>UserCard</c>. A slot rather than a hard reference so this
-    /// component is testable before that component exists.</summary>
-    [Parameter] public RenderFragment? UserSlot { get; set; }
-
     private bool _collapsed;
     private bool _drawerOpen;
 

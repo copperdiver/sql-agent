@@ -46,6 +46,7 @@ else
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();
 
 builder.Services.AddSingleton<LaunchToken>();
+builder.Services.AddSingleton<HostInfo>();
 builder.WebHost.UseUrls(LoopbackUrl.Resolve(builder.Configuration));
 
 var app = builder.Build();

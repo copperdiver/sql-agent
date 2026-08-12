@@ -1,3 +1,11 @@
+/* This rule deliberately carries no clipping property of its own (Task 6 review finding). UserCard
+   puts a Menu in .sidebar-foot, and Menu's .menu-panel is position:absolute — an ancestor whose
+   horizontal or vertical extent is anything but the default clips an absolutely-positioned descendant,
+   so a restricted .sidebar would cut off the user menu at the sidebar's edge, and since it opens
+   upward (MenuPlacement.Top), at the top too. The clip that used to live here is scoped to where each
+   state actually needs it instead: .sidebar-body already clips its own content via overflow-y:auto
+   below, and the collapsed rail's own clip is added under the wide-viewport media query, where
+   .sidebar-foot (and therefore the menu) is hidden entirely anyway. */
 .sidebar {
   display: flex;
   flex-direction: column;
@@ -6,11 +14,13 @@
   padding: var(--space-5);
   background: var(--background-50);
   border-right: 1px solid var(--base-100);
-  overflow: hidden;
   transition: width .25s, flex-basis .25s, transform .25s;
 }
 .sidebar.collapsed { width: var(--sidebar-collapsed-width); flex-basis: var(--sidebar-collapsed-width); }
 
+/* overflow-y:auto alone already clips both axes here per the CSS overflow spec (a non-visible value on
+   one axis forces the other off "visible" too), so SchemaRail's content cannot bleed past the sidebar
+   even though .sidebar itself no longer clips. */
 .sidebar-body { flex: 1; min-height: 0; overflow-y: auto; }
 .sidebar-foot { margin-top: var(--space-4); }
 
@@ -45,4 +55,13 @@
   .sidebar.collapsed ::deep .brand-name,
   .sidebar.collapsed .sidebar-body,
   .sidebar.collapsed .sidebar-foot { display: none; }
+
+  /* The rail's own clip, restored only here (Task 6 review finding). At 72px wide, minus the sidebar's
+     own padding, SidebarHeader's brand icon and collapse-toggle button (each sized to their own
+     content, with the flexbox default min-width:auto refusing to shrink below it) no longer fit
+     side by side and would otherwise bleed out of the aside into the main content area. Safe to clip
+     unconditionally here because .sidebar-foot -- the only descendant with a position:absolute popup
+     (UserCard's Menu) -- is display:none in this exact state (see the rule above), so nothing that
+     needs to escape the box is ever visible while this clip is active. */
+  .sidebar.collapsed { overflow: hidden; }
 }
