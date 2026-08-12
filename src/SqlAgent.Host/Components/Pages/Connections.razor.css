@@ -1,0 +1,9 @@
+/* Connections.razor renders bare elements with no wrapper classes at all — no .connections-list,
+   form, fieldset, or legend exists in its markup. app.css already styles table, label, input,
+   select, and button globally; this sheet only adds the spacing and button grouping this specific
+   page's layout is missing on top of that. */
+table { margin-bottom: var(--space-5); }
+h2 { margin-top: var(--space-6); margin-bottom: var(--space-3); }
+label { display: block; margin-bottom: var(--space-3); }
+label input, label select { display: block; margin-top: 6px; width: 100%; max-width: 360px; }
+button + button { margin-left: var(--space-2); }

@@ -1,0 +1,3 @@
+.outcome { color: var(--text-50); }
+.outcome p { margin: 0; }
+.outcome-code { font-family: var(--font-mono); }

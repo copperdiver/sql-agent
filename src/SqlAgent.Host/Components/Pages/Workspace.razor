@@ -4,8 +4,8 @@
 @inject AppState State
 
 <div class="tabs">
-    <button class="@(_tab == Tab.Sql ? "active" : "")" @onclick="() => _tab = Tab.Sql">SQL</button>
-    <button class="@(_tab == Tab.Chat ? "active" : "")" @onclick="() => _tab = Tab.Chat">Chat</button>
+    <button type="button" class="@(_tab == Tab.Sql ? "active" : "")" @onclick="() => _tab = Tab.Sql">SQL</button>
+    <button type="button" class="@(_tab == Tab.Chat ? "active" : "")" @onclick="() => _tab = Tab.Chat">Chat</button>
 </div>
 
 @if (State.ConnectionId is null)

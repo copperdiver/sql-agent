@@ -1,0 +1,20 @@
+/* CodeMirror builds its own DOM inside this host element, so its nodes are not scoped by CSS
+   isolation and need ::deep to reach. */
+.editor {
+  border: 1px solid var(--base-200);
+  border-radius: var(--radius-control);
+  overflow: hidden;
+}
+.editor ::deep .CodeMirror {
+  height: 220px;
+  background: var(--input-background);
+  color: var(--title-50);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+.editor ::deep .CodeMirror-gutters {
+  background: var(--background-soft-100);
+  border-right: 1px solid var(--base-100);
+}
+.editor ::deep .CodeMirror-cursor { border-left-color: var(--title-50); }
+.editor ::deep .CodeMirror-selected { background: var(--primary-50); }

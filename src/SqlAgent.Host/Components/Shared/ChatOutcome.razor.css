@@ -1,0 +1,17 @@
+.generated-sql {
+  margin: var(--space-2) 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--base-100);
+  border-radius: var(--radius-control);
+  background: var(--background-soft-50);
+  color: var(--title-50);
+  overflow-x: auto;
+  white-space: pre;
+}
+.clarification {
+  padding: var(--space-3) var(--space-4);
+  border-left: 3px solid var(--primary-500);
+  background: var(--primary-50);
+  color: var(--title-50);
+  border-radius: var(--radius-control);
+}
