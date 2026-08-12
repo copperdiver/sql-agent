@@ -1,0 +1,47 @@
+@page "/settings"
+@inject HostInfo Info
+@inject ILlmSqlGateway Llm
+
+<h1>Settings</h1>
+
+<section class="settings-panel">
+    <div class="settings-head">
+        <h2>Appearance</h2>
+        <p class="muted">Stored in this browser only.</p>
+    </div>
+    <ThemeToggle ShowLabels="true" />
+</section>
+
+<section class="settings-panel">
+    <div class="settings-head">
+        <h2>Language model</h2>
+        @if (Llm.IsConfigured)
+        {
+            <Badge Tone="BadgeTone.Success">Configured</Badge>
+        }
+        else
+        {
+            <Badge Tone="BadgeTone.Warning">No model configured</Badge>
+        }
+    </div>
+    @if (!Llm.IsConfigured)
+    {
+        <p class="muted">
+            Natural-language questions cannot be answered until a provider is wired on this server.
+            Configuration is host-side — see <code>docs/runbook.md</code>.
+        </p>
+    }
+</section>
+
+<section class="settings-panel">
+    <div class="settings-head">
+        <h2>Environment</h2>
+        <p class="muted">Set in <code>appsettings.json</code>; shown here for reference.</p>
+    </div>
+    <dl class="settings-facts">
+        <dt>Version</dt><dd>@Info.Version</dd>
+        <dt>Listening on</dt><dd>@Info.BindUrl (port @Info.Port)</dd>
+        <dt>Store</dt><dd class="mono">@Info.StoreDirectory</dd>
+        <dt>Account</dt><dd>@Info.AccountName on @Info.MachineName</dd>
+    </dl>
+</section>

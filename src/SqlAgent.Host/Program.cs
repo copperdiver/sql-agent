@@ -122,6 +122,10 @@ await app.RunAsync();
 /// is contract-complete and fails closed rather than half-wired.</summary>
 internal sealed class UnavailableLlmSqlGateway : ILlmSqlGateway
 {
+    /// <summary>No provider is wired in this build. Surfaces as "no model configured" in the UI; the
+    /// hard failure below is what actually enforces it.</summary>
+    public bool IsConfigured => false;
+
     public Task<LlmSqlResponse> GenerateSqlAsync(LlmSqlRequest request, CancellationToken ct = default) =>
         throw new NotSupportedException("No LLM provider is configured on this server.");
 }

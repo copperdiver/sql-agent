@@ -153,15 +153,16 @@ public class ShellTests : IDisposable
     // --- Task 5 review findings ---------------------------------------------------------------
 
     [Fact]
-    public void No_settings_row_is_rendered()
+    public void The_settings_row_is_rendered_and_points_at_the_settings_route()
     {
-        // No /settings route exists yet -- the only @page directives in src/ are "/" and "/connections"
-        // -- so a Settings nav row would 404 into Routes.razor's "Not found." inside the shell. The
-        // brief's own scope note forbids exactly this: a nav row that does nothing is worse than the
-        // link it replaced. Task 7 adds the row back once the page is real.
+        // Retires No_settings_row_is_rendered (Task 5): that test pinned the absence of a Settings row
+        // while /settings 404'd into Routes.razor's "Not found." Task 7 makes the route real, so the row
+        // belongs back -- this asserts the row exists AND that it targets /settings specifically, not
+        // just that the word "Settings" appears somewhere in the sidebar's markup.
         var sidebar = _ctx.RenderComponent<Sidebar>();
 
-        Assert.DoesNotContain("Settings", sidebar.Markup);
+        var settingsLink = sidebar.Find("a[href='/settings']");
+        Assert.Contains("Settings", settingsLink.TextContent);
     }
 
     [Fact]
@@ -301,11 +302,15 @@ public class ShellTests : IDisposable
         var sidebar = _ctx.RenderComponent<Sidebar>();
         var nav = _ctx.Services.GetRequiredService<FakeNavigationManager>();
 
-        // 3, not 1: SidebarNav renders two NavLink components, and NavLink subscribes to
-        // LocationChanged internally (to compute its own "active" class) independently of Sidebar's own
-        // subscription. The count only needs to be stable and non-zero here; what this test actually
-        // pins is that it drops to exactly 0 after disposal below.
-        Assert.Equal(3, LocationChangedSubscriberCount(nav));
+        // Not pinned to a literal count: SidebarNav renders one NavLink per route (three as of Task 7,
+        // was two before), and each NavLink subscribes to LocationChanged internally (to compute its own
+        // "active" class) independently of Sidebar's own subscription. Hardcoding that total is exactly
+        // the trap this test fell into once already -- it broke the moment Task 7 added the Settings
+        // row back, for a reason that had nothing to do with the leak this test exists to catch. What
+        // this test actually cares about is the BEHAVIOR: at least one subscriber exists after render
+        // (Sidebar's own, at minimum), and every one of them is gone after disposal.
+        Assert.True(LocationChangedSubscriberCount(nav) > 0,
+            "Expected Sidebar to hold a LocationChanged subscription after render.");
 
         // bUnit disposes the whole rendered component tree here, the same as the real Blazor renderer
         // does when a component leaves the render tree.
@@ -314,7 +319,7 @@ public class ShellTests : IDisposable
         // If Sidebar.Dispose() did not unsubscribe, this would still be at least 1 and the component
         // would keep itself alive for the rest of the circuit -- the same class of leak
         // WorkAreaBoundaryTests pins for WorkArea's identical subscription. NavLink cleans up its own
-        // two subscriptions regardless, so a nonzero result here can only mean Sidebar's own leaked.
+        // subscriptions regardless, so a nonzero result here can only mean Sidebar's own leaked.
         Assert.Equal(0, LocationChangedSubscriberCount(nav));
     }
 

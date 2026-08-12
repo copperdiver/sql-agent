@@ -35,4 +35,15 @@ public record LlmSqlResponse(string? Sql, string? ClarificationQuestion)
 public interface ILlmSqlGateway
 {
     Task<LlmSqlResponse> GenerateSqlAsync(LlmSqlRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// Whether a real provider is wired behind this gateway. A default member returning true means a
+    /// future provider does not have to opt in to be usable; only the placeholder overrides it.
+    ///
+    /// This is a UI signal only — it exists so the Settings page and the composer's model selector can
+    /// say "no model configured" instead of inviting a question that will certainly fail. It does NOT
+    /// change the failure path: NlQueryService still keys llm_not_configured off the placeholder's
+    /// NotSupportedException, so a gateway that lies here still fails closed.
+    /// </summary>
+    bool IsConfigured => true;
 }

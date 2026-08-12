@@ -9,9 +9,11 @@
         <Icon Name="database" Size="18" />
         <span class="nav-label">Connections</span>
     </NavLink>
+    <NavLink class="nav-row" href="/settings">
+        <Icon Name="settings" Size="18" />
+        <span class="nav-label">Settings</span>
+    </NavLink>
 </nav>
-@* No Settings row: no /settings route exists yet (Task 7 adds the page). A nav row that 404s into
-   Routes.razor's "Not found." is worse than the link it replaced. *@
 
 @code {
     [Parameter] public bool Collapsed { get; set; }

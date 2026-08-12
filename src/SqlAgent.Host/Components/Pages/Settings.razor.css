@@ -1,0 +1,19 @@
+.settings-panel {
+  max-width: 640px;
+  margin-top: var(--space-5);
+  padding: var(--space-5);
+  border: 1px solid var(--base-100);
+  border-radius: var(--radius-card);
+  background: var(--background-soft-50);
+}
+.settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.settings-head p { font-size: var(--text-xs); }
+.settings-facts { display: grid; grid-template-columns: auto 1fr; gap: var(--space-2) var(--space-4); }
+.settings-facts dt { color: var(--text-100); font-size: var(--text-xs); }
+.settings-facts dd { color: var(--title-50); word-break: break-all; }
