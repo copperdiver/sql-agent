@@ -143,6 +143,49 @@ public class StoreMigrationTests : IDisposable
         Assert.NotEmpty(await db.Database.GetAppliedMigrationsAsync());
     }
 
+    [Fact]
+    public async Task A_rescued_legacy_store_also_accepts_the_next_migration()
+    {
+        // The baseline shim declares InitialCreate applied without ever running it — it trusts that the
+        // legacy tables it found are shaped exactly like InitialCreate would have made them. Task 2's
+        // ChatPersistence migration is the first real test of that trust: if the shim's stamp and
+        // ChatPersistence's assumptions about the prior schema ever disagree, this is where it would
+        // show up, not in a test that only exercises the shim in isolation.
+        Guid connectionId;
+        await using (var legacy = NewLegacyContext())
+        {
+            await legacy.Database.EnsureCreatedAsync();
+            var row = new DatabaseConnection
+            {
+                Id = Guid.NewGuid(),
+                Name = "prod",
+                ProviderType = DatabaseProviderType.Postgres,
+                ConnectionStringSecretRef = "db:abc",
+                IsReadOnly = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            };
+            legacy.Set<DatabaseConnection>().Add(row);
+            await legacy.SaveChangesAsync();
+            connectionId = row.Id;
+        }
+        SqliteConnection.ClearAllPools();
+
+        await using var db = NewContext();
+        await StoreInitializer.InitializeAsync(db, NullLogger.Instance);
+
+        var tables = await db.Database
+            .SqlQueryRaw<string>("SELECT name AS Value FROM sqlite_master WHERE type = 'table'")
+            .ToListAsync();
+        Assert.Contains("Chats", tables);
+        Assert.Contains("ChatMessages", tables);
+        Assert.Contains("ChatMessageDatabases", tables);
+
+        var kept = await db.DatabaseConnections.SingleAsync();
+        Assert.Equal(connectionId, kept.Id);
+        Assert.Equal("prod", kept.Name);
+    }
+
     private LegacyStoreDbContext NewLegacyContext() => new(
         new DbContextOptionsBuilder<LegacyStoreDbContext>().UseSqlite(ConnectionString).Options);
 

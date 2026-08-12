@@ -31,6 +31,7 @@ builder.Services.AddScoped<ConnectionTester>();
 builder.Services.AddScoped<SchemaService>();
 builder.Services.AddScoped<TablePolicyService>();
 builder.Services.AddScoped<NlQueryService>();
+builder.Services.AddScoped<ChatService>();
 builder.Services.AddScoped<LocalTokenAuthenticator>();
 builder.Services.AddScoped<ScopedRunner>();
 builder.Services.AddScoped<AppState>();

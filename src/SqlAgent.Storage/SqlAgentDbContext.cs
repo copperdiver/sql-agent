@@ -11,6 +11,9 @@ public class SqlAgentDbContext(DbContextOptions<SqlAgentDbContext> options) : Db
     public DbSet<QueryAuditLog> QueryAuditLogs => Set<QueryAuditLog>();
     public DbSet<AppSetting> AppSettings => Set<AppSetting>();
     public DbSet<Secret> Secrets => Set<Secret>();
+    public DbSet<Chat> Chats => Set<Chat>();
+    public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
+    public DbSet<ChatMessageDatabase> ChatMessageDatabases => Set<ChatMessageDatabase>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -28,5 +31,39 @@ public class SqlAgentDbContext(DbContextOptions<SqlAgentDbContext> options) : Db
         b.Entity<QueryAuditLog>().HasKey(x => x.Id);
         b.Entity<AppSetting>().HasKey(x => x.Key);
         b.Entity<Secret>().HasKey(x => x.Reference);
+
+        b.Entity<Chat>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.LastMessageAt);
+        });
+        b.Entity<ChatMessage>(e =>
+        {
+            e.HasKey(x => x.Id);
+            // Unique, not merely indexed: it is the backstop for two browser tabs appending to the same
+            // chat at once. ChatService catches the violation and retries rather than writing two
+            // messages that both claim the same position.
+            e.HasIndex(x => new { x.ChatId, x.Sequence }).IsUnique();
+            e.HasOne(x => x.Chat).WithMany(c => c.Messages)
+                .HasForeignKey(x => x.ChatId).OnDelete(DeleteBehavior.Cascade);
+            // Stored as text, like QueryAuditLog.Decision. An int column would silently re-interpret
+            // every existing row the day someone inserts a member in the middle of either enum.
+            e.Property(x => x.Role).HasConversion<string>().HasMaxLength(16);
+            e.Property(x => x.OutcomeKind).HasConversion<string>().HasMaxLength(32);
+        });
+        b.Entity<ChatMessageDatabase>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.ChatMessageId);
+            // One row per database per message. Names are unique across connections, so this also stops
+            // the same database being attached twice from a double-click.
+            e.HasIndex(x => new { x.ChatMessageId, x.DatabaseName }).IsUnique();
+            e.HasOne(x => x.Message).WithMany(m => m.Databases)
+                .HasForeignKey(x => x.ChatMessageId).OnDelete(DeleteBehavior.Cascade);
+            // No foreign key to DatabaseConnection on purpose: the reference is a soft one that survives
+            // the connection being deleted (the id is nulled, the name stays). A real FK with
+            // SetNull would work too, but it would put a constraint on a table that has nothing to do
+            // with chat and make DatabaseConnectionService's delete path depend on chat schema.
+        });
     }
 }
