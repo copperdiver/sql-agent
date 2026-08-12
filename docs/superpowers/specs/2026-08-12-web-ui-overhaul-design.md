@@ -2,7 +2,9 @@
 
 - **Status:** approved, ready for implementation planning
 - **Date:** 2026-08-12
-- **Scope:** five phases, A–E (see [Phasing and priority](#phasing-and-priority))
+- **Scope:** phases A, B1, B2, C–E (see [Phasing and priority](#phasing-and-priority)).
+  Phase B was split in two during B1's design; B1 has its own spec,
+  [2026-08-12 phase B1](2026-08-12-web-ui-phase-b1-chat-persistence-design.md).
 - **Visual reference:** <https://aichat.demos.tailgrids.com/>, captured in
   `docs/superpowers/reference/tg-*.png`
 
@@ -31,7 +33,8 @@ and visually unfinished. Concretely, as of commit `5ef8676`:
   (fail closed)".
 - **No LLM provider is wired.** `UnavailableLlmSqlGateway` throws, so
   `ask_database` always resolves to `llm_not_configured`. This is deliberate and
-  unchanged by this work.
+  unchanged by this work: model calls will go to a SQL Agent web service hosting
+  several models, built after the Web UI. See [Non-goals](#non-goals).
 
 ## Goals
 
@@ -47,11 +50,30 @@ agent's access control a real configuration surface:
    real data table, and an ER diagram.
 5. File attachments behind a pluggable storage provider that returns URLs.
 
+### Where the chat fits
+
+SQL Agent is a local service that mediates database access for language models:
+it holds connection strings in a secret store, describes schemas, enforces
+per-object visibility and read/write policy, and executes validated SQL. MCP is
+one way to reach that mediation — the canonical one for IDE hosts (ADR-0001).
+
+The built-in chat is the **alternative** way to reach the same mediation, for
+people who are not working in an editor. It is not a second engine with second
+rules: it goes through the same `QueryExecutionService`, the same policy, and the
+same audit trail, and it addresses databases by the **name** given in connection
+settings, exactly as the MCP tools do. Neither surface is a place where a person
+pastes a connection string or a page of production rows.
+
+Databases reach a conversation as **context attached to a message** — zero, one,
+or several, added from the composer's attachment menu, the same menu that Phase E
+adds files to.
+
 ## Non-goals
 
 | Out of scope | Why |
 |---|---|
-| Wiring a real LLM provider | Unchanged from the previous spec. The selector, composer, and attachment seam are all built to accept one; none of them require it to exist. Chat continues to return `llm_not_configured`. |
+| Wiring a real LLM provider | Model calls will go to a SQL Agent web service hosting several models, developed after this Web UI work. The selector, composer, and attachment seam are built to accept it; none of them require it to exist. Chat continues to return `llm_not_configured` throughout A–E. |
+| Locking in the shape of `ILlmSqlGateway` | Today's seam takes one question against one schema and returns one SQL string. A conversation carrying several databases, standing as the alternative to MCP, more likely wants a tool-calling loop over `list_databases` / `describe_schema` / `query_database`. That is the web-service phase's design decision, not this one's; nothing here should be read as fixing the current shape. |
 | Procedures, functions, sequences in the object browser | Phase C ships tables and views. Routine catalogs diverge sharply between SQL Server and Postgres, and granting a routine to the agent means allowing `EXEC`, which stays denied. Deferred to its own phase. |
 | View definitions (`CREATE VIEW` bodies) | Column lists are what query generation needs. Definitions are unbounded text headed for an LLM prompt; including them needs a budget story that belongs with the routines work. |
 | A remote file-storage provider (S3, Azure Blob) | The seam and one local provider ship here. A remote provider is a separate project, like the database providers. |
@@ -70,11 +92,12 @@ Recorded because each closed off a plausible alternative:
 | Read-only OS account in the user card | Editable local profile | Nothing else in the app has a notion of a person. Showing `Environment.UserName` is true without inventing a user model. |
 | Model selector renders configured providers, empty state when none | Static decorative list | A dropdown listing models the app cannot call misrepresents what it can do. |
 | Tables and views now | All object types now | See non-goals. |
-| Projects group chats only | Projects pinning a default database or instructions | Matches the reference. A chat's database is a per-chat choice, surfaced in the chat header. |
+| Projects group chats only | Projects pinning a default database or instructions | Matches the reference. Databases are attached per message, not owned by a chat or a project. |
+| Databases attach to a message, from the composer's attachment menu | A single `Chat.DatabaseConnectionId` with a pill in the chat header | A conversation may involve no database, one, or several, and the transcript has to stay honest about which ones each question was asked against. The chips carry over between messages so nothing has to be re-attached. |
 | DDL permissions are enforced, with confirm-before-run | Configure-now-enforce-later; or enforce silently | A toggle that does nothing is a lie in the UI. Enforcing without confirmation lets a model mutate structure unattended. |
 | Mermaid, vendored locally | Hand-rolled SVG diagram | Layout, cardinality, and theming for free. The host is offline, so it is vendored, not CDN-loaded. |
 | Attachments go through `IFileStorageProvider`, which returns a URL | Storing bytes in SQLite and inlining text into the prompt | The provider seam matches ADR-0005's existing boundary and leaves room for a cloud-reachable store later. |
-| The SQL editor survives as a scratchpad panel on the chat page | Chat-only; or a separate `/sql` page | Nothing that works today is lost, and the tab split disappears. |
+| The SQL editor survives in both places: a scratchpad panel on the chat page (D) and a permanent `/sql` page (B1) | Chat-only | Nothing that works today is lost and the tab split disappears, while long queries and wide results still get a full screen. Both render the same components. |
 
 ## Architecture
 
@@ -93,25 +116,25 @@ src/SqlAgent.Host/
       MainLayout.razor            sidebar + main card; keeps WorkArea
       Sidebar.razor               composes the sections below
       SidebarHeader.razor         logo + collapse toggle
-      SidebarNav.razor            New Chat, Search
+      SidebarNav.razor            New Chat, SQL, Search
       DatabaseSection.razor       collapsible database list + Add database   (C)
-      ProjectSection.razor        collapsible project list + Add project     (B)
-      HistorySection.razor        day-grouped chat list                      (B)
+      ProjectSection.razor        collapsible project list + Add project     (B2)
+      HistorySection.razor        day-grouped chat list                      (B1)
       UserCard.razor              OS account + menu (Settings, Theme, About)
       SchemaRail.razor            restyled (A), DELETED in C
     Pages/
-      Chat.razor                  "/" (new chat) and "/chat/{id}"            (B)
+      Chat.razor                  "/" (new chat) and "/chat/{id}"            (B1)
       Database.razor              "/database/{id?}"                          (C)
       Settings.razor              "/settings"                                (A)
-      Workspace.razor             restyled (A), moved to "/sql" (B),
-                                  DELETED in D
+      Workspace.razor             restyled (A), tab strip dropped and moved
+                                  to "/sql" (B1), KEPT
       Connections.razor           restyled (A), DELETED in C
     Shared/
       Ui/                         Icon, Menu, Modal, Segmented, Toggle,
                                   Badge, Spinner, ConfirmDialog, EmptyState
       Chat/                       MessageList, UserMessage, AssistantMessage,
-                                  Composer, SqlBlock, DataTable, ErDiagram,
-                                  ScratchPad, AttachmentChip                 (B, D, E)
+                                  Composer, AttachmentMenu, AttachmentChips  (B1)
+                                  SqlBlock, DataTable, ErDiagram, ScratchPad (D)
       OutcomeMessage.razor        kept as-is
       WorkArea.razor              kept as-is
       SqlEditor.razor             kept as-is (used by ScratchPad)
@@ -119,6 +142,8 @@ src/SqlAgent.Host/
       ChatOutcome.razor           restyled (A), DELETED in D
   Web/
     AppState.cs                   extended (see State)
+    DialogService.cs              new, Phase B1 — dialogs render from
+                                  MainLayout, outside the sidebar's transform
     ResultExport.cs               kept as-is
     SqlHighlighter.cs             new, Phase D
     MermaidSource.cs              new, Phase D
@@ -136,8 +161,10 @@ src/SqlAgent.Host/
 ### State
 
 `AppState` (circuit-scoped, per browser tab) is extended from "which connection
-is selected" to also hold the active chat, the active database, and sidebar
-collapse state, with one event per concern. This preserves the existing pattern
+is selected" to also hold the active chat and the SQL handed from an answer to
+the editor, with one event per concern. There is no "active database": databases
+belong to messages, and the composer's chips are the page's own state until a
+message is sent. This preserves the existing pattern
 and the reason for it: Blazor siblings do not re-render each other, so the
 sidebar sections and the page subscribe to the same state object. The existing
 `Changed` / `ConnectionsChanged` events and their documented rationale stay.
@@ -154,8 +181,8 @@ components are retired only once their replacement exists:
 |---|---|---|---|
 | `Connections.razor` | A | C | Connection management must stay reachable until `Database.razor` replaces it. |
 | `SchemaRail.razor` | A | C | It is the only visibility surface until the config page's Objects panel exists. |
-| `Workspace.razor` | A | D | `Chat.razor` takes `/` in B, so Workspace moves to `/sql` and stays reachable until `ScratchPad` absorbs its editor in D. |
-| `ChatOutcome.razor` | A | D | Phase B's `AssistantMessage` delegates to it; D replaces that with `SqlBlock` + `DataTable`. |
+| `Workspace.razor` | A | never | `Chat.razor` takes `/` in B1, so Workspace drops its tab strip and moves to `/sql`, where it stays. D adds `ScratchPad` beside it, built from the same components, rather than replacing it. |
+| `ChatOutcome.razor` | A | D | Phase B1's `AssistantMessage` delegates to it; D replaces that with `SqlBlock` + `DataTable`. |
 | `ResultGrid.razor` | A | D | Used by Workspace and by B's assistant messages until `DataTable` exists. |
 
 ## Phase A — Design system and application shell
@@ -274,16 +301,23 @@ validation and restart story.
 
 ## Phase B — Chat persistence and navigation
 
-Priority **P0**. Depends on A.
+Priority **P0**. Depends on A. Split in two during design: **B1** ships
+persistence, message-level database context, and history; **B2** ships projects
+and search.
 
-### Migrations come first
+B1 has its own spec —
+[2026-08-12 phase B1](2026-08-12-web-ui-phase-b1-chat-persistence-design.md) —
+which supersedes this section wherever the two disagree. What follows is the
+shape of the whole of B, with each part marked.
+
+### Migrations come first (B1)
 
 `Program.cs` calls `Database.EnsureCreatedAsync()`, and there are no migrations.
 `EnsureCreated` never alters an existing database, so new tables would silently
 never appear on any store that already exists — and Phase C adds columns to
 `TablePolicy`.
 
-Phase B therefore begins by introducing EF Core migrations:
+Phase B1 therefore begins by introducing EF Core migrations:
 
 1. An initial migration matching today's model exactly.
 2. `MigrateAsync()` replaces `EnsureCreatedAsync()`.
@@ -291,37 +325,48 @@ Phase B therefore begins by introducing EF Core migrations:
    `__EFMigrationsHistory` was created by `EnsureCreated`; startup stamps the
    initial migration as applied before migrating, otherwise `MigrateAsync` tries
    to re-create existing tables and throws.
-4. Each later phase adds its own migration.
+4. Each later phase adds its own migration, B2's `Project` included.
 
 The shim is covered by an integration test that boots against a store created the
-old way.
+old way. A migration that throws stops the host rather than degrading.
 
 ### Entities
 
 ```
-Project        Id, Name, Description?, CreatedAt, UpdatedAt
-               unique index Name
+Chat                 Id, Title, CreatedAt, UpdatedAt, LastMessageAt       (B1)
+                     ProjectId?, index ProjectId                          (B2)
+                     index LastMessageAt
 
-Chat           Id, ProjectId?, Title, DatabaseConnectionId?, ModelId?,
-               CreatedAt, UpdatedAt, LastMessageAt
-               index ProjectId; index LastMessageAt
+ChatMessage          Id, ChatId, Sequence, Role, Text, CreatedAt,         (B1)
+                     GeneratedSql?, OutcomeKind, ErrorCode?,
+                     RowCount?, ElapsedMs?, Truncated
+                     index (ChatId, Sequence) unique
 
-ChatMessage    Id, ChatId, Sequence, Role, Text, CreatedAt,
-               GeneratedSql?, OutcomeKind, ErrorCode?,
-               RowCount?, ElapsedMs?, Truncated
-               index (ChatId, Sequence) unique
+ChatMessageDatabase  Id, ChatMessageId, DatabaseConnectionId?,            (B1)
+                     DatabaseName
+                     index ChatMessageId
+                     index (ChatMessageId, DatabaseName) unique
+
+Project              Id, Name, Description?, CreatedAt, UpdatedAt         (B2)
+                     unique index Name
 ```
 
-- `ProjectId` null means an ungrouped chat that appears only in History.
-- `DatabaseConnectionId` is per chat, chosen from a database pill in the chat
-  header. Null is allowed: a chat can exist before a database is picked.
 - `Role` is `User` | `Assistant`.
-- `OutcomeKind` is `None` | `QueryResult` | `Clarification` |
-  `ConfirmationRequired` | `SchemaDiagram` | `Error`.
+- `OutcomeKind` is `None` | `QueryResult` | `Clarification` | `Error` in B1;
+  `ConfirmationRequired` and `SchemaDiagram` are added by Phase D, with the
+  components that render them.
+- **Databases attach to a message, not to a chat.** `ChatMessageDatabase` records
+  the set the message was sent with. The composer's chips carry over to the next
+  message until removed, so the context does not have to be re-attached, but each
+  sent message keeps its own snapshot.
+- `DatabaseConnectionId` is nullable and `DatabaseName` is not. Deleting a
+  `DatabaseConnection` nulls the id across history and leaves the name, rather
+  than deleting history or leaving a dangling id nothing can render.
+- `ProjectId` null means an ungrouped chat that appears only in History.
 - Deleting a project prompts: keep the chats (set `ProjectId` null) or delete
   them too. No silent cascade.
-- Deleting a `DatabaseConnection` sets referencing chats' `DatabaseConnectionId`
-  to null rather than deleting history.
+- Deleting a chat cascades to its messages and their attachment rows.
+- `ModelId` is deliberately absent until the phase that selects models.
 
 ### Result rows are not persisted
 
@@ -336,18 +381,24 @@ becoming a shadow copy of production data.
 
 ### Services
 
-`ChatService` and `ProjectService` in `SqlAgent.Storage`, scoped, invoked through
-the existing `ScopedRunner`:
+In `SqlAgent.Storage`, scoped, invoked through the existing `ScopedRunner`:
 
-- `ListProjectsAsync()` → projects with chat counts.
-- `ListHistoryAsync()` → chats ordered by `LastMessageAt` descending.
-- `CreateChatAsync`, `RenameChatAsync`, `MoveChatAsync`, `DeleteChatAsync`.
-- `AppendMessageAsync` → assigns `Sequence`, updates `LastMessageAt`.
-- `SearchAsync(term)` → chats by title and message text, plus database names.
+- `ChatService` (B1) — `ListHistoryAsync()`, `GetChatAsync()`,
+  `CreateChatAsync`, `RenameChatAsync`, `DeleteChatAsync`, `AppendMessageAsync`
+  (assigns `Sequence`, writes attachments, updates `LastMessageAt`).
+- `ChatTurnService` (B1) — one turn end to end: persist the user message, branch
+  on the number of attached databases, call `NlQueryService` when there is
+  exactly one, persist the assistant message. Zero and several return the stable
+  codes `no_database_attached` and `multiple_databases_unsupported`; the second
+  disappears when the web-service phase brings a tool-calling loop.
+- `ProjectService` (B2) — `ListProjectsAsync()` with chat counts,
+  `MoveChatAsync`, create, rename, delete.
+- `SearchAsync(term)` (B2) — chats by title and message text, projects by name,
+  databases by name.
 
 ### Screens and interactions
 
-**New chat** (`/`): centered hero ("How can I help with your data?"), the
+**New chat** (`/`, B1): centered hero ("How can I help with your data?"), the
 composer, and SQL-flavoured suggestion chips — *Explain this schema*, *Show table
 relationships*, *Find the largest tables*, *Recent rows from…*. Chips **prefill
 the composer and focus it** rather than sending immediately, so the question can
@@ -357,40 +408,57 @@ on first send**, so opening New Chat and navigating away leaves no empty chat
 behind. Title is the first user message truncated to 60 characters (there is no
 LLM to summarize), editable afterwards.
 
-Phase B also moves `Workspace.razor` from `/` to `/sql` so the existing SQL
-editor stays reachable while `Chat.razor` takes the root route, and renders
-assistant messages through the restyled `ChatOutcome` until Phase D replaces it.
+**Attachment menu** (B1): the composer's attach button opens a menu whose
+Databases section lists saved connections by name — the same name MCP addresses
+them by. Choosing one adds a chip above the textarea. With no connections saved
+the menu shows an empty state linking to `/connections`. Phase E adds a Files
+section to this same menu.
 
-**History section**: grouped by `LastMessageAt` in local time into Today,
+B1 also drops `Workspace.razor`'s tab strip and moves it from `/` to `/sql`,
+where it stays permanently, and renders assistant messages through the restyled
+`ChatOutcome` until Phase D replaces it.
+
+**History section** (B1): grouped by `LastMessageAt` in local time into Today,
 Yesterday, Previous 7 days, Previous 30 days, Older. Active row highlighted. A
-`⋮` menu on hover offers Rename, Move to project, Delete — the reference's
-interaction plus Move, because projects exist.
+`⋮` menu on hover offers Rename and Delete in B1, plus Move to project in B2.
+Delete asks for confirmation through `Modal` and its `Footer` slot, rendered from
+`MainLayout` through `DialogService` so it is not trapped inside the mobile
+drawer's transform.
 
-**Projects section**: label with an add button, folder rows with chat counts,
+**Projects section** (B2): label with an add button, folder rows with chat counts,
 collapsible. Create and rename through a modal. Chats nest under an expanded
 project.
 
-**Search**: a modal over the app, also on `Ctrl`/`Cmd`+`K`. Searches chat titles,
-message text, project names, and database names; results grouped by kind; arrow
-keys plus Enter to open. SQLite `LIKE` with an escaped pattern (`%`, `_`, and the
-escape character itself), capped at 50 hits per kind — no FTS table, because the
-corpus is one person's history.
+**Search** (B2): a modal over the app, also on `Ctrl`/`Cmd`+`K`. Searches chat
+titles, message text, project names, and database names; results grouped by kind;
+arrow keys plus Enter to open. SQLite `LIKE` with an escaped pattern (`%`, `_`,
+and the escape character itself), capped at 50 hits per kind — no FTS table,
+because the corpus is one person's history.
 
 ### Phase B acceptance
 
-- A chat survives reload with its messages, in the right project, with the right
-  database.
+B1:
+
+- A chat survives reload with its messages, their order, and the database
+  snapshot each message was sent with.
 - New Chat abandoned without sending creates no row.
-- History buckets correctly across day boundaries; rename, move, and delete work
-  from the `⋮` menu.
-- Project deletion offers both outcomes and honors the choice.
-- Search finds a chat by title, by message body, and a database by name.
+- Sending with zero or several databases attached produces the documented codes,
+  visible again after a reload.
+- History buckets correctly across day boundaries; rename and delete work from
+  the `⋮` menu, delete behind a confirmation.
 - Migration test: a store created by `EnsureCreated` migrates without error and
   keeps its data.
+- `/` is the chat, `/chat/{id}` opens a stored one, `/sql` runs SQL.
+
+B2:
+
+- A chat lands in the right project, and moving it between projects works.
+- Project deletion offers both outcomes and honors the choice.
+- Search finds a chat by title, by message body, and a database by name.
 
 ## Phase C — Databases and access control
 
-Priority **P1**. Depends on A and B.
+Priority **P1**. Depends on A and B1.
 
 ### Sidebar section
 
@@ -518,7 +586,7 @@ dialog covers both.
 
 ## Phase D — Chat-embedded components
 
-Priority **P1**. Depends on A, B, C.
+Priority **P1**. Depends on A, B1, C.
 
 ### Message rendering
 
@@ -568,26 +636,28 @@ not belong in the startup path of a chat that never draws one. Themed by passing
 CSS token values as Mermaid `themeVariables`, re-initialized on theme change.
 Controls: zoom in / out / reset, fullscreen, download SVG.
 
-Entry points are the composer's Tools menu and the database pill menu. The result
-is stored as an assistant message with `OutcomeKind = SchemaDiagram`; the picture
+Entry points are the composer's Tools menu and an attached database's chip menu.
+The result is stored as an assistant message with `OutcomeKind = SchemaDiagram`;
+a diagram needs exactly one attached database, and the picture
 re-derives from the live schema on reload rather than persisting a stale snapshot.
 
 ### Composer
 
 Auto-growing textarea capped at 40vh; Enter sends, Shift+Enter inserts a newline;
-attach button (Phase E); a **Tools** menu carrying real actions — Schema diagram
-(renders locally, needs no LLM), Explain schema (prefills the composer, like the
-suggestion chips), Open scratchpad; the database pill; the model selector with its
-empty state; and a circular send button that becomes a stop button while a
-request is in flight, cancelling the existing `CancellationTokenSource` and
-surfacing `execution_canceled` exactly as today.
+the attach button and its chips (B1 for databases, E for files); a **Tools** menu
+carrying real actions — Schema diagram (renders locally, needs no LLM), Explain
+schema (prefills the composer, like the suggestion chips), Open scratchpad; the
+model selector with its empty state; and a circular send button that becomes a
+stop button while a request is in flight, cancelling the existing
+`CancellationTokenSource` and surfacing `execution_canceled` exactly as today.
 
 The assistant action row's **regenerate** re-sends the preceding user message and
 replaces the assistant message in place, rather than appending a second answer.
 
-The model selector lists configured providers. With none configured it shows "No
-model configured" and links to Settings, and chat continues to return the
-`llm_not_configured` panel — the same explanatory panel as today, not a raw code.
+The model selector lists the models the SQL Agent web service offers, once that
+service exists. Until then it shows "No model configured" and links to Settings,
+and chat continues to return the `llm_not_configured` panel — the same
+explanatory panel as today, not a raw code.
 
 ### ScratchPad
 
@@ -609,7 +679,12 @@ block's Edit action or the chat header. Runs with `confirmed: true`.
 
 ## Phase E — File attachments
 
-Priority **P2**. Depends on A, B. No dependents.
+Priority **P2**. Depends on A, B1. No dependents.
+
+The attachment menu, its chips, and the per-message attachment model already
+exist from B1, where databases are what gets attached. E adds a second kind of
+thing to the same menu and the same chip row; nothing about the interaction is
+new here, only the storage seam below it.
 
 ### The seam
 
@@ -667,6 +742,9 @@ MessageAttachment  Id, ChatMessageId, FileName, ContentType, SizeBytes,
                    ProviderKey, StorageKey, Url, CreatedAt
                    index ChatMessageId
 ```
+
+It sits beside B1's `ChatMessageDatabase` — same owner, same lifetime, same chip
+row in the composer — and differs only in having bytes behind it.
 
 Upload happens when the file is picked, so progress and errors surface before
 sending; the resulting `StoredFile` is held in circuit state and the rows are
@@ -748,8 +826,8 @@ collapse and the mobile drawer.
 ## Documentation
 
 - `docs/web-ui.md` rewritten for the new shell and screens, including the
-  rows-not-persisted behavior, the confirm-before-run model, and the expanded
-  manual checklist.
+  rows-not-persisted behavior, how databases attach to a message and travel with
+  it, the confirm-before-run model, and the expanded manual checklist.
 - `docs/runbook.md` gains file-storage configuration and the DDL-permission
   model.
 - `docs/adr/0006-file-storage-provider-boundary.md` added.
@@ -760,14 +838,25 @@ collapse and the mobile drawer.
 | Phase | Priority | Delivers | Depends on |
 |---|---|---|---|
 | A | P0 | Design system, shell, sidebar, themes, user card | — |
-| B | P0 | Migrations, projects, history, search, persisted chats | A |
-| C | P1 | Databases section, config page, views, access levels, DDL permissions | A, B |
-| D | P1 | SQL blocks, data tables, ER diagrams, scratchpad | A, B, C |
-| E | P2 | File storage seam, attachments | A, B |
+| B1 | P0 | Migrations, persisted chats, message-level database context, history, `/sql` | A |
+| B2 | P0 | Projects, search, `Ctrl`/`Cmd`+K | B1 |
+| C | P1 | Databases section, config page, views, access levels, DDL permissions | A, B1 |
+| D | P1 | SQL blocks, data tables, ER diagrams, scratchpad | A, B1, C |
+| E | P2 | File storage seam, attachments | A, B1 |
 
 Each phase ends green — build, tests, working app — and is independently
-shippable. Stopping after B yields a styled chat application with history;
-stopping after C adds the access control; D and E are additive.
+shippable. Stopping after B1 yields a styled chat application whose conversations
+survive a restart; B2 adds grouping and search; stopping after C adds the access
+control; D and E are additive.
+
+### Work outside these phases
+
+Two things this plan depends on, or bumps into, that are not Web UI work:
+
+| Work | When | Why it is listed here |
+|---|---|---|
+| SQL Agent web service hosting several models, and the gateway client that calls it | After the Web UI | It is what makes the chat answer anything. Its design decides whether the gateway stays one-shot SQL generation or becomes a tool-calling loop over the MCP tool set — see [Non-goals](#non-goals). |
+| MCP addressing databases by connection name | Any time; small | `McpToolService` currently requires a GUID and answers `invalid_database_id` to a name, while the product statement is that both MCP and the chat name databases by their connection name. Names carry a unique index, so the lookup is safe. Name becomes primary, GUID keeps working so configured clients do not break. Touches `McpToolService`, `DatabaseTools`, `docs/ide-plugin-setup.md`, and two test classes. |
 
 ## Risks
 
