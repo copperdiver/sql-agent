@@ -58,3 +58,6 @@ nunit-*.xml
 
 # Superpowers brainstorming session artifacts
 .superpowers/
+
+# Playwright MCP scratch output
+.playwright-mcp/
