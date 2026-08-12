@@ -5,7 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SQL Agent</title>
     <base href="/" />
+    @*
+        Order matters. CodeMirror ships its own colors, so it comes first and app.css overrides it.
+        SqlAgent.Host.styles.css is the Blazor CSS-isolation bundle (every *.razor.css in this
+        project); it comes last so a component's own rules beat the shared sheet.
+
+        theme.js is in <head> and NOT deferred on purpose: it reads localStorage and sets the theme
+        class on <html> before the first paint. Moved to <body>, or given defer/async, the browser
+        paints the light theme and the user sees a flash before the dark class arrives.
+    *@
     <link rel="stylesheet" href="lib/codemirror/codemirror.min.css" />
+    <link rel="stylesheet" href="css/app.css" />
+    <link rel="stylesheet" href="SqlAgent.Host.styles.css" />
+    <script src="js/theme.js"></script>
     <HeadOutlet @rendermode="InteractiveServer" />
 </head>
 <body>
