@@ -2,10 +2,22 @@
 
 @* Below 1024px .sidebar carries a `transform` (it becomes the mobile drawer), and a CSS transform
    makes `position: fixed` descendants resolve against the transformed element instead of the
-   viewport. Menu's .menu-backdrop is `position: fixed`, so on a phone it only covers this drawer, not
-   the whole screen — tapping outside the drawer (but still on the page) will not dismiss this menu.
-   Fixing that properly needs a portal (rendering the backdrop/panel outside the transformed ancestor),
-   which is out of scope for this phase. *@
+   viewport. Both popups this component mounts are affected, with different outcomes:
+
+   - Menu's .menu-backdrop is `position: fixed`, so on a phone it only covers this drawer, not the
+     whole screen — tapping outside the drawer (but still on the page) will not dismiss this menu.
+
+   - Modal is worse, and is introduced to .sidebar for the first time here (no other component mounts
+     one inside the sidebar): Modal.razor.css's `.modal-root` is `position: fixed; inset: 0`, so its
+     `inset: 0` resolves against the transformed 300px-wide drawer instead of the viewport, while the
+     dialog panel's own width (`min(520px, 100vw - 32px)`) stays viewport-relative — so on a phone the
+     About dialog centers on the drawer and hangs off both of its edges, and the scrim dims only the
+     drawer, not the page. Worse, tapping to the right of the drawer lands on Sidebar's own
+     `.sidebar-scrim` (z-index 49) instead, which closes the drawer — translating the open dialog
+     off-screen with it while `_aboutOpen` stays true, so reopening the drawer pops About back up.
+
+   Fixing either properly needs a portal (rendering the backdrop/panel outside the transformed
+   ancestor), which is out of scope for this phase. *@
 <Menu Placement="MenuPlacement.Top">
     <Trigger>
         <div class="user-card-trigger">
@@ -22,7 +34,11 @@
            there is no user record to sign out of. An item that looked like one would misrepresent the
            security model. *@
         <MenuItem Icon="settings" OnClick="GoToSettings">Settings</MenuItem>
-        <MenuItem Icon="sun">
+        @* CloseOnClick="false": this row's own action button is just the "Theme" label -- the actual
+           control is the ThemeToggle segmented control in Trailing, which is a sibling, not something
+           this button triggers. Without this, clicking the label (most of the row, since
+           .menu-item-action is flex:1) would dismiss the menu with no theme change and no feedback. *@
+        <MenuItem Icon="sun" CloseOnClick="false">
             <ChildContent>Theme</ChildContent>
             <Trailing><ThemeToggle /></Trailing>
         </MenuItem>

@@ -1,11 +1,16 @@
 /* This rule deliberately carries no clipping property of its own (Task 6 review finding). UserCard
-   puts a Menu in .sidebar-foot, and Menu's .menu-panel is position:absolute — an ancestor whose
-   horizontal or vertical extent is anything but the default clips an absolutely-positioned descendant,
-   so a restricted .sidebar would cut off the user menu at the sidebar's edge, and since it opens
-   upward (MenuPlacement.Top), at the top too. The clip that used to live here is scoped to where each
-   state actually needs it instead: .sidebar-body already clips its own content via overflow-y:auto
-   below, and the collapsed rail's own clip is added under the wide-viewport media query, where
-   .sidebar-foot (and therefore the menu) is hidden entirely anyway. */
+   puts a Menu in .sidebar-foot; Menu's .menu-panel is position:absolute with left:0 and no right, so it
+   shrink-to-fits within .sidebar's own 260px content box and, opening upward from a foot near the
+   bottom of a 100vh sidebar, was never actually cut off by the old base overflow:hidden either. What
+   that clip did cut was the panel's --shadow-menu drop shadow -- box-shadow paints outside the border
+   box, so any ancestor overflow other than visible clips it away, leaving the panel flat and shadowless
+   against the sidebar's edge. (An earlier version of this comment claimed the panel itself would have
+   been clipped; it would not have been -- corrected per review, since a wrong comment here would have
+   been trusted and copied forward.) The clip that used to live here is scoped to where it is still
+   needed instead: .sidebar-body already clips its own content via overflow-y:auto below, and the
+   collapsed rail's own clip is added under the wide-viewport media query, where .sidebar-foot (and
+   therefore the menu) is hidden entirely anyway. See also app.css's html.sidebar-collapsed rule, which
+   carries the same clip for the pre-connection window this rule cannot cover. */
 .sidebar {
   display: flex;
   flex-direction: column;

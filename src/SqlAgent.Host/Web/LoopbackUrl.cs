@@ -11,15 +11,26 @@ public static class LoopbackUrl
     public const int DefaultPort = 5099;
     public const string ConfigKey = "SqlAgent:Web:Port";
 
-    public static string Resolve(IConfiguration configuration)
+    public static string Resolve(IConfiguration configuration) => $"http://127.0.0.1:{ResolvePort(configuration)}";
+
+    /// <summary>
+    /// Parses <see cref="ConfigKey"/> into a port number, or throws for a value that cannot be one.
+    /// The single source of truth for that parse: HostInfo.Port used to run its own, silently-falls-
+    /// back-to-default copy of this logic, so it could report a port <see cref="Resolve"/> would have
+    /// refused to bind to at all -- unreachable in the running host, since Program.cs calls
+    /// <see cref="Resolve"/> at startup and would fail the process first on the same bad value, but
+    /// reachable by constructing HostInfo directly, which tests do. Sharing this parse means the two
+    /// can no longer disagree.
+    /// </summary>
+    public static int ResolvePort(IConfiguration configuration)
     {
         var raw = configuration[ConfigKey];
         if (string.IsNullOrWhiteSpace(raw))
-            return $"http://127.0.0.1:{DefaultPort}";
+            return DefaultPort;
 
         if (!int.TryParse(raw, out var port) || port is < 1 or > 65535)
             throw new InvalidOperationException($"{ConfigKey} must be a TCP port between 1 and 65535, but was '{raw}'.");
 
-        return $"http://127.0.0.1:{port}";
+        return port;
     }
 }

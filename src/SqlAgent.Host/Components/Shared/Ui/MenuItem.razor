@@ -23,6 +23,12 @@
     [Parameter] public EventCallback OnClick { get; set; }
     [Parameter] public bool Danger { get; set; }
 
+    /// <summary>Whether activating this row dismisses the menu. Defaults to true (choosing an action
+    /// should close the menu that offered it). Set false for a row whose action button has no real
+    /// effect of its own -- e.g. a label wrapping a Trailing widget that does the actual work -- so that
+    /// clicking the label doesn't just close the menu with no feedback.</summary>
+    [Parameter] public bool CloseOnClick { get; set; } = true;
+
     /// <summary>The menu this item lives in, so choosing an item dismisses it. Cascaded by Menu.</summary>
     [CascadingParameter] private Menu? Owner { get; set; }
 
@@ -30,7 +36,7 @@
     {
         // Close first: if OnClick navigates, the menu would otherwise be left open behind the new page,
         // and a caller that throws would strand it open with no backdrop click able to reach it.
-        Owner?.Close();
+        if (CloseOnClick) Owner?.Close();
         await OnClick.InvokeAsync();
     }
 }

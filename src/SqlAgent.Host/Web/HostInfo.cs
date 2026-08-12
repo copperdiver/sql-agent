@@ -27,7 +27,12 @@ public sealed class HostInfo(IConfiguration configuration)
     /// <summary>Directory holding the SQLite store, resolved the same way LaunchUrlFile resolves it.</summary>
     public string StoreDirectory { get; } = LaunchUrlFile.ResolveDirectory(configuration);
 
-    public int Port { get; } = ResolvePort(configuration);
+    // Port and BindUrl both derive from LoopbackUrl's own parse (Task 6 review finding) rather than each
+    // running its own copy of the port-parsing logic: two independent parsers with different failure
+    // policies (this used to silently fall back to DefaultPort on a bad value while LoopbackUrl.Resolve
+    // threw for the exact same value) can only ever drift apart, reporting a port the URL disagrees
+    // with. Sharing the parse makes that impossible by construction.
+    public int Port { get; } = LoopbackUrl.ResolvePort(configuration);
 
     public string BindUrl { get; } = LoopbackUrl.Resolve(configuration);
 
@@ -40,9 +45,4 @@ public sealed class HostInfo(IConfiguration configuration)
         var letters = parts.Take(2).Select(p => char.ToUpperInvariant(p[0]));
         return string.Concat(letters);
     }
-
-    private static int ResolvePort(IConfiguration configuration) =>
-        int.TryParse(configuration["SqlAgent:Web:Port"], out var port) && port is > 0 and < 65536
-            ? port
-            : LoopbackUrl.DefaultPort;
 }

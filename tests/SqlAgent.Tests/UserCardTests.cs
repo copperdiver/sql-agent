@@ -84,6 +84,25 @@ public class UserCardTests
     }
 
     [Fact]
+    public void Clicking_the_Theme_row_does_not_close_the_menu()
+    {
+        // The Theme row's own action button is just the "Theme" label; the real control is the
+        // ThemeToggle segmented control sitting beside it in Trailing. Since .menu-item-action is
+        // flex:1, most of the row is that label button, and MenuItem.Activate closes the owning menu by
+        // default -- so without CloseOnClick="false" on this row, a user aiming for the segmented
+        // control but landing on the label would see the whole menu vanish with no theme change and no
+        // feedback (Task 6 review finding).
+        using var ctx = NewContext();
+        var card = ctx.RenderComponent<UserCard>();
+        card.Find(".user-card-trigger").Click();
+
+        card.FindAll(".menu-item-action").Single(i => i.TextContent.Contains("Theme")).Click();
+
+        Assert.Contains("Theme", card.Markup);
+        Assert.NotEmpty(card.FindAll(".menu-item"));
+    }
+
+    [Fact]
     public void Host_info_derives_initials_from_the_account_name()
     {
         var config = new ConfigurationBuilder().Build();

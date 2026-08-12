@@ -261,9 +261,24 @@ th { color: var(--text-100); font-weight: 500; font-size: var(--text-xs); text-t
    Sidebar.razor.css's own min-width: 1024px guard on the same rules (see FINDING 2 in the Task 5
    review): below 1024px the collapsed state must not hide the drawer's body/foot/labels, or a user who
    collapsed on desktop and later opens the drawer on a narrow screen loses SchemaRail entirely with no
-   way back in, since the collapse toggle that would undo it is itself hidden below 1024px. */
+   way back in, since the collapse toggle that would undo it is itself hidden below 1024px.
+
+   overflow: hidden lives on this rule too (Task 6 review finding), not only on Sidebar.razor.css's
+   ".sidebar.collapsed": this is the ONLY collapsed styling in effect from first paint until the circuit
+   connects and Sidebar's own OnAfterRenderAsync adds the scoped "collapsed" class -- or forever, if the
+   circuit never connects at all (a blocked WebSocket, a JS error during getSidebar). During that window
+   the aside is already 72px wide with sidebar-body/sidebar-foot hidden by the rule below, but with no
+   clip, SidebarHeader's brand icon and collapse-toggle button (sized to their own content, flex's
+   default min-width:auto refusing to shrink either) spill across the sidebar's border into the main
+   content card. Duplicating the clip here is intentional, not redundant: it covers exactly the gap the
+   scoped rule cannot reach, and the two agree once the circuit does connect since both key off the same
+   collapsed state. */
 @media (min-width: 1024px) {
-  html.sidebar-collapsed .app aside.sidebar { width: var(--sidebar-collapsed-width); flex-basis: var(--sidebar-collapsed-width); }
+  html.sidebar-collapsed .app aside.sidebar {
+    width: var(--sidebar-collapsed-width);
+    flex-basis: var(--sidebar-collapsed-width);
+    overflow: hidden;
+  }
   html.sidebar-collapsed .nav-label,
   html.sidebar-collapsed .brand-name,
   html.sidebar-collapsed .sidebar-body,

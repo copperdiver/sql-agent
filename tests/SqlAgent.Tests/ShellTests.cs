@@ -211,14 +211,15 @@ public class ShellTests : IDisposable
     // --- Task 6 review findings ---------------------------------------------------------------
 
     [Fact]
-    public void The_sidebar_itself_does_not_clip_so_the_user_menu_can_escape_it()
+    public void The_sidebar_itself_does_not_clip_so_the_users_menu_shadow_can_escape_it()
     {
-        // UserCard (Task 6) puts a Menu in .sidebar-foot, and Menu's .menu-panel is
-        // position:absolute. An ancestor with overflow other than visible clips an
-        // absolutely-positioned descendant, so a hidden .sidebar would cut off the user menu at the
-        // sidebar's edge -- and since it opens upward (MenuPlacement.Top), at the top too. bUnit runs
-        // no CSS engine, so this can only be pinned on the stylesheet source, the same way the other
-        // Sidebar.razor.css facts in this file are.
+        // UserCard (Task 6) puts a Menu in .sidebar-foot. Menu's .menu-panel is position:absolute with
+        // left:0 and no right, so it shrink-to-fits within .sidebar's own 260px content box and was
+        // never actually clipped horizontally or vertically by the old base overflow:hidden -- what that
+        // clip cut was the panel's --shadow-menu drop shadow (box-shadow paints outside the border box
+        // and follows the same clipping rule as any other visual effect on a clipped ancestor). bUnit
+        // runs no CSS engine, so this can only be pinned on the stylesheet source, the same way the
+        // other Sidebar.razor.css facts in this file are.
         var css = File.ReadAllText(RepoPaths.Find("src/SqlAgent.Host/Components/Layout/Sidebar.razor.css"));
 
         var baseRule = ExtractBlock(css, ".sidebar {");
@@ -257,6 +258,23 @@ public class ShellTests : IDisposable
         Assert.Contains("html.sidebar-collapsed .app aside.sidebar", css);
         Assert.Contains("html.sidebar-collapsed .sidebar-body", css);
         Assert.Contains("html.sidebar-collapsed .sidebar-foot", css);
+    }
+
+    [Fact]
+    public void The_pre_paint_collapsed_rail_clips_itself_before_the_circuit_can()
+    {
+        // Sidebar.razor.css's ".sidebar.collapsed { overflow: hidden; }" only ever applies once
+        // OnAfterRenderAsync's read-back has added the scoped "collapsed" class to <aside> -- which
+        // cannot happen until the circuit connects, and never happens at all if it doesn't (a blocked
+        // WebSocket, a JS error in getSidebar). From first paint until then, html.sidebar-collapsed is
+        // the ONLY thing narrowing the rail to 72px and hiding sidebar-body/sidebar-foot (see the fact
+        // above), so it has to carry its own clip too, or SidebarHeader's brand icon and collapse-toggle
+        // button -- sized to their own content, flex's default min-width:auto refusing to shrink either
+        // -- spill across the rail's border into the main content card for that entire window.
+        var css = File.ReadAllText(RepoPaths.Find("src/SqlAgent.Host/wwwroot/css/app.css"));
+
+        var preConnectRule = ExtractBlock(css, "html.sidebar-collapsed .app aside.sidebar {");
+        Assert.Contains("overflow: hidden", preConnectRule);
     }
 
     [Fact]

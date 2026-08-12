@@ -86,6 +86,29 @@ public class UiInteractionTests
     }
 
     [Fact]
+    public void Setting_CloseOnClick_false_keeps_the_menu_open_after_activating()
+    {
+        // A row whose own button has no real effect -- e.g. a label wrapping a Trailing widget that
+        // does the actual work, like UserCard's Theme row -- should not dismiss the menu just because
+        // the user's click landed on the label rather than the widget. CloseOnClick=false is how that
+        // row opts out of MenuItem's default close-on-activate behavior.
+        using var ctx = new Bunit.TestContext();
+        var clicked = false;
+        var menu = ctx.RenderComponent<Menu>(p => p
+            .Add(m => m.Trigger, (RenderFragment)(b => b.AddMarkupContent(0, "<span>t</span>")))
+            .AddChildContent<MenuItem>(ip => ip
+                .Add(i => i.CloseOnClick, false)
+                .Add(i => i.OnClick, EventCallback.Factory.Create(new object(), () => clicked = true))
+                .AddChildContent("Theme")));
+        menu.Find(".menu-trigger").Click();
+
+        menu.Find(".menu-item-action").Click();
+
+        Assert.True(clicked);
+        Assert.Single(menu.FindAll(".menu-item"));
+    }
+
+    [Fact]
     public void A_menu_item_does_not_nest_a_button_inside_its_trailing_slot()
     {
         // MenuItem used to render icon + label + Trailing all inside one <button>. Task 6 puts a
