@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace SqlAgent.Tests;
 
 /// <summary>
@@ -46,12 +48,27 @@ public class RestyleRegressionTests
             "src/SqlAgent.Host/Components/Shared/OutcomeMessage.razor.css",
             "src/SqlAgent.Host/Components/Shared/SqlEditor.razor.css",
         };
-        var all = string.Concat(sheets.Select(s => File.ReadAllText(RepoPaths.Find(s))));
+        // Comments are stripped before concatenation: Connections.razor.css's own explanatory comment
+        // literally contains the words "connections-list", "form", "fieldset", and "legend" (documenting
+        // that none of those exist in the page's real markup), and a raw substring search over that
+        // prose would treat it as if it were a styling rule for all four.
+        var all = string.Concat(sheets.Select(s =>
+            Regex.Replace(File.ReadAllText(RepoPaths.Find(s)), @"/\*.*?\*/", "", RegexOptions.Singleline)));
 
-        var unstyled = ClassesUsedByExistingMarkup.Where(c => !all.Contains($".{c}", StringComparison.Ordinal)).ToList();
+        var unstyled = ClassesUsedByExistingMarkup.Where(c => !IsClassStyled(all, c)).ToList();
 
         Assert.Empty(unstyled);
     }
+
+    /// <summary>
+    /// A bare substring search for ".outcome" is satisfied by ".outcome-code" — a prefix match, not a
+    /// real one, that would let every ".outcome { ... }" rule be deleted while ".outcome-code" alone
+    /// kept the test green. Requiring the match be followed by a character that cannot continue a CSS
+    /// identifier (letters, digits, hyphens, and underscores all can; "{", ",", ":", ".", whitespace,
+    /// and "[" cannot) tells a rule for ".outcome" apart from a rule for ".outcome-code".
+    /// </summary>
+    private static bool IsClassStyled(string css, string className) =>
+        Regex.IsMatch(css, $@"\.{Regex.Escape(className)}(?=[{{,:.\[]|\s|$)");
 
     [Fact]
     public void No_component_stylesheet_hard_codes_a_hex_color()

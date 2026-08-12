@@ -1,9 +1,6 @@
-.grid-scroll { max-height: 60vh; overflow: auto; }
-.grid-scroll table { font-size: var(--text-sm); }
-.grid-scroll thead th {
-  position: sticky;
-  top: 0;
-  background: var(--background-soft-50);
-  z-index: 1;
-}
-.grid-scroll tbody tr:hover { background: var(--background-soft-50); }
+/* .grid-scroll and its sub-rules used to live here, but ChatOutcome.razor renders the identical
+   "<div class="grid-scroll"><table>" markup in its own CSS-isolation scope for its QueryResult
+   branch — a scoped rule here could never reach that markup, so the SQL tab and the Chat tab's
+   result tables would silently drift apart. Promoted to app.css (global, unscoped) instead, so both
+   callers share the one definition. See app.css's "Shared surfaces used by existing components"
+   section. */

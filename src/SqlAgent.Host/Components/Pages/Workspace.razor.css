@@ -17,7 +17,12 @@
 .tabs button:hover { background: none; color: var(--title-50); }
 .tabs button.active { background: var(--background-100); color: var(--title-50); font-weight: 500; }
 
-.transcript { display: flex; flex-direction: column; gap: var(--space-4); margin-bottom: var(--space-5); }
+/* align-items: flex-start overrides the flex default of stretch: ChatOutcome emits no wrapper of its
+   own, so its <pre>, <button>, <p class="meta">, and <div class="grid-scroll"> are direct flex
+   children of .transcript here. Left at the default stretch, "Open in editor" rendered full
+   transcript width instead of its own intrinsic width. .question's own align-self: flex-end below
+   already overrides this per-item, so the question bubble is unaffected. */
+.transcript { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-4); margin-bottom: var(--space-5); }
 .question {
   align-self: flex-end;
   max-width: 70%;

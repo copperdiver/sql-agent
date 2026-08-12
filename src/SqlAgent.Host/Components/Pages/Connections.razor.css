@@ -5,5 +5,10 @@
 table { margin-bottom: var(--space-5); }
 h2 { margin-top: var(--space-6); margin-bottom: var(--space-3); }
 label { display: block; margin-bottom: var(--space-3); }
-label input, label select { display: block; margin-top: 6px; width: 100%; max-width: 360px; }
+/* Excludes [type=checkbox]: the Read-only field is a single checkbox next to inline label text, not
+   a stacked field, and app.css's input rule already gives every input a border/background/padding —
+   applying width:100%/max-width:360px to it too rendered a 360px bordered box around a tiny check
+   glyph, reading as a broken text field next to the Name and Connection-string inputs. */
+label input:not([type=checkbox]), label select { display: block; margin-top: 6px; width: 100%; max-width: 360px; }
+label input[type=checkbox] { width: auto; margin-left: var(--space-2); accent-color: var(--primary-500); }
 button + button { margin-left: var(--space-2); }
