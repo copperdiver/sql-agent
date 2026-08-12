@@ -10,14 +10,16 @@ Run the host with:
 dotnet run --project src/SqlAgent.Host/SqlAgent.Host.csproj
 ```
 
-It creates the local SQLite store, then writes a URL with a `?token=` required on the first
-request only — e.g. `http://127.0.0.1:5099/?token=...` — to `launch-url.txt` beside that store,
-readable only by the account the host runs as. The startup log names the file but never the token.
-Open the URL from the file in a browser; the token is exchanged for a session cookie on first use.
-The host listens on `127.0.0.1` only, on port 5099 by default
-(`SqlAgent:Web:Port` to change it). Details on the three screens, the token, and the manual
-regression checklist for the parts automated tests can't reach are in
-[`docs/web-ui.md`](docs/web-ui.md).
+It creates the local SQLite store, then needs a `?token=` on the first request only — e.g.
+`http://127.0.0.1:5099/?token=...`. By default the host generates that token itself and writes
+the full URL to `launch-url.txt` beside the store, readable only by the account the host runs as;
+the startup log names the file but never the token, and the file is deleted again when the host
+shuts down. If you instead set `SqlAgent:LocalAuth:Token` yourself, no file is written at all —
+you already hold the value, so open the URL and append `?token=` followed by what you configured.
+Either way, the token is exchanged for a session cookie on first use. The host listens on
+`127.0.0.1` only, on port 5099 by default (`SqlAgent:Web:Port` to change it). Details on the three
+screens, the token, and the manual regression checklist for the parts automated tests can't reach
+are in [`docs/web-ui.md`](docs/web-ui.md).
 
 Override the default `Data Source=sqlagent.db` store with:
 

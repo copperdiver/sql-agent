@@ -51,6 +51,33 @@ public static class LaunchUrlFile
         return path;
     }
 
+    /// <summary>
+    /// Removes the launch URL file from <paramref name="directory"/>, if present. Best-effort: this
+    /// runs on the shutdown path, where a file that is already gone (nothing to do), or one still
+    /// held open by another process (an editor, a backup agent, an antivirus scanner), must not throw
+    /// and must not stop the host from shutting down. Returns false only when a file was present and
+    /// an attempt to remove it failed; true otherwise, including when there was nothing to delete.
+    /// </summary>
+    public static bool Delete(string directory)
+    {
+        try
+        {
+            File.Delete(Path.Combine(directory, FileName));
+            return true;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            // The containing directory itself is gone. That is just as much "nothing to delete" as
+            // the file alone being missing -- File.Delete already treats that case as a silent no-op,
+            // this normalizes the equivalent case one level up.
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static void Restrict(string path)
     {
         if (OperatingSystem.IsWindows())

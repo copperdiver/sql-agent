@@ -57,6 +57,9 @@ dotnet run --project src/SqlAgent.Host/SqlAgent.Host.csproj
 info: SQL Agent UI: http://127.0.0.1:5099 — open the URL (token included) written to /var/lib/sqlagent/launch-url.txt
 ```
 
+(The log line above is the default, unconfigured case, where the host generates the token itself.
+With `SqlAgent:LocalAuth:Token` set, the log line differs and no file is written — see below.)
+
 `SqlAgent:Web:Port` (`SqlAgent__Web__Port` as an environment variable) picks the TCP port; it
 defaults to **5099**. The bind address is fixed at `127.0.0.1` and is not configurable — see
 `docs/web-ui.md` for why. Full screen-by-screen coverage, the manual regression checklist, and
@@ -66,10 +69,11 @@ the export/chat behavior are in [`docs/web-ui.md`](web-ui.md).
 
 #### Where to read it
 
-The host writes the full `http://127.0.0.1:<port>/?token=…` URL to **`launch-url.txt` in the same
-directory as the SQLite store** — `/var/lib/sqlagent/launch-url.txt` for the systemd unit above,
-next to `sqlagent.db` for a console run, and whatever `SqlAgent__Storage__ConnectionString` points
-at otherwise. It is rewritten on every start.
+**Only when the token is generated** (see "Where its value comes from" below — this is the
+default, unconfigured case). The host writes the full `http://127.0.0.1:<port>/?token=…` URL to
+**`launch-url.txt` in the same directory as the SQLite store** — `/var/lib/sqlagent/launch-url.txt`
+for the systemd unit above, next to `sqlagent.db` for a console run, and whatever
+`SqlAgent__Storage__ConnectionString` points at otherwise. It is rewritten on every start.
 
 ```bash
 sudo cat /var/lib/sqlagent/launch-url.txt   # systemd
@@ -85,6 +89,20 @@ runs as: mode `600` on Linux/macOS, and on Windows an explicit ACL with inherita
 granting that account and `BUILTIN\Administrators` only. Under the Windows service that means the
 service account and an elevated administrator; under systemd it means `sqlagent` and `root`, so
 `sudo` is needed to read it.
+
+The host removes the file on shutdown (best-effort — a missing or momentarily locked file will not
+block the host from stopping), so it exists only while a process holding the current generated
+token is actually running. If **`SqlAgent:LocalAuth:Token` is configured** instead, the file is
+never written in the first place: the operator already holds that value, and it does not go stale
+on restart the way a generated one does, so persisting a second plaintext copy of a secret that
+also unlocks the MCP server would only cost confidentiality. In that case the startup log names
+the base URL only:
+
+```
+info: SQL Agent UI: http://127.0.0.1:5099 — open the URL with your configured SqlAgent:LocalAuth:Token appended as ?token=…
+```
+
+and the operator appends the token they already set.
 
 **The token is not written to any log, at any level.** The named pipe it replaced was ACL'd to a
 single user; a loopback TCP port is reachable by every local account and every process, so this
@@ -169,12 +187,21 @@ to those schemas, so an existing database is not disturbed.
 - Windows service cannot read saved secrets: confirm it is running as the same Windows account that created them.
 - Browser gets a `401` opening the web UI: the URL was opened without its `?token=...` query
   parameter — most often from typing or bookmarking the bare address, or reopening it in a
-  window that never presented the token to get a session cookie. Re-read `launch-url.txt` in the
-  store directory and open the full URL from there, token included. A bookmark saved from a
-  previous run will not work either: a generated token changes on every restart.
-- `launch-url.txt` is missing or unreadable: check the startup log for the error naming the
-  directory the host tried to write. Either make it writable, or set `SqlAgent__LocalAuth__Token`
-  to a value you choose so the token no longer has to be discovered at all.
+  window that never presented the token to get a session cookie. If the token is generated,
+  re-read `launch-url.txt` in the store directory and open the full URL from there, token
+  included — a bookmark saved from a previous run will not work either, since a generated token
+  changes on every restart. If `SqlAgent:LocalAuth:Token` is configured, append `?token=` and
+  that value yourself; no file is written in that case.
+- `launch-url.txt` is missing or unreadable: first check whether `SqlAgent:LocalAuth:Token` is
+  configured — if so, this is expected, the file is never written for a configured token. If the
+  token is meant to be generated, check the startup log for the error naming the directory the
+  host tried to write. Either make it writable, or set `SqlAgent__LocalAuth__Token` to a value you
+  choose so the token no longer has to be discovered at all.
+- `launch-url.txt` from a previous run is still present after the host stopped: the host deletes
+  it on shutdown, but the deletion is best-effort and does not retry, so a file locked at that
+  exact moment (an editor with it open, a backup agent, an antivirus scanner) can be left behind.
+  It is stale and harmless — the token it names died with the process — and is safely overwritten
+  on the next start; delete it by hand if it bothers you.
 - Provider fixture tests do nothing: confirm the `SQLAGENT_TEST_POSTGRES` and `SQLAGENT_TEST_SQLSERVER` variables are set in the test process.
 - Client or IDE host gets `unauthorized` on every call: a local-access token is configured on the host but the client presents none. Export `SQLAGENT_AUTH_TOKEN` for the client process and restart it.
 - SQL Server fixture fails to connect: wait for container startup to complete. SQL Server 2022 takes tens of seconds to finish recovery on first start, and it has no healthcheck in the fixture — watch `docker logs` for `Recovery is complete`.

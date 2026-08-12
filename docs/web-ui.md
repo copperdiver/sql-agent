@@ -10,31 +10,49 @@ start the host, open the URL it prints, and the browser is the client.
 dotnet run --project src/SqlAgent.Host/SqlAgent.Host.csproj
 ```
 
-On startup the host logs where to find the URL, but **not the URL itself**:
+On startup the host logs where to find the URL, but **not the URL itself**. What it logs, and
+whether a file is involved at all, depends on where the token came from:
 
-```
-SQL Agent UI: http://127.0.0.1:5099 — open the URL (token included) written to /var/lib/sqlagent/launch-url.txt
-```
+- **No `SqlAgent:LocalAuth:Token` configured (the default)** — a fresh token is generated for
+  this process only, and the tokenized URL goes into `launch-url.txt` beside the SQLite store:
 
-The tokenized URL goes into `launch-url.txt` beside the SQLite store, restricted to the account
-the host runs as (mode `600` on Linux/macOS; on Windows an explicit ACL granting only that account
-and `BUILTIN\Administrators`, with inheritance switched off). Read that file and open the URL it
-contains:
+  ```
+  SQL Agent UI: http://127.0.0.1:5099 — open the URL (token included) written to /var/lib/sqlagent/launch-url.txt
+  ```
 
-```bash
-cat /var/lib/sqlagent/launch-url.txt
-```
+  The file is restricted to the account the host runs as (mode `600` on Linux/macOS; on Windows an
+  explicit ACL granting only that account and `BUILTIN\Administrators`, with inheritance switched
+  off). Read it and open the URL it contains:
 
-```powershell
-Get-Content "C:\ProgramData\SqlAgent\launch-url.txt"
-```
+  ```bash
+  cat /var/lib/sqlagent/launch-url.txt
+  ```
 
-The token is **not** logged, at any level. With the named pipe gone it is the entire trust boundary
-around a TCP port that every local account can reach, and this host attaches log providers that are
-not private to it: `AddWindowsService()` writes to the Windows Event Log and `AddSystemd()` puts
-stdout in the journal, both readable by a wider set of principals than the service account. (As a
-second layer, `appsettings.json` also caps the Event Log provider at `Warning`, so nothing logged at
-`Information` can reach it even if a future change tries.)
+  ```powershell
+  Get-Content "C:\ProgramData\SqlAgent\launch-url.txt"
+  ```
+
+  It is written fresh on every start and **removed automatically when the host shuts down** —
+  a generated token is dead the moment the process exits, and there is no reason for its plaintext
+  copy to outlive it. Deletion is best-effort: a file already gone, or locked by something else at
+  that instant, does not stop the host from shutting down.
+
+- **`SqlAgent:LocalAuth:Token` configured** — no file is written at all. The value is one the
+  operator already holds (it also unlocks the MCP server — see below), so writing a second,
+  indefinitely-lived plaintext copy of it to disk would cost confidentiality for no benefit; unlike
+  a generated token it does not go stale on the next restart anyway. The host just logs the base
+  URL and leaves it to the operator to append their own token:
+
+  ```
+  SQL Agent UI: http://127.0.0.1:5099 — open the URL with your configured SqlAgent:LocalAuth:Token appended as ?token=…
+  ```
+
+The token is **not** logged, at any level, on either path. With the named pipe gone it is the
+entire trust boundary around a TCP port that every local account can reach, and this host attaches
+log providers that are not private to it: `AddWindowsService()` writes to the Windows Event Log and
+`AddSystemd()` puts stdout in the journal, both readable by a wider set of principals than the
+service account. (As a second layer, `appsettings.json` also caps the Event Log provider at
+`Warning`, so nothing logged at `Information` can reach it even if a future change tries.)
 
 The `token` query parameter is required on the first request only; the server exchanges it for an
 `HttpOnly` session cookie (`sqlagent_session`) and every request after that rides the cookie

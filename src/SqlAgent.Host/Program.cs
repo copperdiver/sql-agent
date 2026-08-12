@@ -70,22 +70,47 @@ app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
 // administrators. See docs/runbook.md for the retrieval path.
 var launchToken = app.Services.GetRequiredService<LaunchToken>();
 var launchUrl = LoopbackUrl.Resolve(app.Configuration);
-try
+if (launchToken.IsGenerated)
 {
-    var launchUrlPath = LaunchUrlFile.Write(
-        LaunchUrlFile.ResolveDirectory(app.Configuration), $"{launchUrl}/?token={launchToken.Value}");
-    app.Logger.LogInformation(
-        "SQL Agent UI: {Url} — open the URL (token included) written to {LaunchUrlFile}", launchUrl, launchUrlPath);
+    // Only a generated token is written to disk. An operator-configured token is a long-lived secret
+    // the operator already holds (it's the same value that unlocks the MCP server) — writing it out
+    // too would create a second, indefinitely-lived plaintext copy for no benefit, since unlike a
+    // generated value it does not go stale on the next restart.
+    try
+    {
+        var directory = LaunchUrlFile.ResolveDirectory(app.Configuration);
+        var launchUrlPath = LaunchUrlFile.Write(directory, $"{launchUrl}/?token={launchToken.Value}");
+        app.Logger.LogInformation(
+            "SQL Agent UI: {Url} — open the URL (token included) written to {LaunchUrlFile}", launchUrl, launchUrlPath);
+
+        // The file must not outlive the process that created it: it's a live secret at rest for as
+        // long as it sits on disk. Best-effort — LaunchUrlFile.Delete never throws, so a locked or
+        // already-missing file cannot block shutdown.
+        app.Lifetime.ApplicationStopping.Register(() =>
+        {
+            if (!LaunchUrlFile.Delete(directory))
+                app.Logger.LogWarning(
+                    "SQL Agent UI: could not remove {LaunchUrlFile} on shutdown; delete it manually.", launchUrlPath);
+        });
+    }
+    catch (Exception ex)
+    {
+        // Fail soft and stay silent about the value: a read-only deployment directory must not stop the
+        // host, and must not tempt this into logging the token as a fallback either. Setting
+        // SqlAgent:LocalAuth:Token gives the operator a value they already know.
+        app.Logger.LogError(ex,
+            "SQL Agent UI: {Url} — the launch URL file could not be written, so the generated token cannot be "
+            + "retrieved. Set SqlAgent:LocalAuth:Token to a value of your own, or make {Directory} writable.",
+            launchUrl, LaunchUrlFile.ResolveDirectory(app.Configuration));
+    }
 }
-catch (Exception ex)
+else
 {
-    // Fail soft and stay silent about the value: a read-only deployment directory must not stop the
-    // host, and must not tempt this into logging the token as a fallback either. Setting
-    // SqlAgent:LocalAuth:Token gives the operator a value they already know.
-    app.Logger.LogError(ex,
-        "SQL Agent UI: {Url} — the launch URL file could not be written, so the generated token cannot be "
-        + "retrieved. Set SqlAgent:LocalAuth:Token to a value of your own, or make {Directory} writable.",
-        launchUrl, LaunchUrlFile.ResolveDirectory(app.Configuration));
+    // The operator already knows this value — it's the one they configured. Nothing to write, and
+    // nothing to disclose here either: just point at the URL and let them append their own token.
+    app.Logger.LogInformation(
+        "SQL Agent UI: {Url} — open the URL with your configured SqlAgent:LocalAuth:Token appended as ?token=…",
+        launchUrl);
 }
 
 await app.RunAsync();
