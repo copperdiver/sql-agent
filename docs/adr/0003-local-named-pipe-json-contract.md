@@ -2,7 +2,16 @@
 
 ## Status
 
-Accepted
+Superseded by the local web UI (`docs/superpowers/specs/2026-08-11-local-web-ui-design.md`,
+`docs/web-ui.md`). The WPF client, `SqlAgent.Api.Local`, and `SqlAgent.Api.Local.Contracts` were
+deleted with that change, so the source this record cites no longer exists and the "pipe security is
+default (current user / local)" trust boundary it describes no longer applies to the user-facing
+client: that surface is now loopback HTTP guarded by `Host`/`Origin` validation and a launch token.
+The record is kept as written, for history. Anything citing it as the current trust boundary —
+`docs/ide-plugin-setup.md` does, for the MCP server's own default-open posture — should be read
+against ADR-0001 and `docs/web-ui.md` instead.
+
+Original status: Accepted
 
 ## Context
 

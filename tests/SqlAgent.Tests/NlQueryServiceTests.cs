@@ -169,6 +169,26 @@ public class NlQueryServiceTests
     }
 
     [Fact]
+    public async Task No_provider_configured_returns_a_distinct_code_from_a_genuine_gateway_failure()
+    {
+        // UnavailableLlmSqlGateway (the placeholder wired in Program.cs until a real provider lands)
+        // signals "not configured" by throwing NotSupportedException specifically. That must map to its
+        // own code rather than the generic llm_error used above for every other exception type — once a
+        // real provider is wired, its own timeouts/network errors/malformed responses must still surface
+        // as llm_error, not be mistaken for "no provider configured".
+        var (db, conn) = NewStore();
+        var (svc, connections) = Build(db, new NlFakeProvider(Schema),
+            new FakeGateway(throws: new NotSupportedException("No LLM provider is configured on this server.")));
+        var id = await AddConnectionAsync(connections);
+
+        var r = await svc.AskAsync(id, "anything");
+
+        Assert.Equal(NlResponseKind.Error, r.Kind);
+        Assert.Equal("llm_not_configured", r.ErrorCode);
+        conn.Dispose();
+    }
+
+    [Fact]
     public async Task Prompt_context_excludes_hidden_tables()
     {
         var (db, conn) = NewStore();

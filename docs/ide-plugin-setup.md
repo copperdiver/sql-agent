@@ -50,14 +50,21 @@ directory than the SQL Agent repo or desktop app.
 
 The MCP process calls `EnsureCreated` for the SQLite store at startup. It does
 not seed database connections; configure connections through the SQL Agent Core
-or WPF client first.
+or the web UI first (see `docs/web-ui.md`).
 
 ## Local-access token (`SQLAGENT_AUTH_TOKEN`)
 
-**Authentication is off by default.** With no token configured, both the MCP
-server and the local named-pipe API accept every caller — the v1 trust boundary
-is "whoever can run processes as this user" (ADR-0003). Configure a token when
-that is not good enough.
+**Authentication is off by default.** With no token configured, the MCP server
+accepts every caller — the v1 trust boundary is "whoever can run processes as
+this user" (described in ADR-0003, which is Superseded for the deleted named-pipe
+client but still states the MCP server's own posture accurately). The web UI does
+not share that boundary: it is loopback HTTP, reachable by any local account, and
+is guarded by `Host`/`Origin` validation plus a launch token — see
+`docs/web-ui.md`. Its launch token is a separate mechanism, but not an
+independent one: leave `SqlAgent:LocalAuth:Token` unset and the web UI generates
+a fresh random token every start; set it and the web UI uses that exact fixed
+value instead, same as the MCP server does. Configure
+`SqlAgent:LocalAuth:Token` when the MCP trust boundary alone is not good enough.
 
 Set the expected token on the process that serves the tools, using the
 `SqlAgent:LocalAuth:Token` configuration key. As an environment variable that is
@@ -132,9 +139,9 @@ audit logging are enforced in Core before results reach the MCP host. A host
 integration is correct when it forwards calls to `SqlAgent.Api.Mcp` and leaves
 the response shape untouched.
 
-Do not expose the local named-pipe API to IDE plugins for v1. That API includes
-configuration operations for the WPF client and is broader than the IDE plugin
-tool surface.
+Do not expose the web UI's own operations to IDE plugins for v1. Those cover
+connection configuration and table-visibility management and are broader than
+the IDE plugin tool surface, which should stay limited to the MCP tools above.
 
 ## Platform limitations
 

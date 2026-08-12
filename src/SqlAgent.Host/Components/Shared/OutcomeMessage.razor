@@ -1,0 +1,13 @@
+<div class="outcome" role="status">
+    <p>@Message</p>
+    @if (!string.IsNullOrEmpty(Code))
+    {
+        <code class="outcome-code">@Code</code>
+    }
+</div>
+
+@code {
+    /// <summary>Stable error code from Core. Shown so a denial reads as deliberate, not as a crash.</summary>
+    [Parameter] public string? Code { get; set; }
+    [Parameter] public string? Message { get; set; }
+}

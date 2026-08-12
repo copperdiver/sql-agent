@@ -1,0 +1,34 @@
+@implements IDisposable
+@inject NavigationManager Nav
+
+<ErrorBoundary @ref="_boundary">
+    <ChildContent>@ChildContent</ChildContent>
+    <ErrorContent>
+        <div class="outcome" role="alert">
+            <p>Something went wrong. The details are in the server log.</p>
+            <button @onclick="Retry">Retry</button>
+        </div>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    // ErrorContent deliberately ignores the exception argument: its message can carry a connection
+    // string. Blazor already logs the exception server-side. The Retry button is the recovery path the
+    // message refers to.
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private ErrorBoundary? _boundary;
+
+    // MainLayout, which hosts this component, is not recreated across route navigation, and Blazor's
+    // ErrorBoundary does not clear CurrentException just because it receives new ChildContent — only
+    // Recover() does. Without this, one page throwing would leave every subsequent page (reached via
+    // the header nav, not a reload) stuck behind "Something went wrong".
+    protected override void OnInitialized() => Nav.LocationChanged += OnLocationChanged;
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e) =>
+        InvokeAsync(() => _boundary?.Recover());
+
+    private void Retry() => _boundary?.Recover();
+
+    public void Dispose() => Nav.LocationChanged -= OnLocationChanged;
+}

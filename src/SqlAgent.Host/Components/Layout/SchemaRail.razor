@@ -1,0 +1,154 @@
+@implements IDisposable
+@inject ScopedRunner Runner
+@inject AppState State
+@inject ILogger<SchemaRail> Logger
+
+<aside class="rail">
+    <label class="label">Connection</label>
+    <select @onchange="OnConnectionChanged">
+        <option value="">— select —</option>
+        @foreach (var c in _connections)
+        {
+            <option value="@c.Id" selected="@(c.Id == State.ConnectionId)">@c.Name</option>
+        }
+    </select>
+
+    @if (_error is not null)
+    {
+        @* No code: this is "the app broke", not a deliberate refusal, so it must not look like one. *@
+        <OutcomeMessage Message="@_error" />
+    }
+
+    @if (State.Connection is { } active)
+    {
+        <p class="meta">@active.ProviderType · @(active.IsReadOnly ? "read-only" : "read-write")</p>
+
+        <label class="label">Schema</label>
+        <input type="search" placeholder="Filter tables" value="@_filter" @onchange="OnFilterChanged" />
+
+        <ul class="tree">
+            @foreach (var t in Filtered())
+            {
+                <li data-table="@($"{t.Schema}.{t.Table}")" class="@(t.IsVisible ? "" : "hidden")">
+                    <input type="checkbox" checked="@t.IsVisible"
+                           @onchange="e => ToggleAsync(t, (bool)(e.Value ?? false))" />
+                    <span>@($"{t.Schema}.{t.Table}")</span>
+                </li>
+            }
+        </ul>
+    }
+</aside>
+
+@code {
+    private IReadOnlyList<DatabaseConnectionInfo> _connections = [];
+    private IReadOnlyList<TableVisibility> _tables = [];
+    private string _filter = "";
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.Changed += OnStateChanged;
+        State.ConnectionsChanged += OnConnectionsChanged;
+        await ReloadConnectionsAsync();
+        await LoadTablesAsync();
+    }
+
+    // A method rather than an inline lambda: a lambda assigning a string literal inside a Razor
+    // attribute needs escaped quotes, which the Razor parser handles badly.
+    private void OnFilterChanged(ChangeEventArgs e) => _filter = e.Value?.ToString() ?? string.Empty;
+
+    private IEnumerable<TableVisibility> Filtered() =>
+        string.IsNullOrWhiteSpace(_filter)
+            ? _tables
+            : _tables.Where(t => t.Table.Contains(_filter, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Re-reads the picker's list, then re-points AppState at the current row for whatever is
+    /// selected. That second step is what makes an edit to the selected connection visible: Select
+    /// compares by value, so the fresh record replaces the stale one and notifies, and a row that was
+    /// deleted resolves to null and clears the selection.
+    /// </summary>
+    private async Task ReloadConnectionsAsync()
+    {
+        _connections = await Runner.RunAsync<DatabaseConnectionService, IReadOnlyList<DatabaseConnectionInfo>>(
+            s => s.ListAsync());
+        if (State.ConnectionId is { } id)
+            State.Select(_connections.FirstOrDefault(c => c.Id == id));
+    }
+
+    private async Task LoadTablesAsync()
+    {
+        if (State.ConnectionId is not { } id) { _tables = []; return; }
+        try
+        {
+            // ListAsync returns every live table with its effective visibility — including hidden ones,
+            // which SchemaService deliberately omits. The rail needs them to offer the toggle back.
+            _tables = await Runner.RunAsync<TablePolicyService, IReadOnlyList<TableVisibility>?>(
+                s => s.ListAsync(id)) ?? [];
+        }
+        catch (Exception ex)
+        {
+            // An unreachable database is an ordinary thing for a tool that points at arbitrary servers.
+            // Letting it escape would trip the work-area boundary and blank the page the rail sits
+            // beside; the rail's own job is to say the tree could not be read. The exception text is
+            // deliberately not rendered — a provider message can echo the connection string back.
+            Logger.LogError(ex, "Failed to list tables for connection {ConnectionId}.", id);
+            _tables = [];
+            _error = "The table list could not be read. The details are in the server log.";
+        }
+    }
+
+    private async Task OnConnectionChanged(ChangeEventArgs e)
+    {
+        var raw = e.Value?.ToString();
+        // A filter typed against one connection's tables means nothing against the next one's, and
+        // leaving it in place silently hides most of the new tree.
+        _filter = "";
+        _error = null;
+        State.Select(Guid.TryParse(raw, out var id) ? _connections.FirstOrDefault(c => c.Id == id) : null);
+        await LoadTablesAsync();
+    }
+
+    private async Task ToggleAsync(TableVisibility table, bool isVisible)
+    {
+        if (State.ConnectionId is not { } id) return;
+        _error = null;
+        try
+        {
+            // SetVisibilityAsync clears the cached schema itself, so the next agent read re-extracts
+            // under the new policy; the rail only has to re-read its own list.
+            await Runner.RunAsync<TablePolicyService>(
+                s => s.SetVisibilityAsync(id, table.Schema, table.Table, isVisible));
+        }
+        catch (Exception ex)
+        {
+            // Without this the checkbox just snapped back on the next re-read with no explanation —
+            // the user would believe the toggle had been applied and later wonder why the table is
+            // still in (or out of) the agent's schema.
+            Logger.LogError(ex, "Failed to set visibility for {Schema}.{Table}.", table.Schema, table.Table);
+            _error = "The visibility change could not be saved. The details are in the server log.";
+        }
+        await LoadTablesAsync();
+    }
+
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+
+    /// <summary>
+    /// The Connections page is a sibling route inside the same circuit, not an ancestor of this rail,
+    /// and MainLayout (which owns the rail) is not recreated across navigation — so nothing re-runs
+    /// OnInitializedAsync after a connection is created, edited, or deleted. Without this the picker
+    /// kept showing whatever existed when the tab was first opened.
+    /// </summary>
+    private void OnConnectionsChanged() => InvokeAsync(async () =>
+    {
+        await ReloadConnectionsAsync();
+        await LoadTablesAsync();
+        StateHasChanged();
+    });
+
+    public void Dispose()
+    {
+        State.Changed -= OnStateChanged;
+        State.ConnectionsChanged -= OnConnectionsChanged;
+    }
+}

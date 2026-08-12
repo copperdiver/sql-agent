@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SQL Agent</title>
+    <base href="/" />
+    <link rel="stylesheet" href="lib/codemirror/codemirror.min.css" />
+    <HeadOutlet @rendermode="InteractiveServer" />
+</head>
+<body>
+    @*
+        The render mode belongs here, on the router, not on the individual @page components. A render
+        mode declared on a page does NOT propagate up to its layout: it would make each page its own
+        interactive island rooted at the page component, leaving Routes, MainLayout, SchemaRail and
+        WorkArea in the static SSR pass. Statically rendered, WorkArea's ErrorBoundary would not even
+        wrap the pages (they would be separate root components in the circuit), its Retry @onclick
+        would never be wired up in the browser, and the static NavigationManager never raises
+        LocationChanged — so both of the boundary's recovery paths were dead. Putting it on <Routes>
+        makes the whole component tree one interactive circuit, which is also what makes AppState
+        (scoped to the circuit) shared between the rail and the pages rather than one instance per
+        island. Note this switches navigation from enhanced navigation to circuit routing.
+    *@
+    <Routes @rendermode="InteractiveServer" />
+    <script src="js/download.js"></script>
+    <script src="lib/codemirror/codemirror.min.js"></script>
+    <script src="lib/codemirror/sql.min.js"></script>
+    <script src="js/sql-editor.js"></script>
+    <script src="_framework/blazor.web.js"></script>
+</body>
+</html>

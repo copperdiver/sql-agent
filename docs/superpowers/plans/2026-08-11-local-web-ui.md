@@ -15,7 +15,11 @@
 - Target framework `net10.0` for every project. No `net10.0-windows` may remain in the solution.
 - **No Node, npm, or any JavaScript build step.** JS dependencies are vendored as pre-built files. This is why CodeMirror **5** is used, not 6 — v6 ships ES modules that require a bundler.
 - The HTTP listener binds `127.0.0.1` only. Port from `SqlAgent:Web:Port`, default `5099`.
-- Never render exception text in the UI — it can contain a connection string. Log it server-side instead.
+- Never render the text of an **unexpected** exception in the UI — it can contain a connection string. Those
+  go to the server log and the user sees a generic retry prompt. This does not cover values a Core service
+  deliberately returns as part of its contract: `ConnectionTestResult.Error` and the `ErrorMessage` on
+  `QueryExecutionResult` and `NlQueryResult` are domain results and are meant to be shown. Without the
+  reason, "Test connection" tells the user only that something failed.
 - Expected failures (policy denials, timeouts, missing secret, unconfigured LLM) are values with stable codes, not exceptions. Render them as content.
 - **Every task that adds behavior is TDD:** write the failing test, run it, watch it fail for the right
   reason, then implement. Four tasks are exempt because no failing test is possible for them, and each
@@ -628,7 +632,7 @@ public sealed class LocalOriginMiddleware(RequestDelegate next)
 
     public async Task InvokeAsync(HttpContext context)
     {
-        if (!IsLocalHost(context.Request.Host.Host) || !IsLocalOrigin(context.Request.Headers.Origin))
+        if (!IsLocalHost(context.Request.Host.Host) || !IsLocalOrigin(context.Request))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             return;
@@ -639,14 +643,31 @@ public sealed class LocalOriginMiddleware(RequestDelegate next)
     private static bool IsLocalHost(string host) =>
         LocalHosts.Contains(host, StringComparer.OrdinalIgnoreCase);
 
-    private static bool IsLocalOrigin(string? origin)
+    private static bool IsLocalOrigin(HttpRequest request)
     {
+        var origin = request.Headers.Origin;
+
         // No Origin at all is normal for a top-level navigation, so absence is not a rejection.
         if (string.IsNullOrEmpty(origin)) return true;
-        return Uri.TryCreate(origin, UriKind.Absolute, out var uri) && IsLocalHost(uri.Host);
+
+        // Comparing only the Origin's host (e.g. against 127.0.0.1/localhost/[::1]) is not enough:
+        // SameSite cookie scoping is computed from the registrable domain and ignores port, and a
+        // WebSocket handshake is not subject to CORS at all. A host-only check would therefore also
+        // accept any other local HTTP surface on a different port or scheme -- a dev server, an
+        // Electron app, a local service reflecting attacker-controlled content -- letting it open a
+        // Blazor circuit at /_blazor carrying the user's session cookie. Require the presented Origin
+        // to equal this server's own scheme and authority exactly, so only the process actually bound
+        // to this port is accepted.
+        var expectedOrigin = $"{request.Scheme}://{request.Host.Value}";
+        return string.Equals(origin, expectedOrigin, StringComparison.OrdinalIgnoreCase);
     }
 }
 ```
+
+The first version of this plan compared only `uri.Host`, which accepted any local origin regardless of
+scheme or port. Review caught it before merge; the code above is what shipped. Add tests for the accept
+branch as well as the reject branch — the hole survived initial review precisely because only rejection
+was tested.
 
 - [ ] **Step 5: Implement `TokenAuthMiddleware`**
 

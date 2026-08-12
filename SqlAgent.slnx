@@ -1,9 +1,6 @@
 <Solution>
   <Folder Name="/src/">
-    <Project Path="src/SqlAgent.Api.Local.Contracts/SqlAgent.Api.Local.Contracts.csproj" />
-    <Project Path="src/SqlAgent.Api.Local/SqlAgent.Api.Local.csproj" />
     <Project Path="src/SqlAgent.Api.Mcp/SqlAgent.Api.Mcp.csproj" />
-    <Project Path="src/SqlAgent.Client.Wpf/SqlAgent.Client.Wpf.csproj" />
     <Project Path="src/SqlAgent.Core/SqlAgent.Core.csproj" />
     <Project Path="src/SqlAgent.Host/SqlAgent.Host.csproj" />
     <Project Path="src/SqlAgent.Providers.Postgres/SqlAgent.Providers.Postgres.csproj" />

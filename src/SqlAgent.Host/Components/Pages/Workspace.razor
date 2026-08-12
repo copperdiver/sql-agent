@@ -1,0 +1,130 @@
+@page "/"
+@implements IDisposable
+@inject ScopedRunner Runner
+@inject AppState State
+
+<div class="tabs">
+    <button class="@(_tab == Tab.Sql ? "active" : "")" @onclick="() => _tab = Tab.Sql">SQL</button>
+    <button class="@(_tab == Tab.Chat ? "active" : "")" @onclick="() => _tab = Tab.Chat">Chat</button>
+</div>
+
+@if (State.ConnectionId is null)
+{
+    <p>Select a connection to start querying.</p>
+}
+else if (_tab == Tab.Sql)
+{
+    <SqlEditor @bind-Value="_sql" OnRun="RunAsync" />
+
+    <div class="actions">
+        <button @onclick="RunAsync" disabled="@(_running || string.IsNullOrWhiteSpace(_sql))">Run</button>
+        @if (_running)
+        {
+            <button @onclick="Cancel">Cancel</button>
+        }
+    </div>
+
+    <ResultGrid Result="_result" />
+}
+else if (_tab == Tab.Chat)
+{
+    <div class="transcript">
+        @foreach (var entry in _transcript)
+        {
+            <p class="question">@entry.Question</p>
+            <ChatOutcome Result="entry.Result" OnOpenInEditor="OpenInEditor" />
+        }
+    </div>
+
+    <input @bind="_question" @bind:event="oninput" placeholder="Ask a question about this database" />
+    <button @onclick="AskAsync" disabled="@(_asking || string.IsNullOrWhiteSpace(_question))">Ask</button>
+}
+
+@code {
+    private enum Tab { Sql, Chat }
+
+    private Tab _tab = Tab.Sql;
+    private string _sql = "";
+    private bool _running;
+    private QueryExecutionResult? _result;
+    private CancellationTokenSource? _cts;
+
+    // SchemaRail and Workspace are siblings under MainLayout (not parent/child), so a connection
+    // picked from the rail's dropdown does not, by itself, cause Workspace to re-render — only the
+    // rail's own subtree re-renders. Subscribing here (mirroring SchemaRail's own subscription to
+    // the same event) is what makes selecting a connection actually update this pane immediately,
+    // rather than leaving it stuck on "Select a connection to start querying." until some unrelated
+    // interaction (like a tab click) happens to force a render.
+    protected override void OnInitialized() => State.Changed += OnStateChanged;
+
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => State.Changed -= OnStateChanged;
+
+    private async Task RunAsync()
+    {
+        if (State.ConnectionId is not { } id) return;
+        // The Run button's disabled="@(_running || string.IsNullOrWhiteSpace(_sql))" attribute used to be
+        // the only way into this method, so these two conditions were unreachable here. SqlEditor's
+        // Ctrl+Enter (OnRun) is a second entry point that calls RunAsync directly, bypassing that
+        // attribute entirely — trivially reachable via OS key repeat while a query is already running, or
+        // by pressing it over blank/whitespace SQL. Guarding here (not just on the button) makes both
+        // entry points obey the same rule instead of relying on the button to gatekeep for both.
+        if (_running || string.IsNullOrWhiteSpace(_sql)) return;
+        _running = true;
+        _result = null;
+        _cts = new CancellationTokenSource();
+        try
+        {
+            // ExecuteSqlAsync validates policy, enforces the timeout and row cap, and writes the audit
+            // row itself. Cancelling here surfaces as execution_canceled, distinct from execution_timeout.
+            _result = await Runner.RunAsync<QueryExecutionService, QueryExecutionResult>(
+                s => s.ExecuteSqlAsync(id, _sql, _cts.Token));
+        }
+        finally
+        {
+            _running = false;
+            _cts.Dispose();
+            _cts = null;
+        }
+    }
+
+    private void Cancel() => _cts?.Cancel();
+
+    private record TranscriptEntry(string Question, NlQueryResult Result);
+
+    private readonly List<TranscriptEntry> _transcript = [];
+    private string _question = "";
+    private bool _asking;
+
+    private async Task AskAsync()
+    {
+        // Mirrors RunAsync's guard, and for the same reason: the Ask button's disabled attribute is not
+        // the only thing that can call this method reentrantly in test/edge scenarios (e.g. a fast
+        // short-circuiting question racing a slow in-flight one), and without an explicit guard here a
+        // second overlapping call's `finally` could reset _asking = false while the first is still
+        // running, re-enabling the button early and allowing a third call to start concurrently with the
+        // first. Guarding here makes overlapping calls impossible rather than merely unlikely.
+        if (_asking || State.ConnectionId is not { } id || string.IsNullOrWhiteSpace(_question)) return;
+        _asking = true;
+        var question = _question;
+        _question = "";
+        try
+        {
+            // AskAsync runs generated SQL through the same validate-then-execute path as the SQL tab,
+            // so policy still applies to whatever the model produced.
+            var result = await Runner.RunAsync<NlQueryService, NlQueryResult>(s => s.AskAsync(id, question));
+            _transcript.Add(new TranscriptEntry(question, result));
+        }
+        finally
+        {
+            _asking = false;
+        }
+    }
+
+    private void OpenInEditor(string sql)
+    {
+        _sql = sql;
+        _tab = Tab.Sql;
+    }
+}

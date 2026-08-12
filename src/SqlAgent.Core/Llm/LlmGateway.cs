@@ -26,6 +26,12 @@ public record LlmSqlResponse(string? Sql, string? ClarificationQuestion)
 /// vendor SDK. Implementations translate a question + schema context into SQL or a clarifying question; they
 /// never execute SQL — execution always goes back through the policy-validated path.
 /// </summary>
+/// <remarks>
+/// To signal that no provider is configured at all (as opposed to a configured provider's call failing),
+/// throw <see cref="NotSupportedException"/>; <c>NlQueryService</c> maps that specifically to the
+/// <c>llm_not_configured</c> error code, distinct from the <c>llm_error</c> code used for every other
+/// exception. See <c>UnavailableLlmSqlGateway</c> in <c>Program.cs</c> for the reference implementation.
+/// </remarks>
 public interface ILlmSqlGateway
 {
     Task<LlmSqlResponse> GenerateSqlAsync(LlmSqlRequest request, CancellationToken ct = default);

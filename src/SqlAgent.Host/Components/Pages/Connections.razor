@@ -1,0 +1,196 @@
+@page "/connections"
+@inject ScopedRunner Runner
+@inject AppState State
+@inject ILogger<Connections> Logger
+
+<h1>Connections</h1>
+
+<table>
+    <thead><tr><th>Name</th><th>Provider</th><th>Mode</th><th></th></tr></thead>
+    <tbody>
+        @foreach (var c in _connections)
+        {
+            <tr>
+                <td>@c.Name</td>
+                <td>@c.ProviderType</td>
+                <td>@(c.IsReadOnly ? "read-only" : "read-write")</td>
+                <td>
+                    <button @onclick="() => Edit(c)">Edit</button>
+                    <button @onclick="() => TestAsync(c.Id)">Test</button>
+                    <button @onclick="() => DeleteAsync(c.Id)">Delete</button>
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+<h2>@(_editingId is null ? "New connection" : "Edit connection")</h2>
+
+<label>Name <input @bind="_name" /></label>
+<label>Provider
+    <select @bind="_provider">
+        @foreach (var p in Enum.GetValues<DatabaseProviderType>())
+        {
+            <option value="@p">@p</option>
+        }
+    </select>
+</label>
+<label>Read-only <input type="checkbox" @bind="_isReadOnly" /></label>
+<label>Connection string
+    <input type="password" @bind="_connectionString"
+           placeholder="@(_editingId is null ? "" : "leave blank to keep the stored secret")" />
+</label>
+
+<button @onclick="SaveAsync">Save</button>
+<button @onclick="NewConnection">New</button>
+
+@if (_status is not null)
+{
+    @* Every outcome on this page — refusal, provider result, or breakage — goes through the same
+       component the SQL and Chat tabs use, so a stable code is shown when there is one and the user
+       can tell a deliberate refusal from a failure. Nothing here hand-builds its own status markup. *@
+    <OutcomeMessage Code="@_statusCode" Message="@_status" />
+}
+
+@code {
+    private IReadOnlyList<DatabaseConnectionInfo> _connections = [];
+    private Guid? _editingId;
+    private string _name = "";
+    private DatabaseProviderType _provider = DatabaseProviderType.Postgres;
+    private bool _isReadOnly = true;
+    private string _connectionString = "";
+    private string? _status;
+    private string? _statusCode;
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        try
+        {
+            _connections = await Runner.RunAsync<DatabaseConnectionService, IReadOnlyList<DatabaseConnectionInfo>>(
+                s => s.ListAsync());
+        }
+        catch (Exception ex)
+        {
+            // The store being unreadable is a real possibility (a locked or missing SQLite file). The
+            // page still has to render its form, and the exception text never reaches the browser —
+            // it can carry a file path or a connection string.
+            Logger.LogError(ex, "Failed to list saved connections.");
+            _connections = [];
+            Fail("The saved connections could not be read. The details are in the server log.");
+        }
+    }
+
+    private void Edit(DatabaseConnectionInfo c)
+    {
+        _editingId = c.Id;
+        _name = c.Name;
+        _provider = c.ProviderType;
+        _isReadOnly = c.IsReadOnly;
+        _connectionString = "";     // never populated from the server; blank means "keep the stored secret"
+        Clear();
+    }
+
+    private void NewConnection()
+    {
+        _editingId = null;
+        _name = "";
+        _provider = DatabaseProviderType.Postgres;
+        _isReadOnly = true;
+        _connectionString = "";
+        Clear();
+    }
+
+    private async Task SaveAsync()
+    {
+        var input = new DatabaseConnectionInput(_name, _provider, _isReadOnly);
+        var wasCreate = _editingId is null;
+        try
+        {
+            if (_editingId is { } id)
+            {
+                var secret = string.IsNullOrWhiteSpace(_connectionString) ? null : _connectionString;
+                await Runner.RunAsync<DatabaseConnectionService>(s => s.UpdateAsync(id, input, secret));
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(_connectionString))
+                {
+                    // A refusal, not a failure: it carries a code like every other refusal in the UI.
+                    Refuse("connection_string_required", "A connection string is required for a new connection.");
+                    return;
+                }
+                await Runner.RunAsync<DatabaseConnectionService>(s => s.CreateAsync(input, _connectionString));
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to save connection {ConnectionId}.", _editingId);
+            Fail("The connection could not be saved. The details are in the server log.");
+            return;
+        }
+        // A successful create left the form holding the values just saved, so pressing Save again
+        // attempted a duplicate — blocked only incidentally by the blank-secret check. Reset it to the
+        // same state the New button produces.
+        if (wasCreate) NewConnection();
+        _connectionString = "";
+        Succeed("Saved.");
+        await ReloadAsync();
+        // The rail's picker lives in MainLayout and is never recreated by navigation, so it only ever
+        // learns about a create/edit/delete if this page says so.
+        State.NotifyConnectionsChanged();
+    }
+
+    private async Task DeleteAsync(Guid id)
+    {
+        try
+        {
+            await Runner.RunAsync<DatabaseConnectionService>(s => s.DeleteAsync(id));
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to delete connection {ConnectionId}.", id);
+            Fail("The connection could not be deleted. The details are in the server log.");
+            return;
+        }
+        if (State.ConnectionId == id) State.Select(null);
+        if (_editingId == id) NewConnection();
+        await ReloadAsync();
+        State.NotifyConnectionsChanged();
+    }
+
+    private async Task TestAsync(Guid id)
+    {
+        ConnectionTestResult? result;
+        try
+        {
+            result = await Runner.RunAsync<ConnectionTester, ConnectionTestResult?>(t => t.TestSavedAsync(id));
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to test connection {ConnectionId}.", id);
+            Fail("The connection could not be tested. The details are in the server log.");
+            return;
+        }
+        // A rejecting-but-reachable server is a normal outcome here, not an error to throw. The
+        // provider's own Error text is a deliberately returned domain result, not exception text, so
+        // showing it is intended (see the Task 5 ruling in the ledger).
+        if (result is null)
+            Refuse("connection_secret_missing", "Connection or its secret is missing.");
+        else if (result.Success)
+            Succeed($"Connection OK ({result.ServerVersion}, {result.ElapsedMs} ms)");
+        else
+            Refuse("connection_test_failed", $"Connection failed: {result.Error}");
+    }
+
+    private void Clear() { _status = null; _statusCode = null; }
+
+    private void Succeed(string message) { _status = message; _statusCode = null; }
+
+    /// <summary>An expected outcome the user should read as deliberate: shown with its stable code.</summary>
+    private void Refuse(string code, string message) { _status = message; _statusCode = code; }
+
+    /// <summary>Something broke. No code — a code would make it read as a rule the app applied on purpose.</summary>
+    private void Fail(string message) { _status = message; _statusCode = null; }
+}

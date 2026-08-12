@@ -174,9 +174,16 @@ Generated SQL carries an "open in editor" action that moves it to the SQL tab fo
 manual editing.
 
 Because no LLM provider is wired yet, `ask_database` currently always returns
-`llm_error`. The tab detects this and shows an explanatory "LLM not configured"
-state with a documentation link instead of a raw error code. No UI change is
-needed when a provider is added.
+`llm_not_configured`. The tab detects that code specifically and shows an
+explanatory "LLM not configured" state with a documentation link instead of a raw
+error code. No UI change is needed when a provider is added.
+
+`llm_not_configured` is deliberately distinct from `llm_error`. This spec
+originally used `llm_error` for both, but `NlQueryService` mapped *any* gateway
+exception to it, so once a real provider was wired its timeouts and network
+failures would have been reported to the user as "no LLM configured".
+`llm_error` now means a configured provider's own call failed, and renders
+through the ordinary `OutcomeMessage` path with its code like every other error.
 
 ## Data flow
 

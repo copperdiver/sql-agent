@@ -2,16 +2,26 @@
 
 AI Agent for access to SQL databases with controlled access
 
-## Local host
+## Web UI
 
-Run the v1 console host with:
+Run the host with:
 
 ```bash
 dotnet run --project src/SqlAgent.Host/SqlAgent.Host.csproj
 ```
 
-The host creates the local SQLite store on startup. Override the default
-`Data Source=sqlagent.db` store with:
+It creates the local SQLite store, then needs a `?token=` on the first request only — e.g.
+`http://127.0.0.1:5099/?token=...`. By default the host generates that token itself and writes
+the full URL to `launch-url.txt` beside the store, readable only by the account the host runs as;
+the startup log names the file but never the token, and the file is deleted again when the host
+shuts down. If you instead set `SqlAgent:LocalAuth:Token` yourself, no file is written at all —
+you already hold the value, so open the URL and append `?token=` followed by what you configured.
+Either way, the token is exchanged for a session cookie on first use. The host listens on
+`127.0.0.1` only, on port 5099 by default (`SqlAgent:Web:Port` to change it). Details on the three
+screens, the token, and the manual regression checklist for the parts automated tests can't reach
+are in [`docs/web-ui.md`](docs/web-ui.md).
+
+Override the default `Data Source=sqlagent.db` store with:
 
 ```bash
 SqlAgent__Storage__ConnectionString="Data Source=/path/to/sqlagent.db" dotnet run --project src/SqlAgent.Host/SqlAgent.Host.csproj
@@ -20,10 +30,10 @@ SqlAgent__Storage__ConnectionString="Data Source=/path/to/sqlagent.db" dotnet ru
 Windows service and systemd packaging examples are in `packaging/`. Operator
 startup, fixture, and troubleshooting notes are in `docs/runbook.md`.
 
-The local API and the MCP server share an optional local-access token. It is
-**off by default** — set `SqlAgent__LocalAuth__Token` on the host to require one,
-and give clients the same value through `SQLAGENT_AUTH_TOKEN`. Details and the
-disable procedure are in [`docs/runbook.md`](docs/runbook.md).
+Setting `SqlAgent__LocalAuth__Token` on the host pins the web UI's launch token to a fixed
+value and is shared with the MCP server, which clients present through `SQLAGENT_AUTH_TOKEN`.
+Leave it unset and the web UI generates a fresh random token every start instead. Details are
+in [`docs/runbook.md`](docs/runbook.md).
 
 ## Claude Code (MCP)
 

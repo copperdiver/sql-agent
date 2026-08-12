@@ -1,0 +1,70 @@
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<div class="editor" @ref="_host"></div>
+
+@code {
+    private ElementReference _host;
+    private DotNetObjectReference<SqlEditor>? _self;
+    private string _lastPushed = "";
+
+    [Parameter] public string Value { get; set; } = "";
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+    [Parameter] public EventCallback OnRun { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _self = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("sqlAgentEditor.create", _host, _self, Value);
+            _lastPushed = Value;
+        }
+        else if (Value != _lastPushed)
+        {
+            // Only push when the parent changed the text (e.g. "open in editor" from the chat tab);
+            // echoing the user's own keystrokes back would move the caret.
+            await JS.InvokeVoidAsync("sqlAgentEditor.setValue", _host, Value);
+            _lastPushed = Value;
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnEditorChanged(string value)
+    {
+        _lastPushed = value;
+        Value = value;
+        await ValueChanged.InvokeAsync(value);
+    }
+
+    [JSInvokable]
+    public async Task RunFromEditor() => await OnRun.InvokeAsync();
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_self is not null)
+        {
+            try
+            {
+                // Detach the CodeMirror instance and its 'change' listener before releasing the .NET
+                // reference those closures hold — otherwise a stray event after disposal (the tab
+                // switching away mid-keystroke, for instance) could try to invoke a method on an object
+                // .NET has already let go of. See sql-editor.js's destroy for what this tears down.
+                await JS.InvokeVoidAsync("sqlAgentEditor.destroy", _host);
+            }
+            catch (JSDisconnectedException)
+            {
+                // The circuit is already gone (e.g. the browser tab closed) — nothing left to detach.
+            }
+            finally
+            {
+                // In a finally, not after the try/catch: any other interop failure would otherwise
+                // skip this line and leak the DotNetObjectReference for the life of the circuit, on
+                // top of the exception it throws out of disposal.
+                _self.Dispose();
+                _self = null;
+            }
+        }
+    }
+}

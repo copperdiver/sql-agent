@@ -1,0 +1,58 @@
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
+
+@if (Result is { Success: true } r)
+{
+    <p class="meta">
+        @r.RowCount rows · @r.ElapsedMs ms
+        @if (r.Truncated)
+        {
+            <strong> · results truncated at the row cap</strong>
+        }
+    </p>
+
+    <div class="actions">
+        <button @onclick="DownloadCsvAsync">Export CSV</button>
+        <button @onclick="DownloadJsonAsync">Export JSON</button>
+    </div>
+
+    <div class="grid-scroll">
+        <table>
+            <thead>
+                <tr>@foreach (var c in r.Columns) { <th>@c</th> }</tr>
+            </thead>
+            <tbody>
+                @foreach (var row in r.Rows)
+                {
+                    <tr>
+                        @foreach (var value in row)
+                        {
+                            <td>@(value is null ? "NULL" : value.ToString())</td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+else if (Result is { } failed)
+{
+    <OutcomeMessage Code="@failed.ErrorCode" Message="@failed.ErrorMessage" />
+}
+
+@code {
+    [Parameter] public QueryExecutionResult? Result { get; set; }
+
+    private Task DownloadCsvAsync() => DownloadAsync("csv");
+    private Task DownloadJsonAsync() => DownloadAsync("json");
+
+    private async Task DownloadAsync(string format)
+    {
+        if (Result is not { Success: true } r) return;
+        var content = format == "csv"
+            ? ResultExport.ToCsv(r.Columns, r.Rows)
+            : ResultExport.ToJson(r.Columns, r.Rows);
+        var mime = format == "csv" ? "text/csv" : "application/json";
+        await JS.InvokeVoidAsync("sqlAgentDownload", $"result.{format}", mime, content);
+    }
+}
