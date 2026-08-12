@@ -52,7 +52,13 @@ builder.WebHost.UseUrls(LoopbackUrl.Resolve(builder.Configuration));
 var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
-    await scope.ServiceProvider.GetRequiredService<SqlAgentDbContext>().Database.EnsureCreatedAsync();
+{
+    // Migrations, not EnsureCreated: EnsureCreated never alters a store that already exists, so every
+    // schema change after the first would silently never reach a machine that had run an earlier build.
+    // StoreInitializer also carries the one-time baseline stamp for stores created the old way.
+    var db = scope.ServiceProvider.GetRequiredService<SqlAgentDbContext>();
+    await StoreInitializer.InitializeAsync(db, app.Logger);
+}
 
 // Order matters: origin checks run before anything reads the token, so a hostile page cannot even
 // attempt an exchange.

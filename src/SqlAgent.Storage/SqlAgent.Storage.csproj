@@ -12,6 +12,9 @@
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
     <!-- ILogger for the local-access token authenticator (already in EF Core's graph; pinned for the namespace). -->
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
+    <!-- Design-time only: `dotnet ef migrations add` needs it, the shipped app does not, so
+         PrivateAssets keeps it out of the output and out of every consuming project. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.0" PrivateAssets="all" />
   </ItemGroup>
 
   <PropertyGroup>
