@@ -4,7 +4,8 @@
     @* A real <button>, not a div: clicking it moves focus onto it, and since it lives inside
        .menu-root, a real user's Escape keypress bubbles to OnKeyDown below. A div never receives
        focus on click, so Escape would have nothing to bubble from. *@
-    <button type="button" class="menu-trigger" @onclick="Toggle">@Trigger</button>
+    <button type="button" class="menu-trigger" @onclick="Toggle"
+            aria-haspopup="true" aria-expanded="@(_open ? "true" : "false")">@Trigger</button>
 
     @if (_open)
     {
@@ -12,7 +13,16 @@
            and needs no interop, and clicks on the menu's own panel never reach it because the panel
            is a sibling painted above it. *@
         <div class="menu-backdrop" @onclick="Close"></div>
-        <div class="menu-panel @PlacementClass" role="menu">
+        @* Deliberately NOT role="menu". ARIA lets a menu own only menuitem/menuitemradio/
+           menuitemcheckbox/group/separator, and a group inside a menu must itself contain menu items.
+           This panel holds neither shape: MenuItem renders a plain wrapper div whose activating button
+           is a grandchild, and UserCard puts a ThemeToggle (a role="group" of three plain buttons) in a
+           row's Trailing slot. Claiming "menu" there makes NVDA/JAWS switch into menu mode and expose
+           only the owned menu items, which silently drops the theme buttons out of arrow-key navigation
+           — the control becomes unreachable from the very popover that contains it. Plain buttons in a
+           popover is what this actually is, and announcing it honestly keeps every child reachable;
+           the trigger's aria-haspopup/aria-expanded above still convey that a popover is involved. *@
+        <div class="menu-panel @PlacementClass">
             <CascadingValue Value="this" IsFixed="true">@ChildContent</CascadingValue>
         </div>
     }

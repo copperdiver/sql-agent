@@ -15,7 +15,20 @@
     <Icon Name="menu" Size="20" />
 </button>
 
-<aside class="sidebar custom-scroll @(_collapsed ? "collapsed" : "") @(_drawerOpen ? "drawer-open" : "")">
+@* tabindex="-1" does two jobs: it makes @onkeydown fire on the <aside> at all, and it makes the aside a
+   valid target for the programmatic focus move in OnAfterRenderAsync below. -1 rather than 0 keeps it
+   out of the tab order, so Escape-to-close costs no phantom tab stop before the brand link. Same shape
+   as Menu.razor's .menu-root and Modal.razor's .modal-root.
+
+   Escape reaches this handler only by bubbling from whatever currently has focus, and the drawer is
+   opened by a hamburger that sits OUTSIDE this element — so focus must be moved inside first. That is
+   FocusAsync's job, NOT autofocus's: per the HTML spec the browser flushes autofocus candidates only
+   while the document's focused area is still the body, and clicking the hamburger focuses the hamburger,
+   so an autofocus attribute on a close button inserted by that same click is skipped by design. Verified
+   in Chromium rather than assumed — a standalone probe that inserted an autofocus-carrying button from a
+   click handler left focus on the trigger, and Escape never reached the container. *@
+<aside class="sidebar custom-scroll @(_collapsed ? "collapsed" : "") @(_drawerOpen ? "drawer-open" : "")"
+       tabindex="-1" @ref="_aside" @onkeydown="OnKeyDown">
     <SidebarHeader Collapsed="_collapsed"
                    OnToggleCollapse="ToggleCollapseAsync"
                    OnCloseDrawer="CloseDrawer" />
@@ -36,6 +49,8 @@
 @code {
     private bool _collapsed;
     private bool _drawerOpen;
+    private ElementReference _aside;
+    private bool _focusDrawerPending;
 
     // On a phone: tap the hamburger, tap a nav row, and the route changes behind a still-open drawer
     // and scrim unless something closes it. Same pattern as WorkArea's LocationChanged subscription —
@@ -52,14 +67,25 @@
         // than rendering an expanded sidebar inside an already-narrowed shell. This is a first-render
         // read, not an event handler, so a broad catch is correct here: private-mode localStorage can
         // throw arbitrary types, and there is nothing more specific to recover to than the default.
-        if (!firstRender) return;
+        if (!firstRender)
+        {
+            await FocusDrawerIfJustOpenedAsync();
+            return;
+        }
         try
         {
             _collapsed = await JS.InvokeAsync<string>("sqlAgentUi.getSidebar") == "collapsed";
         }
         catch (Exception ex)
         {
-            Logger.LogDebug(ex, "sqlAgentUi.getSidebar failed; Sidebar is falling back to expanded.");
+            // Level split by what the failure means, not by where it happened (see ToggleCollapseAsync
+            // for the same split on the write path): a JSException is a genuine bug — theme.js failed
+            // to load, or sqlAgentUi.getSidebar was renamed out from under this component — and would
+            // otherwise leave the sidebar silently stuck expanded with zero evidence anywhere, so it is
+            // logged at Warning, above appsettings.json's Information default. Everything else here is
+            // routine (private-mode localStorage throwing, a circuit already gone) and stays at Debug.
+            Logger.Log(ex is JSException ? LogLevel.Warning : LogLevel.Debug, ex,
+                "sqlAgentUi.getSidebar failed; Sidebar is falling back to expanded.");
             _collapsed = false;
         }
         StateHasChanged();
@@ -72,22 +98,85 @@
         {
             await JS.InvokeVoidAsync("sqlAgentUi.setSidebar", _collapsed ? "collapsed" : "expanded");
         }
-        catch (Exception ex) when (ex is JSException or JSDisconnectedException)
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or OperationCanceledException)
         {
-            // JSException and JSDisconnectedException are siblings under System.Exception, not a
-            // base/derived pair (see ThemeToggle.ApplyAsync for the same reasoning in full) — a filter
-            // must name both. This handler runs inside an event callback: an unhandled exception here
-            // would take the whole circuit down, and the sidebar sits outside WorkArea's ErrorBoundary,
-            // so nothing else would catch it. _collapsed is left at the toggled value: the visible
-            // sidebar width already changed synchronously above, and reverting it here would fight the
-            // user's own click while the persistence call is what actually failed.
-            Logger.LogDebug(ex, "sqlAgentUi.setSidebar failed for state {State}.", _collapsed ? "collapsed" : "expanded");
+            // All three are siblings under System.Exception, not a base/derived chain (see
+            // ThemeToggle.ApplyAsync for the same reasoning in full) — a filter must name each one.
+            // OperationCanceledException is what InvokeVoidAsync throws when Blazor Server's own
+            // CircuitOptions.JSInteropDefaultCallTimeout (one minute by default) elapses, e.g. a
+            // backgrounded tab that never answers; TaskCanceledException derives from it and is covered
+            // by naming it.
+            //
+            // The three are caught together but for two different reasons, and the distinction is worth
+            // keeping straight. This handler runs inside an event callback, so a JSException or
+            // JSDisconnectedException escaping it takes the whole circuit down — not into Blazor's
+            // reconnect window, but down — and the sidebar sits outside WorkArea's ErrorBoundary, so
+            // nothing else would catch it. An escaping OperationCanceledException does NOT do that: the
+            // async machinery turns it into a cancelled task and Renderer.GetErrorHandledTask skips its
+            // error path when taskToHandle.IsCanceled ("Ignore errors due to task cancellations").
+            // Catching it buys evidence rather than survival — uncaught, the failure is discarded in
+            // silence and nothing anywhere records that the state was never persisted.
+            //
+            // _collapsed is left at the toggled value in every case: the visible sidebar width already
+            // changed synchronously above, and reverting it here would fight the user's own click while
+            // the persistence call is what actually failed.
+            //
+            // Warning vs Debug: a JSException means the function itself is missing or threw, which is a
+            // real bug worth surfacing above appsettings.json's Information default. A gone circuit or
+            // an interop timeout is routine and stays at Debug so it cannot drown the log.
+            Logger.Log(ex is JSException ? LogLevel.Warning : LogLevel.Debug, ex,
+                "sqlAgentUi.setSidebar failed for state {State}.", _collapsed ? "collapsed" : "expanded");
         }
     }
 
-    private void OpenDrawer() => _drawerOpen = true;
+    private void OpenDrawer()
+    {
+        _drawerOpen = true;
+        // Deferred to OnAfterRenderAsync rather than focused here: the class that actually slides the
+        // drawer into view is applied by the render this handler triggers, and focusing an element that
+        // is still translated off-screen invites the browser to scroll it into view.
+        _focusDrawerPending = true;
+    }
 
     private void CloseDrawer() => _drawerOpen = false;
+
+    /// <summary>
+    /// Moves focus into the drawer once it has actually rendered open, which is the only thing that lets
+    /// a real Escape keypress bubble to OnKeyDown below — the hamburger that opens the drawer sits
+    /// outside the aside, so without this the keypress goes to the trigger and never reaches the handler.
+    /// The aside itself is the focus target rather than the close button inside it: it is already
+    /// tabindex="-1" for the key handler, and focusing the container is the ordinary pattern for a
+    /// drawer, leaving Tab to walk into its contents from the top.
+    /// </summary>
+    private async Task FocusDrawerIfJustOpenedAsync()
+    {
+        if (!_focusDrawerPending) return;
+        _focusDrawerPending = false;
+        try
+        {
+            await _aside.FocusAsync();
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or OperationCanceledException)
+        {
+            // FocusAsync is interop underneath, so it fails the same three ways the calls above do, and
+            // this runs in the render loop, where an escaping JSException or JSDisconnectedException is
+            // just as fatal to the circuit as one from an event handler (a cancellation, per the note in
+            // ToggleCollapseAsync, would instead be discarded silently). Losing the focus move costs only
+            // Escape-to-close; the scrim and the close button still dismiss the drawer, so there is
+            // nothing to recover and nothing worth telling the user about. Same level split as elsewhere:
+            // a JSException means Blazor's own focus interop is missing, which is a real bug.
+            Logger.Log(ex is JSException ? LogLevel.Warning : LogLevel.Debug, ex,
+                "Focusing the drawer failed; Escape-to-close will not work until it is reopened.");
+        }
+    }
+
+    // The spec calls for the drawer to close on scrim click OR Escape. Guarded on _drawerOpen so a
+    // stray Escape inside the wide-viewport sidebar (where the drawer concept does not exist and
+    // _drawerOpen is already false) is a no-op rather than a pointless re-render.
+    private void OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape" && _drawerOpen) CloseDrawer();
+    }
 
     public void Dispose() => Nav.LocationChanged -= OnLocationChanged;
 }

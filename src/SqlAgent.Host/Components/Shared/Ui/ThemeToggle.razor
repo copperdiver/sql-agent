@@ -33,10 +33,14 @@
             // throws JSDisconnectedException, and a missing/renamed sqlAgentUi.getTheme (theme.js
             // failed to load, or drifted from this component) throws JSException. None of those are
             // worth failing the page over: "system" is the same default theme.js itself falls back to,
-            // so the control stays truthful. Logged at Debug rather than swallowed outright: private-mode
-            // storage is routine, but a renamed/missing interop call is a real bug that would otherwise
-            // leave the control silently and permanently wrong with zero evidence in any log.
-            Logger.LogDebug(ex, "sqlAgentUi.getTheme failed; ThemeToggle is falling back to system.");
+            // so the control stays truthful. Logged rather than swallowed outright, and at a level that
+            // matches what the failure means: a renamed/missing interop call (JSException) is a real bug
+            // that would otherwise leave the control silently and permanently wrong, so it goes to
+            // Warning — above appsettings.json's Information default, where it will actually be seen.
+            // Private-mode storage throwing, or a circuit that is already gone, is routine and stays at
+            // Debug rather than crying wolf on every such page load.
+            Logger.Log(ex is JSException ? LogLevel.Warning : LogLevel.Debug, ex,
+                "sqlAgentUi.getTheme failed; ThemeToggle is falling back to system.");
             _theme = "system";
         }
         StateHasChanged();
@@ -49,23 +53,42 @@
         {
             await JS.InvokeVoidAsync("sqlAgentUi.setTheme", theme);
         }
-        catch (Exception ex) when (ex is JSException or JSDisconnectedException)
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or OperationCanceledException)
         {
-            // JSException and JSDisconnectedException are siblings under System.Exception, not a
-            // base/derived pair, so a filter has to name both explicitly rather than catching only one
-            // and assuming it covers the other. Both mean the same thing here — the browser is not
-            // reachable to theme, whether because the circuit is gone (disconnected: a dropped
-            // WebSocket, a closed tab) or because sqlAgentUi.setTheme itself is missing/broken (a
-            // JSException — theme.js failed to load or drifted from this component). The latter is
-            // exactly what the read path above already tolerates: OnAfterRenderAsync's catch renders a
-            // normal-looking toggle in that case, so a click here must not then take an unhandled
-            // exception through this event handler and kill the circuit — Task 5 mounts this in the
-            // sidebar, outside WorkArea's ErrorBoundary, so nothing else would catch it. _theme is left
-            // at the clicked value rather than reverted: applyTheme() never ran either way, so the
-            // visual state is already wrong, and reverting the selection would just make the control
-            // fight the user's own click. A genuine programming error in this method (any other
-            // exception type) still surfaces, since the filter names only these two.
-            Logger.LogDebug(ex, "sqlAgentUi.setTheme failed for theme {Theme}.", theme);
+            // JSException, JSDisconnectedException and OperationCanceledException are all siblings under
+            // System.Exception, not a base/derived chain, so a filter has to name each one explicitly
+            // rather than catching one and assuming it covers the others. All three mean the same thing
+            // here — the browser is not reachable to theme, whether because the circuit is gone
+            // (disconnected: a dropped WebSocket, a closed tab), because sqlAgentUi.setTheme itself is
+            // missing/broken (a JSException — theme.js failed to load or drifted from this component),
+            // or because Blazor Server's own CircuitOptions.JSInteropDefaultCallTimeout (one minute by
+            // default) elapsed with no answer from the browser, which surfaces as
+            // OperationCanceledException. TaskCanceledException derives from it, so naming the base
+            // covers that too.
+            //
+            // Two of the three are caught to keep the circuit alive, the third to keep the failure
+            // visible, and it is worth not blurring them. The JSException case is exactly what the read
+            // path above already tolerates: OnAfterRenderAsync's catch renders a normal-looking toggle,
+            // so a click here must not then take an unhandled exception through this event handler and
+            // kill the circuit — Task 5 mounts this in the sidebar, outside WorkArea's ErrorBoundary, so
+            // nothing else would catch it, and a JSException or JSDisconnectedException escaping an event
+            // handler terminates the circuit outright instead of leaving it in Blazor's reconnect window.
+            // An escaping OperationCanceledException does not: the async machinery completes the handler's
+            // task as cancelled, and Renderer.GetErrorHandledTask deliberately skips its error path when
+            // taskToHandle.IsCanceled ("Ignore errors due to task cancellations"). Catching that one buys
+            // evidence rather than survival — uncaught, the theme silently fails to persist and no log
+            // anywhere says so.
+            //
+            // _theme is left at the clicked value rather than reverted: applyTheme() never ran either
+            // way, so the visual state is already wrong, and reverting the selection would just make the
+            // control fight the user's own click. A genuine programming error in this method (any other
+            // exception type) still surfaces, since the filter names only these three.
+            //
+            // Warning vs Debug, same split as the read path: a missing or throwing function is a bug and
+            // deserves to clear appsettings.json's Information default; a gone circuit or an interop
+            // timeout is routine and stays at Debug.
+            Logger.Log(ex is JSException ? LogLevel.Warning : LogLevel.Debug, ex,
+                "sqlAgentUi.setTheme failed for theme {Theme}.", theme);
         }
     }
 

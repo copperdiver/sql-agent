@@ -239,10 +239,10 @@ files under `wwwroot/js/`:
 | Set theme to System, switch the OS between light and dark | Page follows the OS without a reload |
 | Set theme to Light on a dark-mode OS | Page stays light — the explicit choice wins |
 | Collapse the sidebar, reload | Sidebar renders collapsed on first paint, not wide-then-narrow |
-| Narrow the window below 1024px | Sidebar becomes a drawer; the hamburger opens it; the scrim closes it |
+| Narrow the window below 1024px | Sidebar becomes a drawer; the hamburger opens it; the scrim closes it, and so does Escape |
 | Open the user menu, adjust the theme from its row | Theme changes and the menu stays open |
 | Open About from the user menu | Version, bind URL, port, and store path are correct |
-| Tab through the sidebar and the Chat tab's question input | Focus ring is visible on every control |
+| Tab through the sidebar and the Chat tab's question input | Focus ring is visible on every control, checkboxes included |
 | Load the UI with `wwwroot/fonts/DMSans-Variable.woff2` removed | Text renders in the system sans-serif, not a serif |
 
 ## Approved scope that was consciously dropped

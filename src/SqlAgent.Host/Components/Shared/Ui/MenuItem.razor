@@ -1,5 +1,8 @@
 <div class="menu-item @(Danger ? "danger" : "")">
-    <button type="button" class="menu-item-action" role="menuitem" @onclick="Activate">
+    @* No role="menuitem": Menu's panel is not a role="menu" (see the comment there), and a menuitem
+       outside a menu is a role with no container to belong to. A plain <button> already announces as
+       a button and is reachable by Tab, which is what this row actually offers. *@
+    <button type="button" class="menu-item-action" @onclick="Activate">
         @if (!string.IsNullOrWhiteSpace(Icon))
         {
             <Icon Name="@Icon" Size="16" />

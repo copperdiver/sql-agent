@@ -218,6 +218,18 @@ input, select, textarea {
 }
 input::placeholder, textarea::placeholder { color: var(--input-placeholder); }
 input:focus, select:focus, textarea:focus { border-color: var(--primary-300); outline: none; }
+/* Checkboxes and radios are the exception to the rule above, and must be exempted explicitly. For a
+   text input or a select, swapping the border color is a visible substitute for the outline that rule
+   removes. A native checkbox under the default `appearance: auto` paints its own widget and ignores
+   author border, background and padding entirely, so the compensating declaration renders nothing at
+   all and the focus indicator simply disappears (WCAG 2.4.7). The generic `:focus-visible` rule higher
+   up in this file cannot rescue it: `input:focus` is (0,1,1) against that rule's (0,1,0) and comes
+   later in source order, so it wins twice over. Without this, a keyboard user tabbing through the
+   schema rail's per-table visibility checkboxes cannot tell which of thirty rows is focused. */
+input[type=checkbox]:focus-visible, input[type=radio]:focus-visible {
+  outline: 2px solid var(--primary-400);
+  outline-offset: 2px;
+}
 
 label { color: var(--text-50); font-size: var(--text-sm); }
 

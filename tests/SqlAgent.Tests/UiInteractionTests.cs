@@ -37,6 +37,56 @@ public class UiInteractionTests
     }
 
     [Fact]
+    public void The_menu_trigger_announces_its_popover_and_tracks_whether_it_is_open()
+    {
+        // The panel deliberately carries no role="menu" (ARIA lets a menu own only menu items, a group
+        // of menu items, or separators — and this panel holds a ThemeToggle's role="group" of plain
+        // buttons, which a screen reader in menu mode skips entirely, making the theme control
+        // unreachable from the popover containing it). Dropping that role costs the one true thing it
+        // conveyed: that the trigger opens something. aria-haspopup says so honestly, and aria-expanded
+        // has to track the actual state — a trigger permanently stuck on "false" is worse than no
+        // attribute, because it actively tells the user nothing opened.
+        using var ctx = new Bunit.TestContext();
+        var menu = ctx.RenderComponent<Menu>(p => p
+            .Add(m => m.Trigger, (RenderFragment)(b => b.AddMarkupContent(0, "<span>t</span>")))
+            .AddChildContent("<div id=\"body\">contents</div>"));
+
+        var trigger = menu.Find(".menu-trigger");
+        Assert.Equal("true", trigger.GetAttribute("aria-haspopup"));
+        Assert.Equal("false", trigger.GetAttribute("aria-expanded"));
+
+        trigger.Click();
+        Assert.Equal("true", menu.Find(".menu-trigger").GetAttribute("aria-expanded"));
+
+        menu.Find(".menu-backdrop").Click();
+        Assert.Equal("false", menu.Find(".menu-trigger").GetAttribute("aria-expanded"));
+    }
+
+    [Fact]
+    public void The_menu_claims_no_ARIA_role_it_does_not_honour()
+    {
+        // role="menu" owns only menuitem/menuitemradio/menuitemcheckbox/group/separator, and a group
+        // inside a menu must itself contain menu items. Neither holds here: MenuItem renders a plain
+        // wrapper div whose activating button is a grandchild, and UserCard's Theme row puts a
+        // ThemeToggle — a role="group" of three ordinary buttons — in the sibling Trailing slot. With
+        // role="menu" present, NVDA and JAWS switch into menu mode and expose only the owned menu items,
+        // so arrow-key navigation skips those three buttons and the theme control cannot be reached from
+        // the menu that contains it. Plain buttons in a popover is what this component actually is.
+        using var ctx = new Bunit.TestContext();
+        var menu = ctx.RenderComponent<Menu>(p => p
+            .Add(m => m.Trigger, (RenderFragment)(b => b.AddMarkupContent(0, "<span>t</span>")))
+            .AddChildContent<MenuItem>(ip => ip
+                .AddChildContent("Theme")
+                .Add(i => i.Trailing, (RenderFragment)(b => b.AddMarkupContent(0, "<div role=\"group\"><button>x</button></div>")))));
+        menu.Find(".menu-trigger").Click();
+
+        Assert.Empty(menu.FindAll("[role=menu]"));
+        Assert.Empty(menu.FindAll("[role=menuitem]"));
+        // The row is still activatable — dropping the role must not have dropped the button with it.
+        Assert.Equal("button", menu.Find(".menu-item-action").TagName.ToLowerInvariant());
+    }
+
+    [Fact]
     public void Clicking_the_backdrop_closes_the_menu()
     {
         // Without a backdrop the only way out of an open menu is re-clicking the trigger, which is not

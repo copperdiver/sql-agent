@@ -56,11 +56,19 @@ public class SettingsPageTests
     [Fact]
     public void A_configured_provider_is_reported_as_configured()
     {
+        // Asserting only the absence of "No model configured" was not enough to cover anything: deleting
+        // the whole `@if (Llm.IsConfigured) { <Badge>Configured</Badge> }` branch from Settings.razor
+        // left this test green, even though that branch is the only rendered evidence of the configured
+        // path — the seam a later phase's model selector reads. So assert what is present, not just what
+        // is absent, and pin the unconfigured page's runbook pointer as absent too: a page that both
+        // says "Configured" and sends the user to the runbook is the failure this pair rules out.
         using var ctx = NewContext(new ConfiguredGatewayStub());
 
         var page = ctx.RenderComponent<Settings>();
 
+        Assert.Contains("Configured", page.Markup);
         Assert.DoesNotContain("No model configured", page.Markup);
+        Assert.DoesNotContain("runbook", page.Markup, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

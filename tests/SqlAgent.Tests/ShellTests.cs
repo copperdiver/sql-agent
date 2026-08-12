@@ -5,6 +5,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.JSInterop;
 using SqlAgent.Core;
 using SqlAgent.Host.Components.Layout;
@@ -17,26 +18,14 @@ public class ShellTests : IDisposable
 {
     private readonly SqliteConnection _conn = new("DataSource=:memory:");
     private readonly Bunit.TestContext _ctx = new();
+    private readonly RecordingLoggerProvider _logs = new();
 
     public ShellTests()
     {
         // The sidebar hosts SchemaRail, which resolves the connection services, so the shell test needs
         // the same registrations the rail's own tests use.
         _conn.Open();
-        _ctx.Services.AddDbContext<SqlAgentDbContext>(o => o.UseSqlite(_conn));
-        _ctx.Services.AddSingleton<ISecretStore, InMemorySecretStore>();
-        _ctx.Services.AddSingleton<IDatabaseProviderRegistry, DatabaseProviderRegistry>();
-        _ctx.Services.AddScoped<DatabaseConnectionService>();
-        _ctx.Services.AddScoped<TablePolicyService>();
-        _ctx.Services.AddScoped<ScopedRunner>();
-        _ctx.Services.AddScoped<AppState>();
-        _ctx.Services.AddLogging();
-        // Sidebar now renders UserCard (Task 6), which resolves HostInfo and mounts a ThemeToggle.
-        _ctx.Services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
-        _ctx.Services.AddSingleton<HostInfo>();
-        _ctx.JSInterop.Mode = JSRuntimeMode.Loose;
-        _ctx.JSInterop.Setup<string>("sqlAgentUi.getSidebar").SetResult("expanded");
-        _ctx.JSInterop.Setup<string>("sqlAgentUi.getTheme").SetResult("system");
+        RegisterSidebarServices(_ctx, _logs, "expanded");
 
         using var scope = _ctx.Services.CreateScope();
         scope.ServiceProvider.GetRequiredService<SqlAgentDbContext>().Database.EnsureCreated();
@@ -72,19 +61,7 @@ public class ShellTests : IDisposable
         // Same reason as the theme: the class is applied to <html> pre-paint, so the component has to
         // ask rather than assume, or an expanded-looking sidebar renders inside a narrow shell.
         using var ctx = new Bunit.TestContext();
-        ctx.Services.AddDbContext<SqlAgentDbContext>(o => o.UseSqlite(_conn));
-        ctx.Services.AddSingleton<ISecretStore, InMemorySecretStore>();
-        ctx.Services.AddSingleton<IDatabaseProviderRegistry, DatabaseProviderRegistry>();
-        ctx.Services.AddScoped<DatabaseConnectionService>();
-        ctx.Services.AddScoped<TablePolicyService>();
-        ctx.Services.AddScoped<ScopedRunner>();
-        ctx.Services.AddScoped<AppState>();
-        ctx.Services.AddLogging();
-        ctx.Services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
-        ctx.Services.AddSingleton<HostInfo>();
-        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
-        ctx.JSInterop.Setup<string>("sqlAgentUi.getSidebar").SetResult("collapsed");
-        ctx.JSInterop.Setup<string>("sqlAgentUi.getTheme").SetResult("system");
+        RegisterSidebarServices(ctx, new RecordingLoggerProvider(), "collapsed");
 
         var sidebar = ctx.RenderComponent<Sidebar>();
 
@@ -138,6 +115,71 @@ public class ShellTests : IDisposable
         sidebar.Find("[data-testid=collapse-toggle]").Click();
 
         Assert.Contains("collapsed", sidebar.Find("aside").ClassName);
+    }
+
+    [Fact]
+    public void An_interop_timeout_during_setSidebar_is_caught_and_leaves_evidence()
+    {
+        // The third sibling the two-type filter missed. Blazor Server enforces
+        // CircuitOptions.JSInteropDefaultCallTimeout (one minute by default) on every interop call, and
+        // when it elapses the pending call is cancelled: awaiting it throws TaskCanceledException, which
+        // derives from OperationCanceledException — a sibling of JSException and JSDisconnectedException
+        // under System.Exception, caught by neither of those. A backgrounded tab throttled to a
+        // standstill, or a browser that simply never answers, is enough to trigger it.
+        //
+        // What it does NOT do, contrary to the sibling tests above, is take the circuit down. An async
+        // event handler that throws OperationCanceledException completes as a *cancelled* task (the
+        // async method builder converts it via TrySetCanceled), and the framework's own
+        // Renderer.GetErrorHandledTask guards its error path with "if (!taskToHandle.IsCanceled)" under
+        // the comment "Ignore errors due to task cancellations" — so the exception is discarded before
+        // any error boundary or circuit teardown sees it. Verified rather than assumed: with
+        // OperationCanceledException removed from the filter, an escaping JSException fails these tests
+        // and an escaping TaskCanceledException does not.
+        //
+        // That silence is the actual defect, and it is why this test asserts the log line rather than
+        // "the page still works". Uncaught, the persistence failure is swallowed by the renderer with
+        // no exception surfaced and no record written anywhere; the sidebar simply never remembers its
+        // collapsed state and nothing in any log says why. Caught, it is Debug-level evidence — the
+        // level is deliberate: an interop timeout is routine, unlike the missing-function case below.
+        _ctx.JSInterop.SetupVoid("sqlAgentUi.setSidebar", _ => true)
+            .SetException(new TaskCanceledException("JS interop call timed out"));
+        var sidebar = _ctx.RenderComponent<Sidebar>();
+
+        sidebar.Find("[data-testid=collapse-toggle]").Click();
+
+        Assert.Contains("collapsed", sidebar.Find("aside").ClassName);
+        var record = _logs.Records.Single(r => r.Message.Contains("sqlAgentUi.setSidebar failed"));
+        Assert.Equal(LogLevel.Debug, record.Level);
+        Assert.IsAssignableFrom<OperationCanceledException>(record.Exception);
+    }
+
+    [Fact]
+    public void A_missing_interop_function_is_logged_loudly_but_a_gone_circuit_is_not()
+    {
+        // appsettings.json sets Logging:LogLevel:Default to Information with no Development override, so
+        // every one of these catches logging at Debug meant the interop diagnostics two earlier fix
+        // rounds bought emitted nothing at all in any configuration this project ships. The split is by
+        // what the failure means: a JSException is sqlAgentUi.setSidebar being missing, renamed, or
+        // throwing — a real bug that leaves the sidebar permanently unable to remember its state — so it
+        // clears the Information default at Warning. A dropped circuit is routine and stays at Debug,
+        // where it cannot drown the log every time a laptop sleeps.
+        _ctx.JSInterop.SetupVoid("sqlAgentUi.setSidebar", _ => true)
+            .SetException(new JSException("Could not find 'sqlAgentUi.setSidebar'"));
+        var sidebar = _ctx.RenderComponent<Sidebar>();
+        sidebar.Find("[data-testid=collapse-toggle]").Click();
+
+        Assert.Equal(LogLevel.Warning,
+            _logs.Records.Single(r => r.Message.Contains("sqlAgentUi.setSidebar failed")).Level);
+
+        using var disconnected = new Bunit.TestContext();
+        var otherLogs = new RecordingLoggerProvider();
+        RegisterSidebarServices(disconnected, otherLogs, "expanded");
+        disconnected.JSInterop.SetupVoid("sqlAgentUi.setSidebar", _ => true)
+            .SetException(new JSDisconnectedException("circuit gone"));
+        disconnected.RenderComponent<Sidebar>().Find("[data-testid=collapse-toggle]").Click();
+
+        Assert.Equal(LogLevel.Debug,
+            otherLogs.Records.Single(r => r.Message.Contains("sqlAgentUi.setSidebar failed")).Level);
     }
 
     [Fact]
@@ -297,6 +339,77 @@ public class ShellTests : IDisposable
     }
 
     [Fact]
+    public void Escape_closes_an_open_drawer()
+    {
+        // The spec calls for the drawer to close on scrim click OR Escape; only the scrim was wired.
+        // On a phone the scrim is a tap target, but on a narrow desktop window (the same sub-1024px
+        // breakpoint) Escape is the reflex, and nothing answered it.
+        var sidebar = _ctx.RenderComponent<Sidebar>();
+        sidebar.Find("[data-testid=drawer-open]").Click();
+        Assert.Contains("drawer-open", sidebar.Find("aside").ClassName);
+
+        sidebar.Find("aside").KeyDown(Key.Escape);
+
+        Assert.DoesNotContain("drawer-open", sidebar.Find("aside").ClassName);
+    }
+
+    [Fact]
+    public void Opening_the_drawer_moves_focus_into_it_so_Escape_has_somewhere_to_bubble_from()
+    {
+        // The half of Escape-to-close that KeyDown() above cannot exercise. bUnit has no focus model at
+        // all: KeyDown() invokes the handler directly and would pass even if focus never entered the
+        // aside — but in a real browser the aside's @onkeydown only fires by bubbling from the focused
+        // element, and the drawer is opened by a hamburger that sits OUTSIDE the aside, so without
+        // moving focus inside, Escape is delivered to the trigger and the handler is dead code.
+        //
+        // The obvious fix, an autofocus attribute on the close button, does not work here and was
+        // measured rather than reasoned about: a standalone Chromium probe that inserted an
+        // autofocus-carrying button in a click handler left focus on the trigger and never fired the
+        // container's keydown. The spec explains why — autofocus candidates are flushed only while the
+        // document's focused area is still the body, and the opening click has already focused the
+        // hamburger. So the move is explicit, via ElementReference.FocusAsync, which is interop
+        // underneath; asserting the invocation is the only observable bUnit offers.
+        var sidebar = _ctx.RenderComponent<Sidebar>();
+
+        sidebar.Find("[data-testid=drawer-open]").Click();
+
+        Assert.NotEqual(0, FocusInvocationCount());
+    }
+
+    [Fact]
+    public void The_drawer_focus_move_happens_only_when_the_drawer_actually_opens()
+    {
+        // Focus is a shared, user-visible resource: stealing it on every render would yank the caret out
+        // of whatever the user was typing in the SQL editor each time the sidebar re-rendered, and
+        // grabbing it on first render would fight the browser's own restore-focus-on-reload. The pending
+        // flag exists to keep the move to exactly the open transition, and this pins that.
+        var sidebar = _ctx.RenderComponent<Sidebar>();
+
+        Assert.Equal(0, FocusInvocationCount());
+
+        sidebar.Find("[data-testid=drawer-open]").Click();
+        var afterOpen = FocusInvocationCount();
+        Assert.NotEqual(0, afterOpen);
+
+        // A re-render that is not an open (closing via the scrim) must not focus again.
+        sidebar.Find(".sidebar-scrim").Click();
+
+        Assert.Equal(afterOpen, FocusInvocationCount());
+    }
+
+    [Fact]
+    public void The_aside_is_focusable_enough_to_receive_a_bubbled_Escape()
+    {
+        // @onkeydown on a non-interactive element never fires without a tabindex: the element is not in
+        // the focus path at all, so no keyboard event can reach it, bubbled or otherwise. -1 rather than
+        // 0 keeps the aside out of the tab order, so Escape-to-close costs no phantom tab stop before
+        // the brand link. Same shape as Menu.razor's .menu-root and Modal.razor's .modal-root.
+        var sidebar = _ctx.RenderComponent<Sidebar>();
+
+        Assert.Equal("-1", sidebar.Find("aside").GetAttribute("tabindex"));
+    }
+
+    [Fact]
     public void Disposing_the_sidebar_unsubscribes_from_navigation_changes()
     {
         var sidebar = _ctx.RenderComponent<Sidebar>();
@@ -321,6 +434,36 @@ public class ShellTests : IDisposable
         // WorkAreaBoundaryTests pins for WorkArea's identical subscription. NavLink cleans up its own
         // subscriptions regardless, so a nonzero result here can only mean Sidebar's own leaked.
         Assert.Equal(0, LocationChangedSubscriberCount(nav));
+    }
+
+    /// <summary>How many times the component asked the browser to move focus. ElementReference.FocusAsync
+    /// is interop underneath (Blazor's own "domWrapper.focus"), and the invocation record is the only
+    /// trace of it bUnit exposes — there is no focus model to observe the result of.</summary>
+    private int FocusInvocationCount() =>
+        _ctx.JSInterop.Invocations.Count(i => i.Identifier.Contains("focus", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>The registrations Sidebar needs to render at all: SchemaRail's connection services, plus
+    /// HostInfo and a theme read-back for the UserCard/ThemeToggle in its foot. Shared by the fixture's
+    /// own context and by the tests that need a second, differently-configured one.</summary>
+    private void RegisterSidebarServices(Bunit.TestContext ctx, RecordingLoggerProvider logs, string sidebarState)
+    {
+        ctx.Services.AddDbContext<SqlAgentDbContext>(o => o.UseSqlite(_conn));
+        ctx.Services.AddSingleton<ISecretStore, InMemorySecretStore>();
+        ctx.Services.AddSingleton<IDatabaseProviderRegistry, DatabaseProviderRegistry>();
+        ctx.Services.AddScoped<DatabaseConnectionService>();
+        ctx.Services.AddScoped<TablePolicyService>();
+        ctx.Services.AddScoped<ScopedRunner>();
+        ctx.Services.AddScoped<AppState>();
+        ctx.Services.AddLogging();
+        // An explicit factory, not just an extra ILoggerProvider registration: bUnit pre-registers its
+        // own ILoggerFactory, AddLogging()'s TryAdd leaves that in place, and it ignores providers
+        // entirely — so records went nowhere. Registering the factory last makes it the one resolved.
+        ctx.Services.AddSingleton<ILoggerFactory>(new LoggerFactory([logs]));
+        ctx.Services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        ctx.Services.AddSingleton<HostInfo>();
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
+        ctx.JSInterop.Setup<string>("sqlAgentUi.getSidebar").SetResult(sidebarState);
+        ctx.JSInterop.Setup<string>("sqlAgentUi.getTheme").SetResult("system");
     }
 
     private static int LocationChangedSubscriberCount(NavigationManager nav)

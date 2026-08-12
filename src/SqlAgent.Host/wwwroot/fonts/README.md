@@ -1,8 +1,18 @@
 # Vendored fonts
 
 `DMSans-Variable.woff2` — DM Sans, variable weight axis, latin subset.
-Licensed under the SIL Open Font License 1.1, which permits redistribution.
-Upstream: <https://github.com/googlefonts/dm-fonts>.
+
+> Copyright 2014 The DM Sans Project Authors (https://github.com/googlefonts/dm-fonts)
+
+Licensed under the SIL Open Font License 1.1, which permits redistribution
+provided that "each copy contains the above copyright notice and this license"
+(OFL 1.1, condition 2). The full license text is therefore vendored alongside
+the font as `OFL.txt`, copied verbatim from the upstream repository's
+`Sans/OFL.txt`; the copyright notice above is reproduced from its first line.
+Neither file may be deleted while `DMSans-Variable.woff2` ships —
+`DesignSystemTests.The_vendored_font_ships_its_license_and_copyright_notice`
+fails the build if either goes missing. Upstream:
+<https://github.com/googlefonts/dm-fonts>.
 
 It is vendored rather than loaded from a CDN because the host binds to loopback
 and may run with no outbound network at all.

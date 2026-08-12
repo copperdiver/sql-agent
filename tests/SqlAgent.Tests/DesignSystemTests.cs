@@ -79,11 +79,70 @@ public class DesignSystemTests : IClassFixture<WebTestHost>
         // easy to miss by eye. This pins them to the same property set.
         var css = Css();
 
-        var explicitDark = Properties(Block(css, ":root.dark"));
-        var systemDark = Properties(Block(css, ":root:not(.light):not(.dark)"));
+        var explicitDarkBlock = Block(css, ":root.dark");
+        var systemDarkBlock = Block(css, ":root:not(.light):not(.dark)");
+
+        var explicitDark = Properties(explicitDarkBlock);
+        var systemDark = Properties(systemDarkBlock);
 
         Assert.NotEmpty(explicitDark);
         Assert.Equal(explicitDark, systemDark);
+
+        // color-scheme is not a custom property, so the name comparison above only sees it because
+        // Properties() is widened to match it explicitly — and the name matching is still not enough on
+        // its own, since "color-scheme: light" in one block and "dark" in the other would satisfy it.
+        // Getting this wrong is not a subtle drift: color-scheme is what tells the browser to paint
+        // native controls, form widgets and scrollbars dark, so losing it in the @media block leaves
+        // every system-theme user with light-on-dark chrome over a dark page.
+        Assert.Contains("color-scheme: dark", explicitDarkBlock);
+        Assert.Contains("color-scheme: dark", systemDarkBlock);
+    }
+
+    [Fact]
+    public void The_stylesheet_restores_a_focus_indicator_for_checkboxes_and_radios()
+    {
+        // app.css sets "outline: none" on input:focus and compensates with a border-color swap. That
+        // substitute works for a text input or a select, but a native checkbox under the default
+        // `appearance: auto` paints its own widget and ignores author border, background and padding
+        // entirely — so the compensation renders nothing and the focus ring is simply gone (WCAG 2.4.7).
+        // The generic ":focus-visible" rule earlier in the file cannot cover it either: "input:focus" is
+        // (0,1,1) against its (0,1,0) and comes later in source order. bUnit runs no browser and no CSS
+        // engine, so specificity and cascade cannot be observed from a rendered component at all; this
+        // is pinned on the stylesheet source, the same way the rest of the app.css facts here are.
+        var css = Css();
+
+        var rule = Regex.Match(css,
+            @"input\[type=checkbox\]:focus-visible[^{]*\{([^}]*)\}");
+
+        Assert.True(rule.Success,
+            "app.css must carry an input[type=checkbox]:focus-visible rule; the generic input:focus rule removes the outline.");
+        Assert.Contains("outline:", rule.Groups[1].Value);
+        Assert.DoesNotContain("outline: none", rule.Groups[1].Value);
+        Assert.Contains("input[type=radio]:focus-visible", rule.Value);
+    }
+
+    [Fact]
+    public void The_vendored_font_ships_its_license_and_copyright_notice()
+    {
+        // OFL 1.1 condition 2 permits redistribution only if "each copy contains the above copyright
+        // notice and this license". The woff2 is redistributed here, so both have to travel with it —
+        // a README merely naming the OFL is not the license text. This is a File.Exists assertion
+        // rather than a docs note so that moving or pruning wwwroot/fonts fails the build instead of
+        // silently shipping an unlicensed binary.
+        var font = RepoPaths.Find("src/SqlAgent.Host/wwwroot/fonts/DMSans-Variable.woff2");
+        var license = RepoPaths.Find("src/SqlAgent.Host/wwwroot/fonts/OFL.txt");
+
+        Assert.True(File.Exists(font));
+        Assert.True(File.Exists(license));
+
+        var text = File.ReadAllText(license);
+        Assert.Contains("SIL OPEN FONT LICENSE Version 1.1", text);
+        Assert.Contains("The DM Sans Project Authors", text);
+
+        // The copyright notice must also be reproduced where a reader looks first, not only inside the
+        // license file's own header.
+        var readme = File.ReadAllText(RepoPaths.Find("src/SqlAgent.Host/wwwroot/fonts/README.md"));
+        Assert.Contains("The DM Sans Project Authors", readme);
     }
 
     [Fact]
@@ -109,9 +168,13 @@ public class DesignSystemTests : IClassFixture<WebTestHost>
         return css[(open + 1)..close];
     }
 
-    /// <summary>Custom-property names declared in a block body, sorted, so two blocks compare by set.</summary>
+    /// <summary>Property names declared in a block body, sorted, so two blocks compare by set. Custom
+    /// properties plus color-scheme: the latter is a standard property, not a token, so the original
+    /// "--" pattern skipped it entirely and nothing compared it between the two dark blocks — dropping
+    /// it from either one would have left every native control and scrollbar light on a dark page with
+    /// this test still green.</summary>
     private static List<string> Properties(string block) =>
-        Regex.Matches(block, @"(--[a-z0-9-]+)\s*:")
+        Regex.Matches(block, @"(--[a-z0-9-]+|color-scheme)\s*:")
             .Select(m => m.Groups[1].Value)
             .OrderBy(n => n, StringComparer.Ordinal)
             .ToList();
