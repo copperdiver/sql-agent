@@ -19,7 +19,7 @@
 - **Provider and exception text is never rendered to the user.** It can echo a connection string. Log it, show a stable code and a fixed message.
 - **Result rows are never persisted.** Only text, generated SQL, and the row-count / duration / truncation metadata.
 - **A migration failure stops the host.** Log the store path, rethrow.
-- **Every existing test must stay green** unless this plan says which test changes and why. Tasks 6, 7 and 8 each retire or rewrite named tests; no other test may be touched.
+- **Every existing test must stay green** unless this plan says which test changes and why. Tasks 5, 6, 7, 9 and 10 each name the tests they extend, rewrite, or retire; no other test may be touched.
 - **Test conventions:** xUnit, `Bunit.TestContext`, sentence-style test names with underscores, one class per unit under test in `tests/SqlAgent.Tests/`. Comments explain *why* a test exists, not what it does.
 - **bUnit runs no browser, no CSS engine, no focus model.** Anything depending on those is asserted on rendered DOM structure or on stylesheet source text, or moved to the manual checklist in `docs/web-ui.md`.
 - **Commit messages** end with `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>`.
