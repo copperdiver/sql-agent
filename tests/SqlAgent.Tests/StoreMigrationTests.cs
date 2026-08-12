@@ -180,6 +180,10 @@ public class StoreMigrationTests : IDisposable
         Assert.Contains("Chats", tables);
         Assert.Contains("ChatMessages", tables);
         Assert.Contains("ChatMessageDatabases", tables);
+        // States the intent directly rather than through the tables it happened to create: this survives
+        // a change to what ChatPersistence creates, and would fail if the rescue path ever accepted the
+        // migration's tables without actually recording it as applied.
+        Assert.Contains("20260812223903_ChatPersistence", await db.Database.GetAppliedMigrationsAsync());
 
         var kept = await db.DatabaseConnections.SingleAsync();
         Assert.Equal(connectionId, kept.Id);

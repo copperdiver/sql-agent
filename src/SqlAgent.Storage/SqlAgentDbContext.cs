@@ -56,14 +56,18 @@ public class SqlAgentDbContext(DbContextOptions<SqlAgentDbContext> options) : Db
             e.HasKey(x => x.Id);
             e.HasIndex(x => x.ChatMessageId);
             // One row per database per message. Names are unique across connections, so this also stops
-            // the same database being attached twice from a double-click.
+            // the same database being attached twice — ChatService dedupes by name before writing, and
+            // this index is the backstop that enforces it regardless.
             e.HasIndex(x => new { x.ChatMessageId, x.DatabaseName }).IsUnique();
             e.HasOne(x => x.Message).WithMany(m => m.Databases)
                 .HasForeignKey(x => x.ChatMessageId).OnDelete(DeleteBehavior.Cascade);
-            // No foreign key to DatabaseConnection on purpose: the reference is a soft one that survives
-            // the connection being deleted (the id is nulled, the name stays). A real FK with
-            // SetNull would work too, but it would put a constraint on a table that has nothing to do
-            // with chat and make DatabaseConnectionService's delete path depend on chat schema.
+            // No foreign key to DatabaseConnection on purpose: the reference is a soft one, and
+            // deliberately not a live one — DatabaseConnectionId is never cleaned up when a connection
+            // is renamed or deleted, so it is a historical value only, not proof the connection still
+            // exists. A real FK with SetNull would keep the id trustworthy, but it would put a
+            // constraint on a table that has nothing to do with chat and make
+            // DatabaseConnectionService's delete path depend on chat schema. DatabaseName is what a
+            // transcript actually relies on to say what a question was asked against.
         });
     }
 }

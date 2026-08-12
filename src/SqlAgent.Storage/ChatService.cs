@@ -55,7 +55,9 @@ public class ChatService(SqlAgentDbContext db)
     public async Task<IReadOnlyList<ChatSummary>> ListHistoryAsync(
         int take = 200, CancellationToken ct = default) =>
         await db.Chats
-            .OrderByDescending(c => c.LastMessageAt)
+            // ThenByDescending(CreatedAt) for the same reason Sequence exists on messages: two chats
+            // created or touched inside the same millisecond would otherwise reload in arbitrary order.
+            .OrderByDescending(c => c.LastMessageAt).ThenByDescending(c => c.CreatedAt)
             .Take(take)
             .Select(c => new ChatSummary(c.Id, c.Title, c.LastMessageAt))
             .ToListAsync(ct);
@@ -75,7 +77,10 @@ public class ChatService(SqlAgentDbContext db)
     public async Task<Guid> CreateChatAsync(string title, CancellationToken ct = default)
     {
         var now = DateTime.UtcNow;
-        var chat = new Chat { Id = Guid.NewGuid(), Title = title, CreatedAt = now, UpdatedAt = now, LastMessageAt = now };
+        var chat = new Chat
+        {
+            Id = Guid.NewGuid(), Title = TitleFrom(title), CreatedAt = now, UpdatedAt = now, LastMessageAt = now,
+        };
         db.Chats.Add(chat);
         await db.SaveChangesAsync(ct);
         return chat.Id;
@@ -88,16 +93,29 @@ public class ChatService(SqlAgentDbContext db)
         {
             return await AppendOnceAsync(input, ct);
         }
-        catch (DbUpdateException ex) when (ex.InnerException is SqliteException { SqliteErrorCode: SqliteConstraint })
+        catch (DbUpdateException ex) when (IsSequenceCollision(ex))
         {
             // Another circuit took the sequence number between the read and the write. Re-reading the
             // max and trying again is enough: the loser of the race simply lands after the winner. One
             // retry, not a loop — a second collision means something other than a two-tab race, and a
             // retry loop would hide it.
-            db.ChangeTracker.Clear();
+            //
+            // AppendOnceAsync already detached the failed attempt's own entries on the way out, so
+            // this starts clean without needing to touch anything else this context might be tracking.
             return await AppendOnceAsync(input, ct);
         }
     }
+
+    /// <summary>True only for the unique (ChatId, Sequence) collision the retry above exists for.
+    /// SQLite reports every constraint kind under the same result code (19), including two others this
+    /// same write can raise: the unique (ChatMessageId, DatabaseName) index — pointless to retry, since
+    /// a duplicate name within one input collides identically every time — and the ChatMessages → Chats
+    /// foreign key, raised when the chat itself was deleted between the read and the write. Retrying
+    /// that one would re-read the (now missing) chat and mask the real failure behind
+    /// "Chat does not exist.", instead of the constraint violation that actually happened.</summary>
+    private static bool IsSequenceCollision(DbUpdateException ex) =>
+        ex.InnerException is SqliteException { SqliteErrorCode: SqliteConstraint } sqlite
+        && sqlite.Message.Contains("ChatMessages.ChatId, ChatMessages.Sequence", StringComparison.Ordinal);
 
     private async Task<ChatMessageView> AppendOnceAsync(ChatMessageInput input, CancellationToken ct)
     {
@@ -124,7 +142,11 @@ public class ChatService(SqlAgentDbContext db)
             RowCount = input.RowCount,
             ElapsedMs = input.ElapsedMs,
             Truncated = input.Truncated,
-            Databases = input.Databases.Select(d => new ChatMessageDatabase
+            // Deduped by name: it is what the unique (ChatMessageId, DatabaseName) index enforces, and
+            // failing to dedupe here means an input with two attachments sharing a name would hit that
+            // index and be retried by the catch above, uselessly — the collision recurs identically
+            // every time, since both entries always belong to whatever message id this attempt creates.
+            Databases = input.Databases.DistinctBy(d => d.Name).Select(d => new ChatMessageDatabase
             {
                 Id = Guid.NewGuid(),
                 DatabaseConnectionId = d.ConnectionId,
@@ -135,7 +157,25 @@ public class ChatService(SqlAgentDbContext db)
         db.ChatMessages.Add(message);
         chat.LastMessageAt = now;
         chat.UpdatedAt = now;
-        await db.SaveChangesAsync(ct);
+
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch
+        {
+            // Detach exactly what this attempt added or modified, not the whole tracker: this context
+            // may be shared with other services in the same scope, and ChangeTracker.Clear() would
+            // discard their unrelated pending work along with this attempt's. A caller that retries
+            // (the sequence-collision path above) then starts from a clean read instead of colliding
+            // with this attempt's own now-orphaned entries.
+            db.Entry(chat).State = EntityState.Detached;
+            foreach (var database in message.Databases)
+                db.Entry(database).State = EntityState.Detached;
+            db.Entry(message).State = EntityState.Detached;
+            throw;
+        }
+
         return ToView(message);
     }
 

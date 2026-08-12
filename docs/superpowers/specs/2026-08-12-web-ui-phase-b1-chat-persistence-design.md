@@ -61,7 +61,7 @@ Web UI work. Until it exists `UnavailableLlmSqlGateway` keeps failing closed.
 | Decision | Alternative rejected | Why |
 |---|---|---|
 | Databases attach to a **message**, and the composer's chips carry over to the next message until removed | Attaching to the chat; or requiring re-attachment every message | The transcript stays honest about what each question was asked against, without making the user re-attach on every turn. |
-| Each attachment stores the connection **name** as a snapshot beside a nullable connection id | Storing the id alone | Connections get renamed and deleted. A transcript that forgets which database a question was asked against is worse than a dangling id. |
+| Each attachment stores the connection **name** as a snapshot beside a nullable connection id | Storing the id alone | Connections get renamed and deleted, and nothing cleans up the id afterward. The name is the source of truth for what a question was asked against; the id is a historical value that may already point at nothing. |
 | The user message is persisted **before** the model is called | Persisting the whole turn after the answer arrives | A failed call, a dead circuit, or a closed tab must not cost the typed question. |
 | Failed answers are persisted too, `llm_not_configured` included | Storing only successful answers | Otherwise a reload silently drops half the turns and the transcript stops matching what the user saw. |
 | `Project` does **not** ship in B1 | Shipping all three entities in one migration | Migrations are cheap once B1 has built them. The project's own rule — nothing in the codebase that nothing renders — wins. |
@@ -124,10 +124,12 @@ ChatMessageDatabase   Id, ChatMessageId, DatabaseConnectionId?, DatabaseName
   with the components that render them.
 - Enums are stored as strings, like `QueryAuditLog.Decision`, so reordering a
   member cannot silently re-interpret existing rows.
-- `DatabaseConnectionId` is nullable and `DatabaseName` is not. Deleting a
-  connection nulls the id across history and leaves the name; the transcript
-  still says what the question was asked against. This is the parent spec's
-  stance on connection deletion, moved from the chat to the message.
+- `DatabaseConnectionId` is nullable and `DatabaseName` is not. `DatabaseName` is
+  the source of truth for what a question was asked against; `DatabaseConnectionId`
+  is a historical value captured at send time and never cleaned up when a
+  connection is renamed or deleted, so a non-null id is not proof the connection
+  still exists. This is the parent spec's stance on connection deletion, moved
+  from the chat to the message.
 - Deleting a `Chat` cascades to its messages and their attachment rows.
 - All timestamps are UTC.
 

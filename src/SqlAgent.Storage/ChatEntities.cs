@@ -56,9 +56,12 @@ public class ChatMessage
 /// <summary>
 /// One database attached to one message.
 ///
-/// <see cref="DatabaseConnectionId"/> is nullable and <see cref="DatabaseName"/> is not, on purpose:
-/// connections get renamed and deleted, and a transcript that forgets what a question was asked against
-/// is worse than a dangling id. Deleting a connection nulls the id across history and leaves the name.
+/// <see cref="DatabaseName"/> is the source of truth for what a question was asked against — it is
+/// never null and never rewritten. <see cref="DatabaseConnectionId"/> is a historical value, captured at
+/// send time and never cleaned up afterward: nothing nulls it when the connection is renamed or deleted,
+/// so a non-null id is not proof the connection still exists. No consumer may read "id is not null" as
+/// "the connection is still there" — resolve the id against <c>DatabaseConnections</c> and fall back to
+/// the name when it does not resolve.
 /// </summary>
 public class ChatMessageDatabase
 {
