@@ -321,7 +321,7 @@ against DOM structure or stylesheet source text, or moved to the manual list.
 
 | # | Item | How |
 |---|---|---|
-| 7 | Collapsed-sidebar styling duplicated between `app.css` and `Sidebar.razor.css` | Delete the duplicate set and keep one source of truth, the way the theme already works; scope the remaining selectors under the sidebar. |
+| 7 | Collapsed-sidebar styling duplicated between `app.css` and `Sidebar.razor.css` | Keep both sets and pin them together with a parity test, and scope the `app.css` selectors under `.app aside.sidebar`. Collapsing to one source of truth was the first choice, and planning found it wrong: the `app.css` rule is the only collapsed styling in effect until the circuit connects — and forever if it never does — while the scoped rule is what the `localStorage` read-back applies afterwards. Four Phase A tests pin both for that reason, and making the circuit toggle the `<html>` class instead would tie the visible collapse to interop succeeding, which Phase A deliberately decoupled. |
 | 1 | A `Modal` inside the mobile drawer resolves against the drawer's transform and rides off-screen | B1's delete confirmation is opened from the drawer, so this stops being theoretical. A circuit-scoped `DialogService` plus a host component in `MainLayout` renders dialogs outside the sidebar subtree — simpler than a portal and testable. |
 | 3 | A closed drawer keeps its contents in the tab order, and focus is not restored to the hamburger | History rows multiply the off-screen tab stops. |
 | 9 | `Spinner` and `EmptyState` shipped with no caller | Both get one in the composer. |
