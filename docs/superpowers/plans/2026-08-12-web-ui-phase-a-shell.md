@@ -3244,3 +3244,45 @@ without a caller fails the build, so each phase adds its own.
 `HostInfo.{AccountName,MachineName,Initials,Version,StoreDirectory,BindUrl,Port}`,
 `ILlmSqlGateway.IsConfigured`, and `window.sqlAgentUi.{getTheme,setTheme,getSidebar,setSidebar}` are
 each defined once and referenced with the same names throughout.
+
+---
+
+## Carried forward from Phase A
+
+Findings that Phase A's reviews raised and consciously did not fix. Each was
+adjudicated at the final whole-branch review and ruled acceptable to carry. They
+are recorded here rather than in a code comment because a defect that lives only
+in a comment is a defect nobody is assigned.
+
+| # | Item | Lands in | Why it was carried |
+|---|---|---|---|
+| 1 | **Mobile Modal-in-drawer.** Below 1024px `.sidebar` carries a CSS `transform`, so `position: fixed` descendants resolve against the drawer, not the viewport. The About dialog centres on the drawer, overhangs it, and rides off-screen when the drawer closes while still considering itself open. | B | Needs a portal; disproportionate to Phase A. Documented in `UserCard.razor` and `docs/web-ui.md`. |
+| 2 | **`Modal.razor`'s `autofocus` may or may not work — verify, do not assume broken.** Phase A proved `autofocus` is skipped when the opening click leaves focus on a surviving trigger. Modal's shape differs: `MenuItem.Activate` closes the menu before invoking `OnClick`, removing the focused button, so `activeElement` reverts to `<body>` and the flush should fire. | B | Unproven either way; the scrim still closes the dialog. Note `UiInteractionTests.The_modal_close_button_autofocuses_…` is a green test asserting the mechanism — if the browser check goes the other way, that test needs rewriting too. |
+| 3 | Below 1024px a **closed** drawer's contents stay in the tab order (hidden by `transform`, not `display:none`/`inert`), and focus is not restored to the hamburger on close. | B | Pre-existing shape — Tab already walked into the off-screen drawer before Phase A. |
+| 4 | `SqlEditor.razor:56` catches only `JSDisconnectedException` — the one interop site Phase A's exception-filter sweep did not reach. Arguably right in a `DisposeAsync`, where a `JSException` is a real bug that should surface. | D | Deliberate asymmetry, but undocumented. Decide and write down which. |
+| 5 | `ResultGrid.razor:56` calls `sqlAgentDownload` with **no try/catch**, inside a click handler. | D | Pre-existing; `DataTable` supersedes `ResultGrid` in D anyway. |
+| 6 | The environment `<dl>` is rendered twice — About dialog and `/settings` — from the same `HostInfo`, with byte-identical CSS under two class names. | E | E adds a storage-provider row to Settings; extract a shared `HostFacts.razor` before the two disagree. |
+| 7 | **The collapsed sidebar is styled in two places** — `app.css` keyed on `html.sidebar-collapsed` (pre-paint) and `Sidebar.razor.css` keyed on the circuit-added class. They agree today by hand, with nothing enforcing it; this split caused two Phase A defects. `app.css`'s `.nav-label` / `.brand-name` selectors are **not scoped under the sidebar**. | B | B adds `HistorySection`, `ProjectSection` and a Search row. Either delete the duplicate set (theme works this way — one source of truth, no defects) or add a parity test mirroring `DesignSystemTests`'s dark-block check, and scope the `app.css` selectors under `.app aside.sidebar`. |
+| 8 | Safari does not focus a `<button>` on plain mouse click (a macOS convention), so Escape does not close the user menu there via mouse. Tabbing works. | B | No interop-free fix. Revisit when B's `Ctrl`/`Cmd`+`K` modal makes a document-level key listener worth its cost. |
+| 9 | `Spinner` and `EmptyState` ship rendered by nothing, contradicting this plan's own "Phase A ships only what Phase A renders" amendment. The enforcing test covers glyphs but not components. | B uses both | Harmless, but the rule should cover components too, or be restated. |
+| 10 | `Ui/Toggle` is in the spec's file layout, never shipped, never entered in the deferral table. | C | C needs a read-only toggle and a master DDL toggle. Silent drop, recorded so C plans for it. |
+| 11 | `RestyleRegressionTests.Every_class_the_existing_markup_uses_is_styled_somewhere` concatenates all sheets before searching, so **a rule in the wrong sheet still passes** — precisely the failure that hit Phase A twice. | any | Testing scope, not just presence, needs the compiled `obj/**/scopedcss/**` output. |
+| 12 | `UiPrimitiveTests.No_icon_ships_that_nothing_renders` compares `Icon.Names` against a hardcoded array and never inspects markup — a change-detector wearing a policy's name. | any | Rename it to what it does, or scan `*.razor` for `Name="…"` and make it real. |
+| 13 | **`EventCallback` trap.** `@onclick="@(cond ? Handler : null)"` does **not** detach a handler: Razor compiles it to `EventCallback.Factory.Create(this, expr)`, and with a null delegate the component is still the receiver, so `RequiresExplicitReceiver` is true and the attribute renders anyway. Use `default(EventCallback<T>)`. | any | Generalizes across the codebase. `Sidebar.DrawerKeyHandler` documents it; the aside is the only conditional attachment today. |
+
+### Two lessons for B–E
+
+**bUnit cannot see what broke most often here.** It renders markup but runs no
+browser, no CSS engine, no HTML parser, no focus model and no circuit. Every
+visual and behavioral defect this phase produced was invisible to it: focus
+reachability, the parser restructuring nested buttons, scoped CSS failing to
+reach a child component's markup, clipping, and a dead circuit. Where correctness
+depends on any of those, assert on rendered DOM structure or on stylesheet source
+text and say so in the test comment — or drive a real browser.
+
+**Explanatory prose was wrong more often than the code it explained.** Five
+load-bearing comments in this phase stated something false: an exception
+inheritance relationship, what an `overflow: hidden` was clipping, what a guard
+prevented, and two documentation claims about MCP tools and configuration keys.
+Each was believed until someone checked it against the source. Treat a comment
+that justifies a design decision as a claim to verify, not as context.
