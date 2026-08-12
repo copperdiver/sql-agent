@@ -1,7 +1,10 @@
 @* tabindex is what makes @onkeydown fire on a div at all, and -1 keeps the wrapper out of the tab
    order so Escape works without adding a phantom tab stop before every menu. *@
 <div class="menu-root" @onkeydown="OnKeyDown" tabindex="-1">
-    <div class="menu-trigger" @onclick="Toggle">@Trigger</div>
+    @* A real <button>, not a div: clicking it moves focus onto it, and since it lives inside
+       .menu-root, a real user's Escape keypress bubbles to OnKeyDown below. A div never receives
+       focus on click, so Escape would have nothing to bubble from. *@
+    <button type="button" class="menu-trigger" @onclick="Toggle">@Trigger</button>
 
     @if (_open)
     {

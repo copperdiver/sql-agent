@@ -1,15 +1,16 @@
 <div class="modal-root" @onkeydown="OnKeyDown" tabindex="-1">
     <div class="modal-scrim" @onclick="Close"></div>
-    @* stopPropagation stops the panel's own click from bubbling to the scrim below it and dismissing
-       the dialog mid-interaction. It is paired with a no-op handler (rather than left bare) because
-       Blazor's own event dispatch only needs the stopPropagation marker to halt the walk up the tree,
-       but nothing on this element would otherwise register as "handled" at all — this pairing keeps
-       that walk resolvable to something even when the click lands on plain, handler-less content. *@
-    <div class="modal-panel" role="dialog" aria-modal="true" aria-label="@Title"
-         @onclick="AbsorbPanelClick" @onclick:stopPropagation="true">
+    @* No stopPropagation needed: the scrim and the panel are siblings under .modal-root, not nested,
+       and the panel paints above the scrim (z-index: 1). A click inside the panel hit-tests to the
+       panel itself and can never reach the scrim's handler, exactly as Menu's backdrop/panel pair
+       works. *@
+    <div class="modal-panel" role="dialog" aria-modal="true" aria-label="@Title">
         <div class="modal-head">
             <h3>@Title</h3>
-            <button type="button" class="ghost modal-close" @onclick="Close" aria-label="Close">
+            @* autofocus moves focus inside the dialog as soon as it renders, with no JS interop. That
+               is also what lets a real Escape keypress bubble to OnKeyDown below: without it, focus
+               stays wherever it was before the dialog opened and Escape never reaches .modal-root. *@
+            <button type="button" class="ghost modal-close" @onclick="Close" aria-label="Close" autofocus>
                 <Icon Name="x" Size="18" />
             </button>
         </div>
@@ -28,8 +29,6 @@
     [Parameter] public EventCallback OnClose { get; set; }
 
     private Task Close() => OnClose.InvokeAsync();
-
-    private void AbsorbPanelClick() { }
 
     private Task OnKeyDown(KeyboardEventArgs e) => e.Key == "Escape" ? Close() : Task.CompletedTask;
 }

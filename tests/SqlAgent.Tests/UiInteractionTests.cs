@@ -23,6 +23,20 @@ public class UiInteractionTests
     }
 
     [Fact]
+    public void The_menu_trigger_is_a_focusable_button_so_a_real_Escape_keypress_can_reach_it()
+    {
+        // .menu-root's Escape handler only fires via bubbling from whatever element currently has
+        // focus. KeyDown() below invokes it directly and would pass even if nothing were focusable, so
+        // it cannot catch a regression to a plain <div> trigger — this test pins the tag name instead.
+        using var ctx = new Bunit.TestContext();
+        var menu = ctx.RenderComponent<Menu>(p => p
+            .Add(m => m.Trigger, (RenderFragment)(b => b.AddMarkupContent(0, "<span>t</span>")))
+            .AddChildContent("<div id=\"body\">contents</div>"));
+
+        Assert.Equal("button", menu.Find(".menu-trigger").TagName.ToLowerInvariant());
+    }
+
+    [Fact]
     public void Clicking_the_backdrop_closes_the_menu()
     {
         // Without a backdrop the only way out of an open menu is re-clicking the trigger, which is not
@@ -115,10 +129,31 @@ public class UiInteractionTests
     }
 
     [Fact]
+    public void The_modal_close_button_autofocuses_so_a_real_Escape_keypress_can_reach_the_dialog()
+    {
+        // .modal-root's Escape handler only fires via bubbling from whatever element currently has
+        // focus. KeyDown() above invokes it directly and would pass even if focus never moved into the
+        // dialog, so it cannot catch a regression here — this test pins the autofocus attribute that
+        // is what actually gets a real Escape keypress to bubble from inside .modal-root at all.
+        using var ctx = new Bunit.TestContext();
+        var modal = ctx.RenderComponent<Modal>(p => p
+            .Add(m => m.Title, "t")
+            .AddChildContent("<p>body</p>"));
+
+        Assert.True(modal.Find(".modal-close").HasAttribute("autofocus"));
+    }
+
+    [Fact]
     public void A_click_inside_the_modal_panel_does_not_close_it()
     {
-        // The scrim and the panel are nested, so without stopPropagation every click on the dialog's
-        // own content would bubble to the scrim's handler and dismiss the dialog mid-interaction.
+        // The scrim and the panel are SIBLINGS under .modal-root (the panel simply paints above via
+        // z-index), not nested, so a click inside the panel hit-tests to the panel and can never reach
+        // the scrim's Close handler — there is no handler anywhere in #inside's ancestry to catch it,
+        // which is exactly why bUnit reports that as MissingEventHandlerException rather than routing
+        // the click anywhere. That exception is itself the proof nothing closed the dialog. This
+        // guards against a future regression where someone nests the panel inside the scrim: a click
+        // would then find the scrim's Close handler in its ancestry, no exception would be thrown, and
+        // closes would become 1 — failing this test either way.
         using var ctx = new Bunit.TestContext();
         var closes = 0;
         var modal = ctx.RenderComponent<Modal>(p => p
@@ -126,7 +161,7 @@ public class UiInteractionTests
             .Add(m => m.OnClose, EventCallback.Factory.Create(new object(), () => closes++))
             .AddChildContent("<p id=\"inside\">body</p>"));
 
-        modal.Find("#inside").Click();
+        Assert.Throws<MissingEventHandlerException>(() => modal.Find("#inside").Click());
 
         Assert.Equal(0, closes);
     }
