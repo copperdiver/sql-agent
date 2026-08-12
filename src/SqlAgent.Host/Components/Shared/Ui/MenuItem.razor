@@ -1,14 +1,20 @@
-<button type="button" class="menu-item @(Danger ? "danger" : "")" role="menuitem" @onclick="Activate">
-    @if (!string.IsNullOrWhiteSpace(Icon))
-    {
-        <Icon Name="@Icon" Size="16" />
-    }
-    <span class="menu-item-label">@ChildContent</span>
+<div class="menu-item @(Danger ? "danger" : "")">
+    <button type="button" class="menu-item-action" role="menuitem" @onclick="Activate">
+        @if (!string.IsNullOrWhiteSpace(Icon))
+        {
+            <Icon Name="@Icon" Size="16" />
+        }
+        <span class="menu-item-label">@ChildContent</span>
+    </button>
     @if (Trailing is not null)
     {
-        <span class="menu-item-trailing" @onclick:stopPropagation="true">@Trailing</span>
+        @* No stopPropagation needed: Trailing is a sibling of the action button, not a descendant, so
+           a click inside it can never reach the button's Activate handler in the first place — sibling
+           structure keeps the two independent, exactly as Menu and Modal document their own
+           backdrop/panel pairs. *@
+        <span class="menu-item-trailing">@Trailing</span>
     }
-</button>
+</div>
 
 @code {
     [Parameter] public string? Icon { get; set; }

@@ -79,10 +79,32 @@ public class UiInteractionTests
                 .AddChildContent("Settings")));
         menu.Find(".menu-trigger").Click();
 
-        menu.Find(".menu-item").Click();
+        menu.Find(".menu-item-action").Click();
 
         Assert.True(clicked);
         Assert.Empty(menu.FindAll(".menu-item"));
+    }
+
+    [Fact]
+    public void A_menu_item_does_not_nest_a_button_inside_its_trailing_slot()
+    {
+        // MenuItem used to render icon + label + Trailing all inside one <button>. Task 6 puts a
+        // Segmented control (itself a row of <button>s) in Trailing, and a button inside a button is
+        // invalid HTML — the parser silently closes the outer one, fragmenting the row and moving the
+        // trailing content outside the element meant to contain it. bUnit's renderer does not warn
+        // about this, so this test has to look at the actual element structure.
+        using var ctx = new Bunit.TestContext();
+        var menu = ctx.RenderComponent<Menu>(p => p
+            .Add(m => m.Trigger, (RenderFragment)(b => b.AddMarkupContent(0, "<span>t</span>")))
+            .AddChildContent<MenuItem>(ip => ip
+                .AddChildContent("Theme")
+                .Add(i => i.Trailing, (RenderFragment)(b => b.AddMarkupContent(0, "<button>toggle</button>")))));
+        menu.Find(".menu-trigger").Click();
+
+        Assert.Empty(menu.FindAll("button button"));
+
+        var trailingButton = menu.Find(".menu-item-trailing button");
+        Assert.Null(trailingButton.Closest(".menu-item-action"));
     }
 
     [Fact]
@@ -144,26 +166,25 @@ public class UiInteractionTests
     }
 
     [Fact]
-    public void A_click_inside_the_modal_panel_does_not_close_it()
+    public void The_modal_panel_is_a_sibling_of_the_scrim_so_panel_clicks_cannot_dismiss_it()
     {
-        // The scrim and the panel are SIBLINGS under .modal-root (the panel simply paints above via
-        // z-index), not nested, so a click inside the panel hit-tests to the panel and can never reach
-        // the scrim's Close handler — there is no handler anywhere in #inside's ancestry to catch it,
-        // which is exactly why bUnit reports that as MissingEventHandlerException rather than routing
-        // the click anywhere. That exception is itself the proof nothing closed the dialog. This
-        // guards against a future regression where someone nests the panel inside the scrim: a click
-        // would then find the scrim's Close handler in its ancestry, no exception would be thrown, and
-        // closes would become 1 — failing this test either way.
+        // It's the shape of the DOM, not any click-handling logic, that keeps a click inside the panel
+        // from dismissing the dialog: the scrim and the panel are siblings under .modal-root, and the
+        // panel simply paints above the scrim (z-index), so a click inside the panel hit-tests to the
+        // panel and never reaches the scrim's Close handler at all. That is worth pinning directly
+        // rather than through a click-and-observe test — asserting on bUnit's own handler-resolution
+        // exception (the previous version of this test) is a statement about bUnit's internals, not
+        // about this component, and would break for reasons unrelated to the regression it exists to
+        // catch. If someone later nests the panel inside the scrim, this fails immediately.
         using var ctx = new Bunit.TestContext();
-        var closes = 0;
         var modal = ctx.RenderComponent<Modal>(p => p
             .Add(m => m.Title, "t")
-            .Add(m => m.OnClose, EventCallback.Factory.Create(new object(), () => closes++))
-            .AddChildContent("<p id=\"inside\">body</p>"));
+            .AddChildContent("<p>body</p>"));
 
-        Assert.Throws<MissingEventHandlerException>(() => modal.Find("#inside").Click());
+        var scrim = modal.Find(".modal-scrim");
+        var panel = modal.Find(".modal-panel");
 
-        Assert.Equal(0, closes);
+        Assert.Same(scrim.ParentElement, panel.ParentElement);
     }
 
     [Fact]
