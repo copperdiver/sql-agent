@@ -26,9 +26,20 @@
    while the document's focused area is still the body, and clicking the hamburger focuses the hamburger,
    so an autofocus attribute on a close button inserted by that same click is skipped by design. Verified
    in Chromium rather than assumed — a standalone probe that inserted an autofocus-carrying button from a
-   click handler left focus on the trigger, and Escape never reached the container. *@
+   click handler left focus on the trigger, and Escape never reached the container.
+
+   The handler is attached only while the drawer is open, and that condition is load-bearing rather than
+   tidiness. Attaching it unconditionally makes every keystroke anywhere inside this <aside> a server
+   round trip: SchemaRail's filter input lives in here and deliberately binds on @onchange rather than
+   @oninput precisely to avoid per-keystroke traffic, and a keydown handler on an ancestor reintroduces
+   exactly that traffic through bubbling — plus a re-render of the whole Sidebar subtree, the rail's table
+   list included, because ComponentBase.HandleEventAsync calls StateHasChanged() after every callback
+   whether or not the callback changed anything. Guarding inside OnKeyDown cannot prevent that; only not
+   rendering the attribute can. See DrawerKeyHandler below for why it is an empty EventCallback rather
+   than the obvious null. On a wide viewport, where _drawerOpen can never be true, typing in the filter is
+   therefore as free as it was before Escape-to-close existed. *@
 <aside class="sidebar custom-scroll @(_collapsed ? "collapsed" : "") @(_drawerOpen ? "drawer-open" : "")"
-       tabindex="-1" @ref="_aside" @onkeydown="OnKeyDown">
+       tabindex="-1" @ref="_aside" @onkeydown="DrawerKeyHandler">
     <SidebarHeader Collapsed="_collapsed"
                    OnToggleCollapse="ToggleCollapseAsync"
                    OnCloseDrawer="CloseDrawer" />
@@ -170,12 +181,30 @@
         }
     }
 
-    // The spec calls for the drawer to close on scrim click OR Escape. Guarded on _drawerOpen so a
-    // stray Escape inside the wide-viewport sidebar (where the drawer concept does not exist and
-    // _drawerOpen is already false) is a no-op rather than a pointless re-render.
+    /// <summary>
+    /// The aside's keydown handler while the drawer is open, and nothing at all while it is closed, so
+    /// that no listener is registered and no keystroke inside the sidebar reaches the server (see the
+    /// comment on the markup for why that matters). An empty EventCallback rather than the more obvious
+    /// null: Razor compiles @onkeydown="X" into EventCallback.Factory.Create&lt;KeyboardEventArgs&gt;(this, X),
+    /// and for a component receiver that yields a callback whose RequiresExplicitReceiver is true (the
+    /// receiver is this component; the delegate's target is null), which makes
+    /// RenderTreeBuilder.AddAttribute append the attribute regardless of whether it has a delegate. A
+    /// null therefore does NOT remove the handler — measured, not assumed: with null the rendered aside
+    /// still carried blazor:onkeydown in both states. default(EventCallback&lt;T&gt;) has no receiver and no
+    /// delegate, so both RequiresExplicitReceiver and HasDelegate are false and AddAttribute drops it.
+    /// </summary>
+    private EventCallback<KeyboardEventArgs> DrawerKeyHandler =>
+        _drawerOpen ? EventCallback.Factory.Create<KeyboardEventArgs>(this, OnKeyDown) : default;
+
+    // The spec calls for the drawer to close on scrim click OR Escape. This method only runs while the
+    // drawer is open -- the markup above attaches it conditionally, which is what actually keeps a
+    // keystroke in SchemaRail's filter from costing a round trip on a wide viewport; a _drawerOpen check
+    // in here would not, since the round trip and the re-render both happen before and after the callback
+    // regardless of what it does. The key check is still needed: every other key that reaches the open
+    // drawer (typing in the filter with the drawer open on a phone) must fall through untouched.
     private void OnKeyDown(KeyboardEventArgs e)
     {
-        if (e.Key == "Escape" && _drawerOpen) CloseDrawer();
+        if (e.Key == "Escape") CloseDrawer();
     }
 
     public void Dispose() => Nav.LocationChanged -= OnLocationChanged;

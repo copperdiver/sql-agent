@@ -377,6 +377,41 @@ public class ShellTests : IDisposable
     }
 
     [Fact]
+    public void A_closed_drawer_wires_no_keydown_handler_so_typing_in_the_rail_costs_nothing()
+    {
+        // The Escape-to-close handler must not be attached while the drawer is closed, and that is a
+        // performance fact rather than a tidiness one. SchemaRail's filter input lives inside this
+        // <aside> and binds on @onchange rather than @oninput specifically so it does not send a round
+        // trip per keystroke. A keydown handler on an ancestor undoes that through bubbling -- and worse
+        // than the round trip alone, ComponentBase.HandleEventAsync calls StateHasChanged() after every
+        // callback whether or not the callback did anything, so each keystroke would also re-render the
+        // whole Sidebar subtree including the rail's table list. On a wide viewport _drawerOpen can never
+        // be true, so all of that would be pure waste. An early return inside the handler cannot avoid
+        // it: the round trip and the re-render happen either side of the callback regardless. The
+        // attribute itself has to be absent.
+        //
+        // On the assertion. Two more obvious shapes were tried and rejected because they cannot fail:
+        // bUnit does not throw for an unhandled keydown (it models bubbling, where "nobody handled it"
+        // is legitimate), and RenderCount moves on any dispatched event whether or not a handler exists
+        // -- a keydown on .sidebar-head, which has no handler at all, bumps it just the same. What does
+        // discriminate is bUnit's own projection of the render tree into its DOM: an element with an
+        // event-handler frame carries a "blazor:onkeydown" marker attribute. That is not real HTML and
+        // never reaches a browser, but it is exactly the fact under test -- whether the render tree
+        // registered a listener on this element -- and it is the only place bUnit exposes it.
+        var sidebar = _ctx.RenderComponent<Sidebar>();
+
+        Assert.False(sidebar.Find("aside").HasAttribute("blazor:onkeydown"),
+            "A closed drawer must attach no keydown handler; every keystroke in SchemaRail's filter would otherwise cost a round trip and a full Sidebar re-render.");
+
+        sidebar.Find("[data-testid=drawer-open]").Click();
+
+        // Conditional, not simply absent -- otherwise the assertion above would pass forever while
+        // Escape-to-close quietly stopped working. Escape_closes_an_open_drawer covers the behaviour.
+        Assert.True(sidebar.Find("aside").HasAttribute("blazor:onkeydown"),
+            "An open drawer must attach the keydown handler, or Escape cannot close it.");
+    }
+
+    [Fact]
     public void The_drawer_focus_move_happens_only_when_the_drawer_actually_opens()
     {
         // Focus is a shared, user-visible resource: stealing it on every render would yank the caret out
