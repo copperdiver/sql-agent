@@ -149,6 +149,20 @@ Two operational notes:
   stored it. The web UI's own launch token isn't DPAPI-scoped at all when generated — it lives
   only in the host process's memory and in the file-ACL-protected `launch-url.txt`.
 
+## Language model configuration
+
+**No LLM provider ships configured in this build.** The host wires a placeholder
+`ILlmSqlGateway` that always reports `IsConfigured = false` and fails closed, so every
+`ask_database` call — from the Chat tab or from an MCP client — returns the stable
+`llm_not_configured` outcome by design, not as a bug to work around. `/settings` shows this as
+a "No model configured" badge under Language model, and the Chat tab shows the same fact as an
+explanatory panel instead of a raw error code.
+
+There is no configuration key here to set — `SqlAgent:LocalAuth:Token` and
+`SqlAgent:Web:Port` are the only host settings this phase defines, and neither one wires an
+LLM provider. Connecting a real vendor behind `ILlmSqlGateway` is planned for a later phase;
+when it lands, its own configuration keys and setup steps belong in this section.
+
 ## Provider fixtures
 
 ```bash

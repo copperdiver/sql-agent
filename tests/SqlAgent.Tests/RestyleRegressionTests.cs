@@ -22,7 +22,6 @@ public class RestyleRegressionTests
     [InlineData("src/SqlAgent.Host/Components/Pages/Connections.razor.css")]
     [InlineData("src/SqlAgent.Host/Components/Pages/Workspace.razor.css")]
     [InlineData("src/SqlAgent.Host/Components/Layout/SchemaRail.razor.css")]
-    [InlineData("src/SqlAgent.Host/Components/Shared/ResultGrid.razor.css")]
     [InlineData("src/SqlAgent.Host/Components/Shared/ChatOutcome.razor.css")]
     [InlineData("src/SqlAgent.Host/Components/Shared/OutcomeMessage.razor.css")]
     [InlineData("src/SqlAgent.Host/Components/Shared/SqlEditor.razor.css")]
@@ -43,7 +42,6 @@ public class RestyleRegressionTests
             "src/SqlAgent.Host/Components/Pages/Connections.razor.css",
             "src/SqlAgent.Host/Components/Pages/Workspace.razor.css",
             "src/SqlAgent.Host/Components/Layout/SchemaRail.razor.css",
-            "src/SqlAgent.Host/Components/Shared/ResultGrid.razor.css",
             "src/SqlAgent.Host/Components/Shared/ChatOutcome.razor.css",
             "src/SqlAgent.Host/Components/Shared/OutcomeMessage.razor.css",
             "src/SqlAgent.Host/Components/Shared/SqlEditor.razor.css",

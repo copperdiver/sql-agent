@@ -93,7 +93,63 @@ close that gap:
 Both checks run before authentication, so a request that fails them never even gets a chance to
 try a token.
 
-## The three screens
+## The shell
+
+The UI is a sidebar plus an inset main card. The sidebar carries the product mark, a collapse
+toggle, the nav rows, the schema rail, and the user card; the card holds the current page.
+
+- **Collapse** shrinks the sidebar to an icon rail. Below 1024px it leaves the layout entirely and
+  becomes an overlay drawer opened from the hamburger at the top left.
+- **The user card** shows the OS account and machine name. There is deliberately **no Sign out**:
+  the host is single-user and loopback-only, the only session concept is the `sqlagent_session`
+  cookie the launch token is exchanged for, and no user record exists to sign out of. Its menu
+  offers Settings, Theme, and About.
+
+## Themes
+
+Three settings — system, light, dark — chosen from the segmented control in the user menu or on
+`/settings`.
+
+The choice lives in `localStorage` (`sqlagent.theme`), not in the SQLite store: it is a per-browser
+preference, and a server round trip would paint the wrong theme first. `wwwroot/js/theme.js` is
+loaded **synchronously from `<head>`** and applies the stored value to `<html>` before Blazor
+connects; moving it to `<body>`, or adding `defer`, reintroduces a flash. `system` sets no class at
+all, and `app.css` keys the OS preference off the absence of both classes so an explicit choice
+always wins over the OS.
+
+Colors are CSS custom properties in `wwwroot/css/app.css`; components consume `var(--token)` and
+never a literal color. The dark palette is written twice — once for `:root.dark`, once inside
+`@media (prefers-color-scheme: dark)` for the system setting — and
+`DesignSystemTests.Every_token_redefined_for_dark_mode_is_also_redefined_for_the_system_preference`
+pins the two blocks to the same property set so they cannot drift.
+
+The sidebar's collapsed state is stored and applied the same way (`sqlagent.sidebar`, `html.sidebar-collapsed`).
+
+### Known limitations
+
+These are real gaps found during this phase's reviews, not undiscovered bugs — recorded here so
+nobody spends time rediscovering them:
+
+- **Escape does not close the user menu in Safari via mouse click.** Safari does not focus a
+  `<button>` on a plain mouse click (unlike every other browser), and the menu's Escape handler
+  relies on focus being inside it. Tabbing into the menu instead of clicking it works fine, and
+  every other browser is unaffected either way. There is no interop-free fix — reaching for one
+  would mean adding JS just to work around one browser's focus model for one dismissal path.
+- **The theme toggle briefly shows "System" after a fresh load.** The app prerenders on the
+  server, where there is no `localStorage` to read, so the toggle's Blazor-side state starts at
+  the default ("System") and is corrected to the stored value only after the circuit connects and
+  JS interop can read it back. This is a one-frame flash of the *control's label*, not the page
+  background — `theme.js` in `<head>` already applies the real color before first paint (see
+  above), so the page itself never flashes.
+- **The user menu backdrop and the About dialog misbehave on a narrow viewport.** Below 1024px the
+  sidebar becomes a drawer positioned with a CSS `transform`, and a `transform` on an ancestor
+  makes any `position: fixed` descendant resolve against that ancestor instead of the viewport.
+  So the user menu's backdrop covers only the drawer (not the full screen), and the About dialog
+  centers on the drawer, overhangs its edges, and can ride off-screen if the drawer closes while
+  the dialog still considers itself open. Fixing this properly needs rendering those elements
+  through a portal outside the transformed subtree; that is deferred rather than patched around.
+
+## The screens
 
 - **Connections** (`/connections`) — create, edit, test, and delete database connections.
   Editing a connection never shows the stored connection string back; the field starts blank,
@@ -109,6 +165,9 @@ try a token.
   The rail lists every table for the selected connection with a visibility checkbox — unchecking
   one hides it from both the schema the SQL policy allows and the context given to the chat
   model. A filter box narrows the list by name.
+- **Settings** (`/settings`) — three panels: appearance (the same theme control as the user menu),
+  language-model status (whether `ILlmSqlGateway.IsConfigured` is true, with a badge), and
+  environment (version, bind URL, port, store path, account — read from `HostInfo`).
 
 ## Export
 
@@ -170,6 +229,15 @@ files under `wwwroot/js/`:
 | Export CSV, then JSON | Both files download and open cleanly |
 | Ask a question on the Chat tab | "LLM is not configured" explanation, not a raw code |
 | Start a slow query, press Cancel | `execution_canceled` |
+| Set theme to Dark, reload | Page is dark on first paint — no white flash |
+| Set theme to System, switch the OS between light and dark | Page follows the OS without a reload |
+| Set theme to Light on a dark-mode OS | Page stays light — the explicit choice wins |
+| Collapse the sidebar, reload | Sidebar renders collapsed on first paint, not wide-then-narrow |
+| Narrow the window below 1024px | Sidebar becomes a drawer; the hamburger opens it; the scrim closes it |
+| Open the user menu, adjust the theme from its row | Theme changes and the menu stays open |
+| Open About from the user menu | Version, bind URL, port, and store path are correct |
+| Tab through the sidebar and the composer | Focus ring is visible on every control |
+| Load the UI with `wwwroot/fonts/DMSans-Variable.woff2` removed | Text renders in the system sans-serif, not a serif |
 
 ## Approved scope that was consciously dropped
 

@@ -17,7 +17,7 @@ the startup log names the file but never the token, and the file is deleted agai
 shuts down. If you instead set `SqlAgent:LocalAuth:Token` yourself, no file is written at all —
 you already hold the value, so open the URL and append `?token=` followed by what you configured.
 Either way, the token is exchanged for a session cookie on first use. The host listens on
-`127.0.0.1` only, on port 5099 by default (`SqlAgent:Web:Port` to change it). Details on the three
+`127.0.0.1` only, on port 5099 by default (`SqlAgent:Web:Port` to change it). Details on the shell, the
 screens, the token, and the manual regression checklist for the parts automated tests can't reach
 are in [`docs/web-ui.md`](docs/web-ui.md).
 
