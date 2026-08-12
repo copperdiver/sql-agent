@@ -1,0 +1,64 @@
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
+
+<Segmented Options="Options" Value="@_theme" ValueChanged="ApplyAsync"
+           AriaLabel="Theme" ShowLabels="ShowLabels" />
+
+@code {
+    [Parameter] public bool ShowLabels { get; set; }
+
+    private static readonly IReadOnlyList<SegmentedOption> Options =
+    [
+        new("system", "System", "monitor"),
+        new("light", "Light", "sun"),
+        new("dark", "Dark", "moon"),
+    ];
+
+    private string _theme = "system";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Read, do not assume: theme.js already applied the stored value to <html> before this circuit
+        // existed, so the server's only way to show the right selection is to ask the browser.
+        if (!firstRender) return;
+        try
+        {
+            _theme = Normalize(await JS.InvokeAsync<string>("sqlAgentUi.getTheme"));
+        }
+        catch (Exception)
+        {
+            // Private-mode localStorage throws rather than returning null, and a disconnected circuit
+            // throws JSDisconnectedException. Neither is worth failing the page over: "system" is the
+            // same default theme.js itself falls back to, so the control stays truthful.
+            _theme = "system";
+        }
+        StateHasChanged();
+    }
+
+    private async Task ApplyAsync(string theme)
+    {
+        _theme = theme;
+        try
+        {
+            await JS.InvokeVoidAsync("sqlAgentUi.setTheme", theme);
+        }
+        catch (JSDisconnectedException)
+        {
+            // The tab is gone; there is nothing left to theme.
+        }
+    }
+
+    /// <summary>
+    /// sqlAgentUi.getTheme() returns the raw localStorage string with no validation of its own
+    /// (theme.js just echoes back whatever was stored). A hand-edited devtools entry, or a value
+    /// written by a future version this build doesn't know about, must not become the Value handed to
+    /// Segmented: Segmented selects by exact match, so an unrecognized string would highlight none of
+    /// the three buttons and leave the control looking broken with no indication why. Falling back to
+    /// "system" mirrors the default theme.js itself uses, so this stays truthful either way.
+    /// </summary>
+    private static string Normalize(string? theme) => theme switch
+    {
+        "light" or "dark" => theme,
+        _ => "system",
+    };
+}
