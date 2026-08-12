@@ -41,7 +41,6 @@
 | `src/SqlAgent.Host/Components/Shared/Ui/MenuItem.razor` | One menu row (icon, label, optional trailing) | 3 |
 | `src/SqlAgent.Host/Components/Shared/Ui/Segmented.razor` | Segmented single-choice control | 3 |
 | `src/SqlAgent.Host/Components/Shared/Ui/Modal.razor` | Centered dialog with scrim and Escape close | 3 |
-| `src/SqlAgent.Host/Components/Shared/Ui/ConfirmDialog.razor` | Confirm/cancel dialog built on `Modal` | 3 |
 | `src/SqlAgent.Host/Components/Shared/Ui/ThemeToggle.razor` | Segmented system/light/dark bound to `sqlAgentUi` | 4 |
 | `src/SqlAgent.Host/Components/Layout/MainLayout.razor` | Shell: sidebar + inset main card, keeps `WorkArea` | 5 |
 | `src/SqlAgent.Host/Components/Layout/Sidebar.razor` | Composes header, nav, and user card; owns drawer state | 5 |
@@ -717,7 +716,7 @@ public class UiPrimitiveTests
     {
         using var ctx = new Bunit.TestContext();
 
-        var icon = ctx.RenderComponent<Icon>(p => p.Add(i => i.Name, "search").Add(i => i.Size, 16));
+        var icon = ctx.RenderComponent<Icon>(p => p.Add(i => i.Name, "database").Add(i => i.Size, 16));
 
         var svg = icon.Find("svg");
         Assert.Equal("16", svg.GetAttribute("width"));
@@ -732,7 +731,7 @@ public class UiPrimitiveTests
         // A hard-coded stroke would strand them at one color in one theme.
         using var ctx = new Bunit.TestContext();
 
-        var icon = ctx.RenderComponent<Icon>(p => p.Add(i => i.Name, "search"));
+        var icon = ctx.RenderComponent<Icon>(p => p.Add(i => i.Name, "database"));
 
         Assert.Equal("currentColor", icon.Find("svg").GetAttribute("stroke"));
     }
@@ -751,28 +750,36 @@ public class UiPrimitiveTests
 
     [Theory]
     [InlineData("panel-left")]
+    [InlineData("menu")]
     [InlineData("sun")]
     [InlineData("moon")]
     [InlineData("monitor")]
     [InlineData("settings")]
     [InlineData("info")]
-    [InlineData("search")]
-    [InlineData("plus")]
     [InlineData("database")]
-    [InlineData("folder")]
     [InlineData("message-square")]
     [InlineData("chevron-down")]
-    [InlineData("chevron-right")]
-    [InlineData("more-vertical")]
     [InlineData("x")]
-    [InlineData("check")]
-    [InlineData("menu")]
-    [InlineData("alert-triangle")]
     public void The_icons_the_shell_needs_all_exist(string name)
     {
         // The shell references these by string, so a missing one is invisible until someone opens the
         // page it is on. Enumerating them here turns that into a build-time failure.
         Assert.Contains(name, Icon.Names);
+    }
+
+    [Fact]
+    public void No_icon_ships_that_nothing_renders()
+    {
+        // Phase A ships only the glyphs Phase A draws. Phases B-D add theirs alongside the components
+        // that render them, so an unused glyph never sits in the set waiting for a caller that a later
+        // phase might rename or never write.
+        var rendered = new[]
+        {
+            "panel-left", "menu", "sun", "moon", "monitor", "settings",
+            "info", "database", "message-square", "chevron-down", "x",
+        };
+
+        Assert.Equal(rendered.OrderBy(n => n, StringComparer.Ordinal), Icon.Names.OrderBy(n => n, StringComparer.Ordinal));
     }
 
     [Fact]
@@ -852,6 +859,8 @@ of them and nothing needs a per-icon fill flag.
     /// </summary>
     private static readonly Dictionary<string, string[]> Paths = new(StringComparer.Ordinal)
     {
+        // Phase A ships only what Phase A renders. Later phases add their glyphs beside the components
+        // that draw them — see UiPrimitiveTests.No_icon_ships_that_nothing_renders.
         ["panel-left"] = ["M5 4 H19 A2 2 0 0 1 21 6 V18 A2 2 0 0 1 19 20 H5 A2 2 0 0 1 3 18 V6 A2 2 0 0 1 5 4 Z", "M9.5 4 V20"],
         ["menu"] = ["M4 7 H20", "M4 12 H20", "M4 17 H20"],
         ["sun"] = [
@@ -866,23 +875,13 @@ of them and nothing needs a per-icon fill flag.
             "M17 12 A2 2 0 1 1 13 12 A2 2 0 1 1 17 12",
             "M11 17 A2 2 0 1 1 7 17 A2 2 0 1 1 11 17"],
         ["info"] = ["M21 12 A9 9 0 1 1 3 12 A9 9 0 1 1 21 12", "M12 11.5 V16.5", "M12 7.6 V7.7"],
-        ["search"] = ["M17 11 A6 6 0 1 1 5 11 A6 6 0 1 1 17 11", "M15.4 15.4 L20 20"],
-        ["plus"] = ["M12 5 V19", "M5 12 H19"],
         ["database"] = [
             "M20 6 A8 3 0 1 1 4 6 A8 3 0 1 1 20 6",
             "M4 6 V18 C4 19.66 7.58 21 12 21 C16.42 21 20 19.66 20 18 V6",
             "M4 12 C4 13.66 7.58 15 12 15 C16.42 15 20 13.66 20 12"],
-        ["folder"] = ["M3 7 A2 2 0 0 1 5 5 H9.2 L11.4 8 H19 A2 2 0 0 1 21 10 V17 A2 2 0 0 1 19 19 H5 A2 2 0 0 1 3 17 Z"],
         ["message-square"] = ["M20 4 H4 A1 1 0 0 0 3 5 V15 A1 1 0 0 0 4 16 H7 V20 L12.5 16 H20 A1 1 0 0 0 21 15 V5 A1 1 0 0 0 20 4 Z"],
         ["chevron-down"] = ["M6 9.5 L12 15.5 L18 9.5"],
-        ["chevron-right"] = ["M9.5 6 L15.5 12 L9.5 18"],
-        ["more-vertical"] = [
-            "M13.5 5 A1.5 1.5 0 1 1 10.5 5 A1.5 1.5 0 1 1 13.5 5",
-            "M13.5 12 A1.5 1.5 0 1 1 10.5 12 A1.5 1.5 0 1 1 13.5 12",
-            "M13.5 19 A1.5 1.5 0 1 1 10.5 19 A1.5 1.5 0 1 1 13.5 19"],
         ["x"] = ["M6 6 L18 18", "M18 6 L6 18"],
-        ["check"] = ["M5 13 L9 17 L19 7"],
-        ["alert-triangle"] = ["M12 4 L21.5 19.5 H2.5 Z", "M12 10 V14", "M12 16.6 V16.7"],
     };
 
     /// <summary>Available icon names. Exposed so a test can fail the build on a missing glyph rather
@@ -1036,7 +1035,7 @@ Modify `src/SqlAgent.Host/Components/_Imports.razor` — append:
 - [ ] **Step 8: Run the tests to verify they pass**
 
 Run: `dotnet test tests/SqlAgent.Tests/SqlAgent.Tests.csproj --filter UiPrimitiveTests`
-Expected: PASS, 24 tests (7 facts + 18 theory cases, minus none).
+Expected: PASS, 18 tests (7 facts + 11 theory cases).
 
 - [ ] **Step 9: Commit**
 
@@ -1067,8 +1066,10 @@ EOF
 - Create: `src/SqlAgent.Host/Components/Shared/Ui/Segmented.razor` + `.razor.css`
 - Create: `src/SqlAgent.Host/Components/Shared/Ui/SegmentedOption.cs`
 - Create: `src/SqlAgent.Host/Components/Shared/Ui/Modal.razor` + `.razor.css`
-- Create: `src/SqlAgent.Host/Components/Shared/Ui/ConfirmDialog.razor` + `.razor.css`
 - Test: `tests/SqlAgent.Tests/UiInteractionTests.cs`
+
+**Not in this task:** `ConfirmDialog`. Phase D's SQL blocks are its only caller, so it is built in
+Phase D beside them rather than sitting here unrendered.
 
 **Interfaces:**
 - Consumes: `Icon`, tokens.
@@ -1077,7 +1078,6 @@ EOF
   - `<MenuItem Icon="string?" OnClick="EventCallback" Danger="bool">child</MenuItem>` and an optional `Trailing` fragment.
   - `<Segmented Options="IReadOnlyList<SegmentedOption>" Value="string" ValueChanged="EventCallback<string>" AriaLabel="string?" />` where `SegmentedOption` is `record SegmentedOption(string Value, string Label, string? Icon = null)`.
   - `<Modal Title="string" OnClose="EventCallback">child</Modal>` with an optional `Footer` fragment.
-  - `<ConfirmDialog Title="string" Message="string" ConfirmLabel="string" Danger="bool" OnConfirm="EventCallback" OnCancel="EventCallback" />`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1218,42 +1218,22 @@ public class UiInteractionTests
     }
 
     [Fact]
-    public void A_confirm_dialog_reports_confirm_and_cancel_separately()
+    public void A_modal_footer_is_rendered_only_when_supplied()
     {
+        // The footer is the slot Phase D's confirm dialog will fill. It must be genuinely optional, or
+        // every plain modal (About, for one) grows an empty bordered strip.
         using var ctx = new Bunit.TestContext();
-        var confirmed = 0;
-        var cancelled = 0;
-        var dialog = ctx.RenderComponent<ConfirmDialog>(p => p
-            .Add(d => d.Title, "Drop table orders?")
-            .Add(d => d.Message, "This cannot be undone.")
-            .Add(d => d.ConfirmLabel, "Drop table")
-            .Add(d => d.Danger, true)
-            .Add(d => d.OnConfirm, EventCallback.Factory.Create(new object(), () => confirmed++))
-            .Add(d => d.OnCancel, EventCallback.Factory.Create(new object(), () => cancelled++)));
 
-        Assert.Contains("This cannot be undone.", dialog.Markup);
-        dialog.FindAll("button").Single(b => b.TextContent.Contains("Drop table")).Click();
-        dialog.FindAll("button").Single(b => b.TextContent.Contains("Cancel")).Click();
+        var plain = ctx.RenderComponent<Modal>(p => p
+            .Add(m => m.Title, "About")
+            .AddChildContent("<p>body</p>"));
+        Assert.Empty(plain.FindAll(".modal-foot"));
 
-        Assert.Equal(1, confirmed);
-        Assert.Equal(1, cancelled);
-    }
-
-    [Fact]
-    public void A_dangerous_confirm_dialog_styles_its_confirm_button_as_destructive()
-    {
-        // The single dialog covers both "run this SELECT" and "drop this table"; the destructive case
-        // must not look identical to the benign one.
-        using var ctx = new Bunit.TestContext();
-        var dialog = ctx.RenderComponent<ConfirmDialog>(p => p
-            .Add(d => d.Title, "t")
-            .Add(d => d.Message, "m")
-            .Add(d => d.ConfirmLabel, "Drop it")
-            .Add(d => d.Danger, true));
-
-        var confirm = dialog.FindAll("button").Single(b => b.TextContent.Contains("Drop it"));
-
-        Assert.Contains("danger", confirm.ClassName);
+        var withFooter = ctx.RenderComponent<Modal>(p => p
+            .Add(m => m.Title, "About")
+            .Add(m => m.Footer, (RenderFragment)(b => b.AddMarkupContent(0, "<button>OK</button>")))
+            .AddChildContent("<p>body</p>"));
+        Assert.Single(withFooter.FindAll(".modal-foot"));
     }
 }
 ```
@@ -1261,7 +1241,7 @@ public class UiInteractionTests
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `dotnet test tests/SqlAgent.Tests/SqlAgent.Tests.csproj --filter UiInteractionTests`
-Expected: FAIL — compile error, `Menu`/`MenuItem`/`Segmented`/`Modal`/`ConfirmDialog` not found.
+Expected: FAIL — compile error, `Menu`/`MenuItem`/`Segmented`/`Modal` not found.
 
 - [ ] **Step 3: Write `Menu.razor`**
 
@@ -1556,52 +1536,24 @@ Create `src/SqlAgent.Host/Components/Shared/Ui/Modal.razor.css`:
 .modal-close { padding: 4px; }
 ```
 
-- [ ] **Step 7: Write `ConfirmDialog.razor`**
-
-```razor
-<Modal Title="@Title" OnClose="OnCancel">
-    <p>@Message</p>
-    <Footer>
-        <button type="button" @onclick="OnCancel">Cancel</button>
-        <button type="button" class="@(Danger ? "danger" : "primary")" @onclick="OnConfirm">@ConfirmLabel</button>
-    </Footer>
-</Modal>
-
-@code {
-    [Parameter, EditorRequired] public string Title { get; set; } = "";
-    [Parameter, EditorRequired] public string Message { get; set; } = "";
-    [Parameter] public string ConfirmLabel { get; set; } = "Confirm";
-
-    /// <summary>Styles the confirm action as destructive. Phase D's DDL confirmations set this, so a
-    /// "drop table" prompt cannot look identical to a benign one.</summary>
-    [Parameter] public bool Danger { get; set; }
-
-    [Parameter] public EventCallback OnConfirm { get; set; }
-    [Parameter] public EventCallback OnCancel { get; set; }
-}
-```
-
-No `.razor.css` is needed — the buttons use `app.css`'s `.primary` / `.danger` classes and `Modal`
-owns the layout. Create the file only if a rule is actually required.
-
-- [ ] **Step 8: Run the tests to verify they pass**
+- [ ] **Step 7: Run the tests to verify they pass**
 
 Run: `dotnet test tests/SqlAgent.Tests/SqlAgent.Tests.csproj --filter UiInteractionTests`
-Expected: PASS, 9 tests.
+Expected: PASS, 8 tests.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add src/SqlAgent.Host/Components/Shared/Ui tests/SqlAgent.Tests/UiInteractionTests.cs
 git commit -m "$(cat <<'EOF'
-Add interactive UI primitives: Menu, MenuItem, Segmented, Modal, ConfirmDialog
+Add interactive UI primitives: Menu, MenuItem, Segmented, Modal
 
 Dismissal is built from plain elements — a backdrop element and stopPropagation
 — rather than document-level JS listeners, so these work in the static first
 render and need no interop, and bUnit can test them without a JS engine.
 
-ConfirmDialog takes a Danger flag because Phase D reuses one dialog for both
-"run this SELECT" and "drop this table", and those must not look alike.
+Modal's footer is an optional slot; Phase D's confirm dialog fills it, beside
+the SQL blocks that are its only caller.
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
@@ -3260,6 +3212,7 @@ Checked against the spec's Phase A section:
 | DM Sans vendored, OFL, system fallback, mono stack | 1 |
 | Type scale and radii | 1 |
 | Button/input/badge/menu/alert token sets | 1 (`app.css`), 2 (`Badge`), 3 (`Menu`) |
+| `ConfirmDialog` | deferred to Phase D, where the SQL blocks that call it are built |
 | 300px sidebar, 20px padding, inset rounded card | 1 (`app.css`), 5 |
 | Collapse to icon rail, persisted | 5 |
 | Overlay drawer below 1024px, scrim, hamburger | 5 |
@@ -3272,9 +3225,20 @@ Checked against the spec's Phase A section:
 | Existing screens restyled, not removed | 8 |
 | Docs + manual checklist | 9 |
 
-**Provider glyphs** are the one Phase A item intentionally deferred: they are only referenced by the
-Databases sidebar section, which Phase C builds. Adding `Icon` entries now with nothing rendering
-them would be untested markup. Phase C's plan must add them.
+**Deferred on purpose, and where each lands.** Phase A ships only what Phase A renders, so nothing
+sits in the codebase waiting for a caller a later phase might rename or never write. Each later
+phase's plan must pick its items up:
+
+| Deferred | Lands in | Why not now |
+|---|---|---|
+| Provider glyphs (`MS`, `PG` database marks) | C | Only the Databases sidebar section draws them. |
+| `search`, `plus` icons | B | New Chat and Search arrive with the pages behind them. |
+| `folder`, `chevron-right`, `more-vertical` icons | B | Projects, history rows, and their `⋮` menus. |
+| `check`, `alert-triangle` icons | D | Access-level control and the DDL warning band. |
+| `ConfirmDialog` | D | Its only caller is the SQL block's confirm-before-run gate. |
+
+`UiPrimitiveTests.No_icon_ships_that_nothing_renders` enforces this for the icon set: adding a glyph
+without a caller fails the build, so each phase adds its own.
 
 **Type consistency:** `Icon.Names`, `BadgeTone`, `MenuPlacement`, `SegmentedOption`,
 `HostInfo.{AccountName,MachineName,Initials,Version,StoreDirectory,BindUrl,Port}`,
