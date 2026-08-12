@@ -1,0 +1,30 @@
+.modal-root { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; outline: none; }
+.modal-scrim { position: absolute; inset: 0; background: var(--scrim); }
+.modal-panel {
+  position: relative;
+  z-index: 1;
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+  background: var(--background-100);
+  border: 1px solid var(--base-100);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-menu);
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--base-100);
+}
+.modal-body { padding: var(--space-5); }
+.modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-5);
+  border-top: 1px solid var(--base-100);
+}
+.modal-close { padding: 4px; }

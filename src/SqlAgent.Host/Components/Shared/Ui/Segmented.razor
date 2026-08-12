@@ -1,0 +1,34 @@
+<div class="segmented" role="group" aria-label="@AriaLabel">
+    @foreach (var option in Options)
+    {
+        var selected = option.Value == Value;
+        <button type="button"
+                class="segment @(selected ? "selected" : "")"
+                aria-pressed="@(selected ? "true" : "false")"
+                title="@option.Label"
+                @onclick="() => Select(option.Value)">
+            @if (!string.IsNullOrWhiteSpace(option.Icon))
+            {
+                <Icon Name="@option.Icon" Size="15" />
+            }
+            @if (ShowLabels)
+            {
+                <span>@option.Label</span>
+            }
+            else
+            {
+                <span class="sr-only">@option.Label</span>
+            }
+        </button>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<SegmentedOption> Options { get; set; } = [];
+    [Parameter] public string Value { get; set; } = "";
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+    [Parameter] public string? AriaLabel { get; set; }
+    [Parameter] public bool ShowLabels { get; set; }
+
+    private Task Select(string value) => value == Value ? Task.CompletedTask : ValueChanged.InvokeAsync(value);
+}

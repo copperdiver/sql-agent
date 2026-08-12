@@ -1,0 +1,18 @@
+.menu-root { position: relative; outline: none; }
+.menu-trigger { cursor: pointer; }
+/* Below the panel's z-index, above everything else, so an open menu is modal to the page without a
+   JS focus trap. */
+.menu-backdrop { position: fixed; inset: 0; z-index: 40; }
+.menu-panel {
+  position: absolute;
+  z-index: 41;
+  min-width: 200px;
+  padding: var(--space-1);
+  background: var(--dropdown-background);
+  border: 1px solid var(--base-200);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-menu);
+}
+.menu-panel.place-bottom { top: calc(100% + 6px); left: 0; }
+.menu-panel.place-top { bottom: calc(100% + 6px); left: 0; }
+.menu-panel.place-right { top: 0; left: calc(100% + 6px); }

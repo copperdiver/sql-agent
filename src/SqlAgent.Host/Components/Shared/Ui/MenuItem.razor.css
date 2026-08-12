@@ -1,0 +1,16 @@
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  border: none;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--text-50);
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+}
+.menu-item:hover:not(:disabled) { background: var(--dropdown-hover-background); color: var(--title-50); }
+.menu-item.danger { color: var(--danger-500); }
+.menu-item-label { flex: 1; min-width: 0; }
+.menu-item-trailing { margin-left: auto; display: flex; align-items: center; }

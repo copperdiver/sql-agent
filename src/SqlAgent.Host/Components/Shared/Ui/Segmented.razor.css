@@ -1,0 +1,21 @@
+.segmented {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--background-soft-200);
+  border: 1px solid var(--base-100);
+  border-radius: var(--radius-round);
+}
+.segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: none;
+  color: var(--text-100);
+  padding: 4px 8px;
+  border-radius: var(--radius-round);
+  font-size: var(--text-xs);
+}
+.segment:hover:not(.selected) { color: var(--title-50); }
+.segment.selected { background: var(--background-100); color: var(--title-50); }

@@ -1,0 +1,48 @@
+@* tabindex is what makes @onkeydown fire on a div at all, and -1 keeps the wrapper out of the tab
+   order so Escape works without adding a phantom tab stop before every menu. *@
+<div class="menu-root" @onkeydown="OnKeyDown" tabindex="-1">
+    <div class="menu-trigger" @onclick="Toggle">@Trigger</div>
+
+    @if (_open)
+    {
+        @* A plain element, not a document-level JS listener: this works in the static first render
+           and needs no interop, and clicks on the menu's own panel never reach it because the panel
+           is a sibling painted above it. *@
+        <div class="menu-backdrop" @onclick="Close"></div>
+        <div class="menu-panel @PlacementClass" role="menu">
+            <CascadingValue Value="this" IsFixed="true">@ChildContent</CascadingValue>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public RenderFragment? Trigger { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public MenuPlacement Placement { get; set; } = MenuPlacement.Bottom;
+
+    private bool _open;
+
+    private string PlacementClass => Placement switch
+    {
+        MenuPlacement.Top => "place-top",
+        MenuPlacement.Right => "place-right",
+        _ => "place-bottom",
+    };
+
+    private void Toggle() => _open = !_open;
+
+    public void Close()
+    {
+        // StateHasChanged is required here, unlike in Toggle/OnKeyDown: those run as Menu's own event
+        // handlers, which Blazor re-renders automatically once the handler returns. MenuItem calls this
+        // method on a sibling component instance (via the cascaded Owner), and mutating a field on a
+        // component that isn't itself handling the event does not queue that component for re-render.
+        _open = false;
+        StateHasChanged();
+    }
+
+    private void OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") Close();
+    }
+}

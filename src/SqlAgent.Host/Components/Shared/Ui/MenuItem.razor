@@ -1,0 +1,30 @@
+<button type="button" class="menu-item @(Danger ? "danger" : "")" role="menuitem" @onclick="Activate">
+    @if (!string.IsNullOrWhiteSpace(Icon))
+    {
+        <Icon Name="@Icon" Size="16" />
+    }
+    <span class="menu-item-label">@ChildContent</span>
+    @if (Trailing is not null)
+    {
+        <span class="menu-item-trailing" @onclick:stopPropagation="true">@Trailing</span>
+    }
+</button>
+
+@code {
+    [Parameter] public string? Icon { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public RenderFragment? Trailing { get; set; }
+    [Parameter] public EventCallback OnClick { get; set; }
+    [Parameter] public bool Danger { get; set; }
+
+    /// <summary>The menu this item lives in, so choosing an item dismisses it. Cascaded by Menu.</summary>
+    [CascadingParameter] private Menu? Owner { get; set; }
+
+    private async Task Activate()
+    {
+        // Close first: if OnClick navigates, the menu would otherwise be left open behind the new page,
+        // and a caller that throws would strand it open with no backdrop click able to reach it.
+        Owner?.Close();
+        await OnClick.InvokeAsync();
+    }
+}
