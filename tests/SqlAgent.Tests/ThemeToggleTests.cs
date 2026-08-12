@@ -12,8 +12,18 @@ public class ThemeToggleTests
     private static Bunit.TestContext NewContext()
     {
         var ctx = new Bunit.TestContext();
-        ctx.Services.AddLogging();
-        return ctx;
+        try
+        {
+            ctx.Services.AddLogging();
+            return ctx;
+        }
+        catch
+        {
+            // AddLogging() throwing would otherwise leak ctx: it isn't behind a `using` until this
+            // method returns it to the caller.
+            ctx.Dispose();
+            throw;
+        }
     }
 
     [Fact]
@@ -109,6 +119,31 @@ public class ThemeToggleTests
         ctx.JSInterop.Setup<string>("sqlAgentUi.getTheme").SetResult("system");
         ctx.JSInterop.SetupVoid("sqlAgentUi.setTheme", _ => true)
             .SetException(new JSException("Could not find 'sqlAgentUi.setTheme'"));
+        var toggle = ctx.RenderComponent<ThemeToggle>();
+
+        toggle.FindAll("button").Single(b => b.TextContent.Contains("Dark")).Click();
+
+        var dark = toggle.FindAll("button").Single(b => b.TextContent.Contains("Dark"));
+        Assert.Equal("true", dark.GetAttribute("aria-pressed"));
+    }
+
+    [Fact]
+    public void A_dropped_circuit_during_setTheme_does_not_take_itself_down()
+    {
+        // JSDisconnectedException and JSException are siblings under System.Exception, not a
+        // base/derived pair -- a catch clause naming only one of them does not also catch the other.
+        // This covers the case the previous fix-up missed: the WebSocket drops mid-click (laptop sleep,
+        // network blip, backgrounded tab past the transport timeout) and InvokeVoidAsync throws
+        // JSDisconnectedException, not JSException. An unhandled exception here would escape the event
+        // handler and terminate the circuit outright rather than leaving it in Blazor's reconnect
+        // window, which is strictly worse than a plain disconnect: the client's automatic reconnect
+        // never gets the chance, and the page hard-reloads, losing whatever the user had unsaved in the
+        // editor. The clicked option must still show as selected, same reasoning as the JSException test
+        // above: applyTheme() never ran either way.
+        using var ctx = NewContext();
+        ctx.JSInterop.Setup<string>("sqlAgentUi.getTheme").SetResult("system");
+        ctx.JSInterop.SetupVoid("sqlAgentUi.setTheme", _ => true)
+            .SetException(new JSDisconnectedException("circuit gone"));
         var toggle = ctx.RenderComponent<ThemeToggle>();
 
         toggle.FindAll("button").Single(b => b.TextContent.Contains("Dark")).Click();

@@ -49,18 +49,22 @@
         {
             await JS.InvokeVoidAsync("sqlAgentUi.setTheme", theme);
         }
-        catch (JSException ex)
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException)
         {
-            // Covers both a disconnected circuit (JSDisconnectedException derives from JSException —
-            // there is nothing left to theme) and a missing/renamed sqlAgentUi.setTheme, e.g. theme.js
-            // failed to load or evaluate. The latter is exactly what the read path above already
-            // tolerates: OnAfterRenderAsync's catch renders a normal-looking toggle in that case, so a
-            // click here must not then take an unhandled JSException through this event handler and
-            // kill the circuit — Task 5 mounts this in the sidebar, outside WorkArea's ErrorBoundary,
-            // so nothing else would catch it. _theme is left at the clicked value rather than reverted:
-            // applyTheme() never ran either way, so the visual state is already wrong, and reverting the
-            // selection would just make the control fight the user's own click. A genuine programming
-            // error in this method (not a JSException) still surfaces, since only JSException is caught.
+            // JSException and JSDisconnectedException are siblings under System.Exception, not a
+            // base/derived pair, so a filter has to name both explicitly rather than catching only one
+            // and assuming it covers the other. Both mean the same thing here — the browser is not
+            // reachable to theme, whether because the circuit is gone (disconnected: a dropped
+            // WebSocket, a closed tab) or because sqlAgentUi.setTheme itself is missing/broken (a
+            // JSException — theme.js failed to load or drifted from this component). The latter is
+            // exactly what the read path above already tolerates: OnAfterRenderAsync's catch renders a
+            // normal-looking toggle in that case, so a click here must not then take an unhandled
+            // exception through this event handler and kill the circuit — Task 5 mounts this in the
+            // sidebar, outside WorkArea's ErrorBoundary, so nothing else would catch it. _theme is left
+            // at the clicked value rather than reverted: applyTheme() never ran either way, so the
+            // visual state is already wrong, and reverting the selection would just make the control
+            // fight the user's own click. A genuine programming error in this method (any other
+            // exception type) still surfaces, since the filter names only these two.
             Logger.LogDebug(ex, "sqlAgentUi.setTheme failed for theme {Theme}.", theme);
         }
     }
