@@ -1,5 +1,7 @@
+@using Microsoft.Extensions.Logging
 @using Microsoft.JSInterop
 @inject IJSRuntime JS
+@inject ILogger<ThemeToggle> Logger
 
 <Segmented Options="Options" Value="@_theme" ValueChanged="ApplyAsync"
            AriaLabel="Theme" ShowLabels="ShowLabels" />
@@ -25,11 +27,16 @@
         {
             _theme = Normalize(await JS.InvokeAsync<string>("sqlAgentUi.getTheme"));
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // Private-mode localStorage throws rather than returning null, and a disconnected circuit
-            // throws JSDisconnectedException. Neither is worth failing the page over: "system" is the
-            // same default theme.js itself falls back to, so the control stays truthful.
+            // Private-mode localStorage throws rather than returning null, a disconnected circuit
+            // throws JSDisconnectedException, and a missing/renamed sqlAgentUi.getTheme (theme.js
+            // failed to load, or drifted from this component) throws JSException. None of those are
+            // worth failing the page over: "system" is the same default theme.js itself falls back to,
+            // so the control stays truthful. Logged at Debug rather than swallowed outright: private-mode
+            // storage is routine, but a renamed/missing interop call is a real bug that would otherwise
+            // leave the control silently and permanently wrong with zero evidence in any log.
+            Logger.LogDebug(ex, "sqlAgentUi.getTheme failed; ThemeToggle is falling back to system.");
             _theme = "system";
         }
         StateHasChanged();
@@ -42,9 +49,19 @@
         {
             await JS.InvokeVoidAsync("sqlAgentUi.setTheme", theme);
         }
-        catch (JSDisconnectedException)
+        catch (JSException ex)
         {
-            // The tab is gone; there is nothing left to theme.
+            // Covers both a disconnected circuit (JSDisconnectedException derives from JSException —
+            // there is nothing left to theme) and a missing/renamed sqlAgentUi.setTheme, e.g. theme.js
+            // failed to load or evaluate. The latter is exactly what the read path above already
+            // tolerates: OnAfterRenderAsync's catch renders a normal-looking toggle in that case, so a
+            // click here must not then take an unhandled JSException through this event handler and
+            // kill the circuit — Task 5 mounts this in the sidebar, outside WorkArea's ErrorBoundary,
+            // so nothing else would catch it. _theme is left at the clicked value rather than reverted:
+            // applyTheme() never ran either way, so the visual state is already wrong, and reverting the
+            // selection would just make the control fight the user's own click. A genuine programming
+            // error in this method (not a JSException) still surfaces, since only JSException is caught.
+            Logger.LogDebug(ex, "sqlAgentUi.setTheme failed for theme {Theme}.", theme);
         }
     }
 
