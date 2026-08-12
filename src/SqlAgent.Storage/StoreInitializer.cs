@@ -29,7 +29,12 @@ public static class StoreInitializer
         {
             var tables = await ListTablesAsync(db, ct);
 
-            if (!tables.Contains(HistoryTable) && tables.Contains(LegacyMarkerTable))
+            // "Absent or empty", not just "absent": StampAsync's create-table and insert-row are two
+            // separate statements, so a process that dies between them leaves a history table with no
+            // rows. Treating that the same as no history table at all is what lets the next start retry
+            // the stamp instead of concluding — wrongly, and permanently — that the store is already
+            // migrated and running straight into MigrateAsync's "table already exists".
+            if (tables.Contains(LegacyMarkerTable) && !await HistoryIsPopulatedAsync(db, tables, ct))
             {
                 // GetMigrations() returns the migrations compiled into this assembly in id order, so the
                 // first is InitialCreate. Reading it here rather than hardcoding the timestamped id keeps
@@ -62,6 +67,20 @@ public static class StoreInitializer
             .SqlQueryRaw<string>("SELECT name AS Value FROM sqlite_master WHERE type = 'table'")
             .ToListAsync(ct);
         return names.ToHashSet(StringComparer.Ordinal);
+    }
+
+    /// <summary>False both when the history table doesn't exist yet and when it exists but is empty — the
+    /// second case is what an interrupted <see cref="StampAsync"/> (crashed between its create and its
+    /// insert) leaves behind, and it must be recognized as "still needs stamping" rather than "already
+    /// migrated".</summary>
+    private static async Task<bool> HistoryIsPopulatedAsync(
+        SqlAgentDbContext db, HashSet<string> tables, CancellationToken ct)
+    {
+        if (!tables.Contains(HistoryTable)) return false;
+        var count = await db.Database
+            .SqlQueryRaw<int>($"SELECT COUNT(*) AS Value FROM \"{HistoryTable}\"")
+            .SingleAsync(ct);
+        return count > 0;
     }
 
     /// <summary>Writes the history table and one row, using EF's own scripts rather than hand-rolled DDL

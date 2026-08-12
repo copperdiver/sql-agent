@@ -1,5 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Logging.Abstractions;
 using SqlAgent.Core;
 using SqlAgent.Storage;
@@ -81,11 +83,63 @@ public class StoreMigrationTests : IDisposable
     {
         // Every host start runs this. The second run must not try to stamp the baseline again — the
         // insert would violate the history table's primary key and stop a host whose store is fine.
+        // Starting from a legacy store (not an empty one) is what actually exercises the stamp path:
+        // initializing an empty store never stamps at all, so it would never approach the guard this
+        // test means to verify.
+        await using (var legacy = NewLegacyContext())
+            await legacy.Database.EnsureCreatedAsync();
+        SqliteConnection.ClearAllPools();
+
         await using var db = NewContext();
         await StoreInitializer.InitializeAsync(db, NullLogger.Instance);
 
         await StoreInitializer.InitializeAsync(db, NullLogger.Instance);
 
+        Assert.NotEmpty(await db.Database.GetAppliedMigrationsAsync());
+    }
+
+    [Fact]
+    public async Task A_history_table_left_empty_by_an_interrupted_stamp_is_treated_as_unmigrated()
+    {
+        // Reproduces exactly what a process death between StoreInitializer's create-history-table and
+        // insert-baseline-row statements leaves behind: the history table exists, but has no row. A
+        // version of the detection that only checked "does the history table exist" would read that as
+        // "already migrated", skip straight to MigrateAsync, and hit "table DatabaseConnections already
+        // exists" — permanently, since every later start reaches the same wrong conclusion from the same
+        // empty table.
+        Guid connectionId;
+        await using (var legacy = NewLegacyContext())
+        {
+            await legacy.Database.EnsureCreatedAsync();
+            var row = new DatabaseConnection
+            {
+                Id = Guid.NewGuid(),
+                Name = "prod",
+                ProviderType = DatabaseProviderType.Postgres,
+                ConnectionStringSecretRef = "db:abc",
+                IsReadOnly = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            };
+            legacy.Set<DatabaseConnection>().Add(row);
+            await legacy.SaveChangesAsync();
+            connectionId = row.Id;
+        }
+        SqliteConnection.ClearAllPools();
+
+        // Create the history table without inserting the baseline row — the half-stamped state.
+        await using (var setup = NewContext())
+        {
+            var history = setup.GetService<IHistoryRepository>();
+            await setup.Database.ExecuteSqlRawAsync(history.GetCreateIfNotExistsScript());
+        }
+        SqliteConnection.ClearAllPools();
+
+        await using var db = NewContext();
+        await StoreInitializer.InitializeAsync(db, NullLogger.Instance);
+
+        var kept = await db.DatabaseConnections.SingleAsync();
+        Assert.Equal(connectionId, kept.Id);
         Assert.NotEmpty(await db.Database.GetAppliedMigrationsAsync());
     }
 
