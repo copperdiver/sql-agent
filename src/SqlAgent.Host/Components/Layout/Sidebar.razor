@@ -1,0 +1,85 @@
+@using Microsoft.Extensions.Logging
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
+@inject ILogger<Sidebar> Logger
+
+@if (_drawerOpen)
+{
+    <div class="sidebar-scrim" @onclick="CloseDrawer"></div>
+}
+
+<button type="button" class="ghost drawer-trigger" data-testid="drawer-open"
+        @onclick="OpenDrawer" aria-label="Open menu">
+    <Icon Name="menu" Size="20" />
+</button>
+
+<aside class="sidebar custom-scroll @(_collapsed ? "collapsed" : "") @(_drawerOpen ? "drawer-open" : "")">
+    <SidebarHeader Collapsed="_collapsed"
+                   OnToggleCollapse="ToggleCollapseAsync"
+                   OnCloseDrawer="CloseDrawer" />
+
+    <SidebarNav Collapsed="_collapsed" />
+
+    <div class="sidebar-body custom-scroll">
+        @* Phase C replaces the rail with the Databases section and the config page. Until then it is
+           the only place a connection can be picked or a table hidden, so it stays. *@
+        <SchemaRail />
+    </div>
+
+    <div class="sidebar-foot">
+        @* UserCard arrives in Task 6. *@
+        @UserSlot
+    </div>
+</aside>
+
+@code {
+    /// <summary>Filled by Task 6 with <c>UserCard</c>. A slot rather than a hard reference so this
+    /// component is testable before that component exists.</summary>
+    [Parameter] public RenderFragment? UserSlot { get; set; }
+
+    private bool _collapsed;
+    private bool _drawerOpen;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // theme.js put html.sidebar-collapsed in place before this circuit existed; read it back rather
+        // than rendering an expanded sidebar inside an already-narrowed shell. This is a first-render
+        // read, not an event handler, so a broad catch is correct here: private-mode localStorage can
+        // throw arbitrary types, and there is nothing more specific to recover to than the default.
+        if (!firstRender) return;
+        try
+        {
+            _collapsed = await JS.InvokeAsync<string>("sqlAgentUi.getSidebar") == "collapsed";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "sqlAgentUi.getSidebar failed; Sidebar is falling back to expanded.");
+            _collapsed = false;
+        }
+        StateHasChanged();
+    }
+
+    private async Task ToggleCollapseAsync()
+    {
+        _collapsed = !_collapsed;
+        try
+        {
+            await JS.InvokeVoidAsync("sqlAgentUi.setSidebar", _collapsed ? "collapsed" : "expanded");
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException)
+        {
+            // JSException and JSDisconnectedException are siblings under System.Exception, not a
+            // base/derived pair (see ThemeToggle.ApplyAsync for the same reasoning in full) — a filter
+            // must name both. This handler runs inside an event callback: an unhandled exception here
+            // would take the whole circuit down, and the sidebar sits outside WorkArea's ErrorBoundary,
+            // so nothing else would catch it. _collapsed is left at the toggled value: the visible
+            // sidebar width already changed synchronously above, and reverting it here would fight the
+            // user's own click while the persistence call is what actually failed.
+            Logger.LogDebug(ex, "sqlAgentUi.setSidebar failed for state {State}.", _collapsed ? "collapsed" : "expanded");
+        }
+    }
+
+    private void OpenDrawer() => _drawerOpen = true;
+
+    private void CloseDrawer() => _drawerOpen = false;
+}

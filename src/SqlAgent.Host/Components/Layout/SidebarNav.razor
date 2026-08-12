@@ -1,0 +1,20 @@
+@* Phase A lists the routes that exist. Phase B replaces these with New Chat and Search once the
+   chat pages are behind them. *@
+<nav class="sidebar-nav">
+    <NavLink class="nav-row" href="/" Match="NavLinkMatch.All">
+        <Icon Name="message-square" Size="18" />
+        <span class="nav-label">Workspace</span>
+    </NavLink>
+    <NavLink class="nav-row" href="/connections">
+        <Icon Name="database" Size="18" />
+        <span class="nav-label">Connections</span>
+    </NavLink>
+    <NavLink class="nav-row" href="/settings">
+        <Icon Name="settings" Size="18" />
+        <span class="nav-label">Settings</span>
+    </NavLink>
+</nav>
+
+@code {
+    [Parameter] public bool Collapsed { get; set; }
+}

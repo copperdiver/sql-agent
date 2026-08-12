@@ -1,0 +1,8 @@
+/* Layout lives in app.css (.app, .app-main, .app-card) because the restyled pages and the tests
+   reference those class names directly. This file holds only what is specific to the layout
+   component itself. */
+.app { min-height: 100vh; }
+@media (max-width: 1023px) {
+  /* Leave room for the fixed drawer trigger so it never covers page content. */
+  .app-main { padding-top: 56px; }
+}

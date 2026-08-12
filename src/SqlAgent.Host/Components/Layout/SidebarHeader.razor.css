@@ -1,0 +1,20 @@
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-6);
+}
+.brand { display: flex; align-items: center; gap: var(--space-2); color: var(--title-50); }
+.brand:hover { text-decoration: none; }
+.brand ::deep .brand-mark { color: var(--primary-500); }
+.brand-name { font-size: var(--text-base); font-weight: 600; }
+.icon-button { padding: 6px; border-radius: var(--radius-control); }
+
+/* The drawer close button only exists on narrow viewports; the collapse toggle only on wide ones. */
+.drawer-close { display: inline-flex; }
+.collapse-toggle { display: none; }
+@media (min-width: 1024px) {
+  .drawer-close { display: none; }
+  .collapse-toggle { display: inline-flex; }
+}

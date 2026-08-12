@@ -1,12 +1,13 @@
 @inherits LayoutComponentBase
 
-<header>
-    <strong>SQL Agent</strong>
-    <nav><a href="/">Workspace</a> <a href="/connections">Connections</a></nav>
-</header>
-<div class="shell">
-    <SchemaRail />
-    <main>
-        <WorkArea>@Body</WorkArea>
+@* The header nav is gone: the sidebar owns navigation now. WorkArea stays exactly where it was —
+   it is the error boundary for every page, and its LocationChanged recovery depends on living
+   above @Body rather than inside a page. *@
+<div class="app">
+    <Sidebar />
+    <main class="app-main">
+        <div class="app-card custom-scroll">
+            <WorkArea>@Body</WorkArea>
+        </div>
     </main>
 </div>

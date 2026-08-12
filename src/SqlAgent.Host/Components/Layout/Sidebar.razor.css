@@ -1,0 +1,45 @@
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  width: var(--sidebar-width);
+  flex: 0 0 var(--sidebar-width);
+  padding: var(--space-5);
+  background: var(--background-50);
+  border-right: 1px solid var(--base-100);
+  overflow: hidden;
+  transition: width .25s, flex-basis .25s, transform .25s;
+}
+.sidebar.collapsed { width: var(--sidebar-collapsed-width); flex-basis: var(--sidebar-collapsed-width); }
+/* Labels disappear, icons stay: a collapsed rail of icons is navigable, a rail of clipped words is not. */
+.sidebar.collapsed ::deep .nav-label,
+.sidebar.collapsed ::deep .brand-name,
+.sidebar.collapsed .sidebar-body,
+.sidebar.collapsed .sidebar-foot { display: none; }
+
+.sidebar-body { flex: 1; min-height: 0; overflow-y: auto; }
+.sidebar-foot { margin-top: var(--space-4); }
+
+.sidebar-scrim { position: fixed; inset: 0; background: var(--scrim); z-index: 49; }
+.drawer-trigger {
+  position: fixed;
+  top: var(--space-3);
+  left: var(--space-3);
+  z-index: 30;
+  padding: 6px;
+}
+
+/* Below 1024px the sidebar leaves the flow entirely and slides in over the page. */
+@media (max-width: 1023px) {
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 50;
+    transform: translateX(-100%);
+  }
+  .sidebar.drawer-open { transform: translateX(0); }
+  .sidebar.collapsed { width: var(--sidebar-width); flex-basis: var(--sidebar-width); }
+}
+@media (min-width: 1024px) {
+  .drawer-trigger { display: none; }
+  .sidebar-scrim { display: none; }
+}

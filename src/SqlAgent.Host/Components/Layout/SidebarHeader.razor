@@ -1,0 +1,23 @@
+<div class="sidebar-head">
+    <a class="brand" href="/">
+        <Icon Name="database" Size="22" Class="brand-mark" />
+        <span class="brand-name">SQL Agent</span>
+    </a>
+
+    <button type="button" class="ghost icon-button drawer-close" data-testid="drawer-close"
+            @onclick="OnCloseDrawer" aria-label="Close menu">
+        <Icon Name="x" Size="18" />
+    </button>
+
+    <button type="button" class="ghost icon-button collapse-toggle" data-testid="collapse-toggle"
+            @onclick="OnToggleCollapse"
+            aria-label="@(Collapsed ? "Expand sidebar" : "Collapse sidebar")">
+        <Icon Name="panel-left" Size="18" />
+    </button>
+</div>
+
+@code {
+    [Parameter] public bool Collapsed { get; set; }
+    [Parameter] public EventCallback OnToggleCollapse { get; set; }
+    [Parameter] public EventCallback OnCloseDrawer { get; set; }
+}
