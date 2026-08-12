@@ -1,0 +1,19 @@
+<div class="empty">
+    <Icon Name="@Icon" Size="28" Class="empty-icon" />
+    <p class="empty-title">@Title</p>
+    @if (!string.IsNullOrWhiteSpace(Hint))
+    {
+        <p class="empty-hint">@Hint</p>
+    }
+    @if (ChildContent is not null)
+    {
+        <div class="empty-actions">@ChildContent</div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Icon { get; set; } = "info";
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter] public string? Hint { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

@@ -1,0 +1,15 @@
+<span class="badge @ToneClass">@ChildContent</span>
+
+@code {
+    [Parameter] public BadgeTone Tone { get; set; } = BadgeTone.Neutral;
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private string ToneClass => Tone switch
+    {
+        BadgeTone.Primary => "primary",
+        BadgeTone.Success => "success",
+        BadgeTone.Warning => "warning",
+        BadgeTone.Danger => "danger",
+        _ => "neutral",
+    };
+}

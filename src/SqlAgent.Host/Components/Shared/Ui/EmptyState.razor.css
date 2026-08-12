@@ -1,0 +1,13 @@
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-8) var(--space-4);
+  text-align: center;
+  color: var(--text-100);
+}
+.empty ::deep .empty-icon { color: var(--base-200); }
+.empty-title { color: var(--title-50); font-weight: 500; }
+.empty-hint { font-size: var(--text-xs); }
+.empty-actions { margin-top: var(--space-2); }
