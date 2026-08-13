@@ -10,7 +10,7 @@
         <input id="chat-title" value="@_title" @onchange="OnTitleChanged" />
     </ChildContent>
     <Footer>
-        <button type="button" @onclick="OnCancel">Cancel</button>
+        <button type="button" data-testid="rename-cancel" @onclick="OnCancel">Cancel</button>
         <button type="button" class="primary" data-testid="rename-save"
                 disabled="@string.IsNullOrWhiteSpace(_title)"
                 @onclick="() => OnSave.InvokeAsync(_title)">Save</button>

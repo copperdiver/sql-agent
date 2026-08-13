@@ -322,11 +322,11 @@ th { color: var(--text-100); font-weight: 500; font-size: var(--text-xs); text-t
 }
 .meta { color: var(--text-100); font-size: var(--text-xs); }
 .actions { display: flex; gap: var(--space-2); flex-wrap: wrap; margin: var(--space-3) 0; }
-/* Both ResultGrid.razor (the SQL tab) and ChatOutcome.razor (the Chat tab's QueryResult branch)
+/* Both ResultGrid.razor (the SQL page) and ChatOutcome.razor (the chat page's QueryResult branch)
    render their own "<div class="grid-scroll"><table>" markup directly, each in its own CSS-isolation
    scope — a scoped .grid-scroll rule in either component's stylesheet could never reach the other's
    markup. These rules live here, unscoped, so one definition covers both callers instead of the two
-   tabs' identical result tables silently drifting apart (see ChatOutcome.razor's QueryResult case). */
+   pages' identical result tables silently drifting apart (see ChatOutcome.razor's QueryResult case). */
 .grid-scroll {
   max-height: 60vh;
   overflow: auto;

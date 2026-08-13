@@ -43,7 +43,14 @@ public class HistorySectionTests : IDisposable
     [Fact]
     public async Task Chats_are_listed_under_their_day_headings_newest_first()
     {
-        await SeedAsync("this morning", DateTime.UtcNow.AddHours(-2));
+        // A fixed -2h offset here is flaky near local midnight: whenever the host's local time is within
+        // two hours after midnight, "2 hours ago" in UTC lands on the *previous* local calendar day, and
+        // ChatHistoryGrouping (which buckets by local calendar date, correctly per its own doc comment)
+        // puts this chat under Yesterday instead of Today, failing the assertion below for a reason that
+        // has nothing to do with the grouping logic. No offset at all still exercises the same thing this
+        // test checks — a chat active right now sorts under Today, ahead of one 20 days old — without a
+        // day-boundary edge case that only reproduces at a specific time of night.
+        await SeedAsync("this morning", DateTime.UtcNow);
         await SeedAsync("last month", DateTime.UtcNow.AddDays(-20));
 
         var section = _ctx.RenderComponent<HistorySection>();
@@ -111,7 +118,29 @@ public class HistorySectionTests : IDisposable
         dialog.Find("input").Change("quarterly revenue");
         await dialog.Find("[data-testid=rename-save]").ClickAsync(new MouseEventArgs());
 
-        Assert.Equal("quarterly revenue", (await LoadAsync(id)).Title);
+        var reloaded = await LoadAsync(id);
+        Assert.NotNull(reloaded);
+        Assert.Equal("quarterly revenue", reloaded.Title);
+        Assert.Null(dialogs.Current);
+    }
+
+    [Fact]
+    public async Task Cancelling_the_rename_dialog_keeps_the_title()
+    {
+        var id = await SeedAsync("keep me", DateTime.UtcNow);
+        var section = _ctx.RenderComponent<HistorySection>();
+        var dialogs = _ctx.Services.GetRequiredService<DialogService>();
+
+        section.Find(".history-row .menu-trigger").Click();
+        section.FindAll(".menu-item-action").First(r => r.TextContent.Contains("Rename")).Click();
+
+        var dialog = _ctx.Render(dialogs.Current!);
+        dialog.Find("input").Change("something else entirely");
+        await dialog.Find("[data-testid=rename-cancel]").ClickAsync(new MouseEventArgs());
+
+        var reloaded = await LoadAsync(id);
+        Assert.NotNull(reloaded);
+        Assert.Equal("keep me", reloaded.Title);
         Assert.Null(dialogs.Current);
     }
 

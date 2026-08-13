@@ -4,8 +4,9 @@ namespace SqlAgent.Host.Web;
 
 /// <summary>
 /// Which connection the workspace is pointed at. Scoped to the circuit, so it is per browser tab.
-/// The rail, the SQL tab, and the chat tab all read it, so it lives here rather than in a parent
-/// component's parameters.
+/// The rail and the SQL page read it, so it lives here rather than in a parent component's
+/// parameters. The chat page does not read it at all — it attaches databases independently,
+/// through the composer's attachment menu.
 /// </summary>
 public sealed class AppState
 {

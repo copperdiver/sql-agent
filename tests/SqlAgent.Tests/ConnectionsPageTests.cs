@@ -130,7 +130,7 @@ public class ConnectionsPageTests : IDisposable
         FindButton(page, "Save").Click();
 
         // Not hand-built prose in a bare <p role="status">: this page routes refusals through the same
-        // component the SQL and Chat tabs use, so the user sees a stable code and can tell a
+        // component the SQL and chat pages use, so the user sees a stable code and can tell a
         // deliberate refusal from a crash.
         var outcome = page.Find(".outcome");
         Assert.Contains("A connection string is required for a new connection.", outcome.TextContent);
