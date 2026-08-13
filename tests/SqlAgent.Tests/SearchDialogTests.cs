@@ -42,6 +42,20 @@ public class SearchDialogTests : IDisposable
     }
 
     [Fact]
+    public void Rendering_the_dialog_moves_focus_into_the_search_input()
+    {
+        // bUnit has no focus model, so this can only prove the interop call was issued -- the same limit
+        // ShellTests documents for the drawer's own focus move (FocusInvocationCount there). autofocus
+        // cannot do this job here: Modal's own close button already carries one, and a browser only
+        // honors autofocus while the document's focused area is still <body> at insertion time, which it
+        // never is when this dialog is opened by a click or a keydown.
+        _ctx.RenderComponent<SearchDialog>();
+
+        Assert.NotEqual(0, _ctx.JSInterop.Invocations.Count(
+            i => i.Identifier.Contains("focus", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    [Fact]
     public async Task Typing_finds_a_chat_by_title_and_opening_it_navigates()
     {
         await SeedChatAsync("quarterly revenue", "body");

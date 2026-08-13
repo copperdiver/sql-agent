@@ -1,13 +1,23 @@
+@using Microsoft.Extensions.Logging
+@using Microsoft.JSInterop
 @inject ScopedRunner Runner
 @inject AppState State
 @inject NavigationManager Nav
+@inject ILogger<SearchDialog> Logger
 
 <Modal Title="Search" OnClose="OnClose">
     <ChildContent>
         @* Enter, the arrows and Escape are handled here rather than by a document listener: focus is in
-           this box for the dialog's whole life, so Blazor hears them without any interop. *@
+           this box for the dialog's whole life, so Blazor hears them without any interop.
+           No autofocus here: Modal's own close button already carries one, and per the HTML spec a
+           browser only honors autofocus while the document's focused area is still <body> at insertion
+           time -- never true here, since this dialog is always opened by a click or a keydown, both of
+           which have already moved focus away from body before this input exists. Sidebar.razor documents
+           the identical failure (verified in Chromium, not assumed) and NameDialog has no autofocus on
+           its own field for the same reason. Fixed the same way Sidebar fixes it: an explicit FocusAsync
+           in OnAfterRenderAsync below. *@
         <input class="search-input" placeholder="Search chats, projects and databases"
-               value="@_term" @oninput="OnTermChanged" @onkeydown="OnKeyDown" autofocus />
+               value="@_term" @oninput="OnTermChanged" @onkeydown="OnKeyDown" @ref="_input" />
 
         @if (_term.Length == 0)
         {
@@ -46,15 +56,47 @@
     private string _term = "";
     private List<SearchHit> _hits = [];
     private int _highlighted;
+    private ElementReference _input;
+
+    // Bumped on every query and captured before awaiting, so a response can tell whether it is still the
+    // most recent thing asked for. Without this, a slow response for an earlier keystroke can land after
+    // a fast response for a later one and overwrite it -- Enter would then open a hit for a term no
+    // longer in the box, with nothing in the UI to suggest that happened.
+    private int _searchToken;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            await _input.FocusAsync();
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or OperationCanceledException)
+        {
+            // Same three failures FocusAsync can throw everywhere else in this codebase (see Sidebar's
+            // FocusDrawerIfJustOpenedAsync), and the same split: a JSException means Blazor's own focus
+            // interop is missing, a real bug worth Warning; a gone circuit or an interop timeout is
+            // routine and stays at Debug. Losing the move costs only the keyboard-first workflow -- the
+            // user can still click into the box -- so there is nothing to recover and nothing to surface
+            // to them.
+            Logger.Log(ex is JSException ? LogLevel.Warning : LogLevel.Debug, ex,
+                "Focusing the search input failed; typing will require a manual click into the box.");
+        }
+    }
 
     private async Task OnTermChanged(ChangeEventArgs e)
     {
         _term = e.Value?.ToString() ?? "";
+        var token = ++_searchToken;
         // Queried on every keystroke, deliberately: the store is a local file and the corpus is one
         // person's history, so an artificial delay would only add drag. SearchService returns early on a
         // blank term, so clearing the box costs no query at all.
-        _hits = (await Runner.RunAsync<SearchService, IReadOnlyList<SearchHit>>(
+        var hits = (await Runner.RunAsync<SearchService, IReadOnlyList<SearchHit>>(
             s => s.SearchAsync(_term))).ToList();
+        // A newer keystroke already started its own query while this one was in flight; that query owns
+        // _hits and _highlighted now, and applying this stale response would overwrite its results.
+        if (token != _searchToken) return;
+        _hits = hits;
         _highlighted = 0;
     }
 

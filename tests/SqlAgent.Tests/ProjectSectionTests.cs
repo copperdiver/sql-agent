@@ -142,6 +142,22 @@ public class ProjectSectionTests : IDisposable
     }
 
     [Fact]
+    public async Task Requesting_a_project_expanded_opens_it_and_shows_its_chats()
+    {
+        // SearchDialogTests only proves the request lands in AppState.ProjectToExpand; this is the
+        // consuming side of that handshake -- the section that actually reads the request and opens the
+        // project a search hit pointed at, since there is no project route to navigate to instead.
+        var id = await SeedProjectAsync("quarterly", "first");
+        var section = _ctx.RenderComponent<ProjectSection>();
+        Assert.Empty(section.FindAll(".chat-row"));
+
+        await section.InvokeAsync(() =>
+            _ctx.Services.GetRequiredService<AppState>().RequestProjectExpanded(id));
+
+        Assert.Single(section.FindAll(".chat-row"));
+    }
+
+    [Fact]
     public async Task The_list_re_reads_itself_when_something_says_the_chats_changed()
     {
         // A chat moved into a project from the history section's own row has to change this section's
