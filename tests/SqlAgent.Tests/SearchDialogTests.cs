@@ -5,6 +5,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SqlAgent.Host.Components.Shared.Chat;
+using SqlAgent.Host.Components.Shared.Ui;
 using SqlAgent.Host.Web;
 using SqlAgent.Storage;
 
@@ -42,17 +43,23 @@ public class SearchDialogTests : IDisposable
     }
 
     [Fact]
-    public void Rendering_the_dialog_moves_focus_into_the_search_input()
+    public void Rendering_the_dialog_hands_its_input_to_Modal_as_the_focus_target()
     {
-        // bUnit has no focus model, so this can only prove the interop call was issued -- the same limit
-        // ShellTests documents for the drawer's own focus move (FocusInvocationCount there). autofocus
-        // cannot do this job here: Modal's own close button already carries one, and a browser only
-        // honors autofocus while the document's focused area is still <body> at insertion time, which it
-        // never is when this dialog is opened by a click or a keydown.
-        _ctx.RenderComponent<SearchDialog>();
+        // bUnit has no focus model at all, so nothing here can assert that the search input actually
+        // receives focus, or that it receives focus before Modal's own close button does -- both are
+        // exactly what regressed last: SearchDialog used to make its own separate FocusAsync call
+        // alongside Modal's default, on the theory that render order would make its call win. A real
+        // browser said otherwise -- Modal's own focus move landed second and silently overwrote it -- and
+        // an interop-count assertion like the old version of this test couldn't tell the difference: it
+        // passed whether the close button or the input ended up focused, since both are calls whose
+        // identifier contains "focus". The strongest claim this suite can make instead is structural: that
+        // SearchDialog hands Modal a specific target rather than leaving Modal to fall back to its close
+        // button default, which means there is exactly one FocusAsync call and no ordering left to race.
+        // Actually landing on the input, on both open paths, is covered only by the manual browser row in
+        // docs/web-ui.md -- see "New project" / "Search" there.
+        var dialog = _ctx.RenderComponent<SearchDialog>();
 
-        Assert.NotEqual(0, _ctx.JSInterop.Invocations.Count(
-            i => i.Identifier.Contains("focus", StringComparison.OrdinalIgnoreCase)));
+        Assert.NotNull(dialog.FindComponent<Modal>().Instance.InitialFocus);
     }
 
     [Fact]

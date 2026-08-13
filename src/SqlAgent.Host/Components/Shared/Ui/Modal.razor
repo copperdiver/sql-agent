@@ -36,8 +36,18 @@
     /// <c>default</c> at the point this parameter is bound -- its element does not exist in the DOM yet
     /// -- and only resolves to something real by the time <see cref="OnAfterRenderAsync"/> below actually
     /// invokes the callback. Defaults to this dialog's own close button, so every caller gets a real
-    /// focus move even when it supplies nothing more specific -- MoveToProjectDialog, for one, has no
-    /// single field that deserves it more than another.
+    /// focus move even when it supplies nothing more specific -- MoveToProjectDialog and the About dialog,
+    /// for instance, have no single field that deserves it more than another.
+    ///
+    /// This is the only FocusAsync call a dialog should make. NameDialog and SearchDialog both pass their
+    /// own field through this parameter rather than also calling FocusAsync themselves in their own
+    /// OnAfterRenderAsync -- SearchDialog used to do exactly that, on the assumption that its own call,
+    /// running after this component's default per the child-before-parent OnAfterRenderAsync ordering,
+    /// would simply overwrite it. Checked in a real browser rather than trusted, that assumption was
+    /// backwards: this component's own focus move landed second and silently won, leaving the search
+    /// input unfocused while typing did nothing. Routing every caller's target through this one parameter
+    /// removes the ordering question entirely -- there is exactly one FocusAsync call per dialog, made
+    /// here, and nothing left to race.
     ///
     /// autofocus cannot do this job, on the close button or anywhere else: per the HTML spec a browser
     /// only honors autofocus while the document's focused area is still &lt;body&gt; at insertion time,

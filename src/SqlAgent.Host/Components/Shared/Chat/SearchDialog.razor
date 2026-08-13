@@ -1,11 +1,8 @@
-@using Microsoft.Extensions.Logging
-@using Microsoft.JSInterop
 @inject ScopedRunner Runner
 @inject AppState State
 @inject NavigationManager Nav
-@inject ILogger<SearchDialog> Logger
 
-<Modal Title="Search" OnClose="OnClose">
+<Modal Title="Search" OnClose="OnClose" InitialFocus="() => _input">
     <ChildContent>
         @* Enter, the arrows and Escape are handled here rather than by a document listener: focus is in
            this box for the dialog's whole life, so Blazor hears them without any interop.
@@ -13,10 +10,14 @@
            focused area is still <body> at insertion time -- never true here, since this dialog is always
            opened by a click or a keydown, both of which have already moved focus away from body before
            this input exists. Sidebar.razor documents the identical failure (verified in Chromium, not
-           assumed). Fixed the same way Sidebar fixes it: an explicit FocusAsync in OnAfterRenderAsync
-           below, kept separate from Modal's own InitialFocus default (which would otherwise land on its
-           close button) rather than routed through it -- Modal renders before this component's own
-           OnAfterRenderAsync runs, so this call executes after Modal's default and wins. *@
+           assumed).
+           Routed through Modal's InitialFocus rather than a second, separate FocusAsync call of this
+           component's own: an earlier version called FocusAsync here as well as relying on Modal's
+           default, on the theory that "Modal renders before this component's OnAfterRenderAsync runs, so
+           this call executes after Modal's default and wins." That was checked in a real browser, not
+           just reasoned about, and it was backwards -- Modal's own close-button focus actually lands
+           *after* this one, so the close button silently stole focus back from the input on every open.
+           One call, owned by Modal, has no ordering to get wrong. *@
         <input class="search-input" placeholder="Search chats, projects and databases"
                value="@_term" @oninput="OnTermChanged" @onkeydown="OnKeyDown" @ref="_input" />
 
@@ -64,26 +65,6 @@
     // a fast response for a later one and overwrite it -- Enter would then open a hit for a term no
     // longer in the box, with nothing in the UI to suggest that happened.
     private int _searchToken;
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (!firstRender) return;
-        try
-        {
-            await _input.FocusAsync();
-        }
-        catch (Exception ex) when (ex is JSException or JSDisconnectedException or OperationCanceledException)
-        {
-            // Same three failures FocusAsync can throw everywhere else in this codebase (see Sidebar's
-            // FocusDrawerIfJustOpenedAsync), and the same split: a JSException means Blazor's own focus
-            // interop is missing, a real bug worth Warning; a gone circuit or an interop timeout is
-            // routine and stays at Debug. Losing the move costs only the keyboard-first workflow -- the
-            // user can still click into the box -- so there is nothing to recover and nothing to surface
-            // to them.
-            Logger.Log(ex is JSException ? LogLevel.Warning : LogLevel.Debug, ex,
-                "Focusing the search input failed; typing will require a manual click into the box.");
-        }
-    }
 
     private async Task OnTermChanged(ChangeEventArgs e)
     {
