@@ -24,6 +24,7 @@ public class ChatRowTests : IDisposable
         _conn.Open();
         _ctx.Services.AddDbContext<SqlAgentDbContext>(o => o.UseSqlite(_conn));
         _ctx.Services.AddScoped<ChatService>();
+        _ctx.Services.AddScoped<ProjectService>();
         _ctx.Services.AddScoped<ScopedRunner>();
         _ctx.Services.AddScoped<AppState>();
         _ctx.Services.AddScoped<DialogService>();
@@ -176,6 +177,30 @@ public class ChatRowTests : IDisposable
         var row = _ctx.RenderComponent<ChatRow>(p => p.Add(r => r.Chat, chat));
 
         Assert.Contains("quarterly revenue", row.Find(".menu-trigger .sr-only").TextContent);
+    }
+
+    [Fact]
+    public async Task Moving_a_chat_into_a_project_takes_it_out_of_the_history_list()
+    {
+        var chat = await SeedAsync("wandering");
+        Guid projectId;
+        using (var scope = _ctx.Services.CreateScope())
+            projectId = (await scope.ServiceProvider.GetRequiredService<ProjectService>()
+                .CreateProjectAsync("quarterly")).Id!.Value;
+        var dialogs = _ctx.Services.GetRequiredService<DialogService>();
+        var row = _ctx.RenderComponent<ChatRow>(p => p.Add(r => r.Chat, chat));
+
+        row.Find(".menu-trigger").Click();
+        row.FindAll(".menu-item-action").First(r => r.TextContent.Contains("Move")).Click();
+
+        var dialog = _ctx.Render(dialogs.Current!);
+        await dialog.FindAll("[data-testid=move-target]")
+            .First(b => b.TextContent.Contains("quarterly"))
+            .ClickAsync(new Microsoft.AspNetCore.Components.Web.MouseEventArgs());
+
+        using var check = _ctx.Services.CreateScope();
+        var chats = check.ServiceProvider.GetRequiredService<ChatService>();
+        Assert.DoesNotContain(await chats.ListHistoryAsync(), c => c.Id == chat.Id);
     }
 
     private async Task<ChatSummary> SeedAsync(string title)

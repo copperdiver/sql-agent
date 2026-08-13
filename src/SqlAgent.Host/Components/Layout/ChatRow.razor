@@ -14,6 +14,7 @@
         </Trigger>
         <ChildContent>
             <MenuItem Icon="pencil" OnClick="ShowRename">Rename</MenuItem>
+            <MenuItem Icon="folder" OnClick="ShowMoveAsync">Move to project</MenuItem>
             <MenuItem Icon="trash" Danger="true" OnClick="ShowDelete">Delete</MenuItem>
         </ChildContent>
     </Menu>
@@ -27,6 +28,12 @@
     /// parameters have not changed, which strands the highlight on the chat the user just left.</summary>
     [Parameter] public bool Active { get; set; }
 
+    /// <summary>The project this row is being rendered under, or null in the history list. Used only to
+    /// grey out the move that would do nothing. It is a parameter rather than something the row looks up
+    /// because `ChatSummary` does not carry it, and adding it to that record would change a shape four
+    /// other call sites already use.</summary>
+    [Parameter] public Guid? CurrentProjectId { get; set; }
+
     private void Open() => Nav.NavigateTo($"/chat/{Chat.Id}");
 
     // The dialogs are handed to DialogService, which renders them from MainLayout. Rendering one here
@@ -38,6 +45,25 @@
 
     private void ShowDelete() => Dialogs.Show(
         @<ChatDeleteDialog Chat="Chat" OnConfirm="DeleteAsync" OnCancel="Dialogs.Close" />);
+
+    /// <summary>The project list is read before the dialog opens rather than inside it, so the dialog
+    /// stays presentational with no service scope of its own — the same shape every other dialog in this
+    /// codebase has.</summary>
+    private async Task ShowMoveAsync()
+    {
+        var projects = await Runner.RunAsync<ProjectService, IReadOnlyList<ProjectSummary>>(
+            s => s.ListProjectsAsync());
+        Dialogs.Show(
+            @<MoveToProjectDialog Chat="Chat" Projects="projects" CurrentProjectId="CurrentProjectId"
+                                  OnPick="MoveAsync" OnCancel="Dialogs.Close" />);
+    }
+
+    private async Task MoveAsync(Guid? projectId)
+    {
+        await Runner.RunAsync<ProjectService, bool>(s => s.MoveChatAsync(Chat.Id, projectId));
+        Dialogs.Close();
+        State.NotifyChatsChanged();
+    }
 
     private async Task RenameAsync(string title)
     {

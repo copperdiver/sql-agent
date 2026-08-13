@@ -8,6 +8,10 @@
            a Razor attribute needs escaped quotes, which the parser handles badly — SchemaRail's filter
            input carries the same note for the same reason. *@
         <input id="name-dialog-value" value="@_value" @onchange="OnValueChanged" />
+        @if (!string.IsNullOrWhiteSpace(Error))
+        {
+            <p class="name-error" role="alert">@Error</p>
+        }
     </ChildContent>
     <Footer>
         <button type="button" data-testid="name-cancel" @onclick="OnCancel">Cancel</button>
@@ -32,6 +36,11 @@
 
     [Parameter] public EventCallback<string> OnSave { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
+
+    /// <summary>Shown under the field when the caller refuses the name — a project name already taken,
+    /// today. The dialog stays open when this is set: closing it and quietly doing nothing is how a user
+    /// concludes the button is broken.</summary>
+    [Parameter] public string? Error { get; set; }
 
     private string _value = "";
 

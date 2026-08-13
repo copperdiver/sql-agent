@@ -1,0 +1,36 @@
+@* Presentational: it reports which project was picked. The caller owns the write, as every dialog in
+   this codebase does. The project list is passed in rather than fetched here so the dialog needs no
+   service scope of its own. *@
+<Modal Title="Move to project" OnClose="OnCancel">
+    <ChildContent>
+        <p class="muted">Move <strong>@Chat.Title</strong> to:</p>
+        <div class="move-targets">
+            @* "No project" first and always present: taking a chat back out is the same operation as
+               moving it, and burying it under the project list would hide the only way back. *@
+            <button type="button" class="ghost move-target" data-testid="move-target"
+                    disabled="@(CurrentProjectId is null)"
+                    @onclick="() => OnPick.InvokeAsync(null)">No project</button>
+            @foreach (var project in Projects)
+            {
+                <button type="button" class="ghost move-target" data-testid="move-target"
+                        disabled="@(CurrentProjectId == project.Id)"
+                        @onclick="() => OnPick.InvokeAsync(project.Id)">@project.Name</button>
+            }
+        </div>
+    </ChildContent>
+    <Footer>
+        <button type="button" data-testid="move-cancel" @onclick="OnCancel">Cancel</button>
+    </Footer>
+</Modal>
+
+@code {
+    [Parameter, EditorRequired] public ChatSummary Chat { get; set; } = default!;
+    [Parameter] public IReadOnlyList<ProjectSummary> Projects { get; set; } = [];
+
+    /// <summary>Where the chat is now, so that row is shown as the current one rather than offered as a
+    /// move that would do nothing.</summary>
+    [Parameter] public Guid? CurrentProjectId { get; set; }
+
+    [Parameter] public EventCallback<Guid?> OnPick { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+}

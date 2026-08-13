@@ -1,0 +1,162 @@
+@implements IDisposable
+@inject ScopedRunner Runner
+@inject AppState State
+@inject DialogService Dialogs
+
+<div class="projects">
+    <div class="projects-head">
+        <p class="projects-label">Projects</p>
+        <button type="button" class="ghost projects-add" data-testid="project-add"
+                @onclick="ShowCreate" aria-label="New project">
+            <Icon Name="plus" Size="16" />
+        </button>
+    </div>
+
+    @foreach (var project in _projects)
+    {
+        <div class="project-row" @key="project.Id">
+            <button type="button" class="ghost project-open truncate" @onclick="() => ToggleAsync(project)">
+                @* Two elements under an @if rather than one with a ternary Name. The inventory test in
+                   Task 8 scans this markup for the glyph names actually rendered, and a name computed
+                   inside an attribute expression is not something a regex can read honestly — the
+                   alternative was a scanner complicated enough to have its own bugs. *@
+                @if (_expanded.Contains(project.Id))
+                {
+                    <Icon Name="chevron-down" Size="14" />
+                }
+                else
+                {
+                    <Icon Name="chevron-right" Size="14" />
+                }
+                <Icon Name="folder" Size="16" />
+                <span class="truncate">@project.Name</span>
+                <span class="project-count">@project.ChatCount</span>
+            </button>
+            <Menu Placement="MenuPlacement.Bottom">
+                <Trigger>
+                    <Icon Name="more-vertical" Size="16" />
+                    <span class="sr-only">@($"Actions for {project.Name}")</span>
+                </Trigger>
+                <ChildContent>
+                    <MenuItem Icon="pencil" OnClick="() => ShowRename(project)">Rename</MenuItem>
+                    <MenuItem Icon="trash" Danger="true" OnClick="() => ShowDelete(project)">Delete</MenuItem>
+                </ChildContent>
+            </Menu>
+        </div>
+
+        @if (_expanded.Contains(project.Id))
+        {
+            <div class="project-chats">
+                @foreach (var chat in _chats[project.Id])
+                {
+                    <ChatRow @key="chat.Id" Chat="chat" CurrentProjectId="project.Id"
+                             Active="@(chat.Id == State.ActiveChatId)" />
+                }
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private IReadOnlyList<ProjectSummary> _projects = [];
+
+    // Which projects are open, and the chats loaded for them. Circuit state only: persisting it would
+    // mean a third localStorage key beside the theme and the sidebar, for something one click restores.
+    private readonly HashSet<Guid> _expanded = [];
+    private readonly Dictionary<Guid, IReadOnlyList<ChatSummary>> _chats = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        // A chat moved into a project from the history list changes this section's counts, and the two
+        // are siblings that meet only through AppState — the same reason HistorySection subscribes.
+        State.ChatsChanged += OnChatsChanged;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _projects = await Runner.RunAsync<ProjectService, IReadOnlyList<ProjectSummary>>(
+            s => s.ListProjectsAsync());
+        // Only the open ones, and only the ones that still exist: a project deleted elsewhere must not
+        // leave its chats cached under an id nothing renders.
+        foreach (var id in _expanded.ToList())
+        {
+            if (!_projects.Any(p => p.Id == id)) { _expanded.Remove(id); _chats.Remove(id); continue; }
+            _chats[id] = await Runner.RunAsync<ProjectService, IReadOnlyList<ChatSummary>>(
+                s => s.ListChatsInProjectAsync(id));
+        }
+    }
+
+    private void OnChatsChanged() => InvokeAsync(async () =>
+    {
+        await ReloadAsync();
+        StateHasChanged();
+    });
+
+    private async Task ToggleAsync(ProjectSummary project)
+    {
+        if (!_expanded.Add(project.Id))
+        {
+            _expanded.Remove(project.Id);
+            _chats.Remove(project.Id);
+            return;
+        }
+        _chats[project.Id] = await Runner.RunAsync<ProjectService, IReadOnlyList<ChatSummary>>(
+            s => s.ListChatsInProjectAsync(project.Id));
+    }
+
+    private void ShowCreate() => ShowNameDialog("New project", "Create", "", CreateAsync);
+
+    private void ShowRename(ProjectSummary project) =>
+        ShowNameDialog("Rename project", "Save", project.Name,
+            name => RenameAsync(project, name));
+
+    /// <summary>One dialog for both writes, re-shown with an error when the name is taken. Re-showing
+    /// replaces the open dialog rather than stacking a second one — DialogService holds exactly one.</summary>
+    private void ShowNameDialog(string title, string confirm, string initial,
+        Func<string, Task<ProjectWriteOutcome>> write, string? error = null)
+    {
+        Dialogs.Show(
+            @<NameDialog Title="@title" Label="Name" InitialValue="@initial" ConfirmLabel="@confirm"
+                         Error="@error" OnCancel="Dialogs.Close"
+                         OnSave="@(async name =>
+                         {
+                             var outcome = await write(name);
+                             if (outcome == ProjectWriteOutcome.NameTaken)
+                             {
+                                 ShowNameDialog(title, confirm, name, write,
+                                     $"A project called \"{name}\" already exists.");
+                                 return;
+                             }
+                             Dialogs.Close();
+                             await ReloadAsync();
+                             StateHasChanged();
+                         })" />);
+    }
+
+    private async Task<ProjectWriteOutcome> CreateAsync(string name) =>
+        (await Runner.RunAsync<ProjectService, ProjectWriteResult>(s => s.CreateProjectAsync(name))).Outcome;
+
+    private async Task<ProjectWriteOutcome> RenameAsync(ProjectSummary project, string name) =>
+        (await Runner.RunAsync<ProjectService, ProjectWriteResult>(
+            s => s.RenameProjectAsync(project.Id, name))).Outcome;
+
+    private void ShowDelete(ProjectSummary project) => Dialogs.Show(
+        @<ProjectDeleteDialog Project="project" OnCancel="Dialogs.Close"
+                              OnConfirm="mode => DeleteAsync(project, mode)" />);
+
+    private async Task DeleteAsync(ProjectSummary project, ProjectDeleteMode mode)
+    {
+        await Runner.RunAsync<ProjectService, bool>(s => s.DeleteProjectAsync(project.Id, mode));
+        Dialogs.Close();
+        _expanded.Remove(project.Id);
+        _chats.Remove(project.Id);
+        await ReloadAsync();
+        // Deleting with the chats removes rows the history section is not showing, but keeping them adds
+        // rows it is — either way it has to re-read.
+        State.NotifyChatsChanged();
+        StateHasChanged();
+    }
+
+    public void Dispose() => State.ChatsChanged -= OnChatsChanged;
+}

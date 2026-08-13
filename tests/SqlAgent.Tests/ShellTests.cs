@@ -534,6 +534,7 @@ public class ShellTests : IDisposable
         ctx.Services.AddScoped<ScopedRunner>();
         ctx.Services.AddScoped<AppState>();
         ctx.Services.AddScoped<ChatService>();
+        ctx.Services.AddScoped<ProjectService>();
         ctx.Services.AddScoped<DialogService>();
         ctx.Services.AddLogging();
         // An explicit factory, not just an extra ILoggerProvider registration: bUnit pre-registers its
