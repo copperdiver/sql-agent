@@ -66,9 +66,9 @@
     // element inside the sidebar, and below 1024px the sidebar's transform makes it the containing block
     // — the dialog would centre on the drawer and ride off-screen with it.
     private void ShowRename(ChatSummary chat) => Dialogs.Show(
-        @<ChatRenameDialog Chat="chat"
-                           OnSave="title => RenameAsync(chat, title)"
-                           OnCancel="Dialogs.Close" />);
+        @<NameDialog Title="Rename chat" Label="Title" InitialValue="@chat.Title"
+                     OnSave="title => RenameAsync(chat, title)"
+                     OnCancel="Dialogs.Close" />);
 
     private void ShowDelete(ChatSummary chat) => Dialogs.Show(
         @<ChatDeleteDialog Chat="chat"

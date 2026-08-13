@@ -1,0 +1,42 @@
+@* Presentational: it collects a name and reports it. The write happens in whichever component owns the
+   service scope — a dialog that saves as a side effect of being rendered is much harder to reason about
+   from the caller, and this one is shared by three callers with three different writes. *@
+<Modal Title="@Title" OnClose="OnCancel">
+    <ChildContent>
+        <label for="name-dialog-value">@Label</label>
+        @* OnValueChanged is a method rather than an inline lambda: a lambda with a string literal inside
+           a Razor attribute needs escaped quotes, which the parser handles badly — SchemaRail's filter
+           input carries the same note for the same reason. *@
+        <input id="name-dialog-value" value="@_value" @onchange="OnValueChanged" />
+    </ChildContent>
+    <Footer>
+        <button type="button" data-testid="name-cancel" @onclick="OnCancel">Cancel</button>
+        <button type="button" class="primary" data-testid="name-save"
+                disabled="@string.IsNullOrWhiteSpace(_value)"
+                @onclick="() => OnSave.InvokeAsync(_value)">@ConfirmLabel</button>
+    </Footer>
+</Modal>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+
+    /// <summary>The field's label. Defaults to the common case; a project dialog says "Name".</summary>
+    [Parameter] public string Label { get; set; } = "Name";
+
+    /// <summary>What the box starts with — the current name when renaming, empty when creating.</summary>
+    [Parameter] public string InitialValue { get; set; } = "";
+
+    /// <summary>"Save" for a rename, "Create" for a creation. The verb is the caller's, not the
+    /// dialog's.</summary>
+    [Parameter] public string ConfirmLabel { get; set; } = "Save";
+
+    [Parameter] public EventCallback<string> OnSave { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private string _value = "";
+
+    // OnInitialized, not a field initializer: parameters are not set yet when fields initialize.
+    protected override void OnInitialized() => _value = InitialValue;
+
+    private void OnValueChanged(ChangeEventArgs e) => _value = e.Value?.ToString() ?? string.Empty;
+}

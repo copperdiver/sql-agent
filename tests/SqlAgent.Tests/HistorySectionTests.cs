@@ -116,7 +116,7 @@ public class HistorySectionTests : IDisposable
         // Render what the host would render, and drive it.
         var dialog = _ctx.Render(dialogs.Current!);
         dialog.Find("input").Change("quarterly revenue");
-        await dialog.Find("[data-testid=rename-save]").ClickAsync(new MouseEventArgs());
+        await dialog.Find("[data-testid=name-save]").ClickAsync(new MouseEventArgs());
 
         var reloaded = await LoadAsync(id);
         Assert.NotNull(reloaded);
@@ -136,7 +136,7 @@ public class HistorySectionTests : IDisposable
 
         var dialog = _ctx.Render(dialogs.Current!);
         dialog.Find("input").Change("something else entirely");
-        await dialog.Find("[data-testid=rename-cancel]").ClickAsync(new MouseEventArgs());
+        await dialog.Find("[data-testid=name-cancel]").ClickAsync(new MouseEventArgs());
 
         var reloaded = await LoadAsync(id);
         Assert.NotNull(reloaded);
