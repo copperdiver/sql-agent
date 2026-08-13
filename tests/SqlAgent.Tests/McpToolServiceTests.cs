@@ -44,7 +44,7 @@ public class McpToolServiceTests
         var connections = new DatabaseConnectionService(db, secrets);
         var registry = new DatabaseProviderRegistry([provider]);
         var schemas = new SchemaService(connections, registry, db);
-        var executor = new QueryExecutionService(connections, registry, db);
+        var executor = new QueryExecutionService(connections, registry, db, NullLogger<QueryExecutionService>.Instance);
         var authenticator = new LocalTokenAuthenticator(secrets, NullLogger<LocalTokenAuthenticator>.Instance);
         return (new McpToolService(connections, schemas, executor, authenticator, new McpClientToken(presentedToken)), connections, db);
     }

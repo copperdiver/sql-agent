@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using SqlAgent.Core;
 using SqlAgent.Storage;
 
@@ -30,7 +31,8 @@ public class ChatTurnServiceTests : IDisposable
         var registry = new DatabaseProviderRegistry([_provider]);
         _connections = new DatabaseConnectionService(_db, new InMemorySecretStore());
         _chats = new ChatService(_db);
-        var executor = new QueryExecutionService(_connections, registry, _db);
+        var executor = new QueryExecutionService(
+            _connections, registry, _db, NullLogger<QueryExecutionService>.Instance);
         var schemas = new SchemaService(_connections, registry, _db);
         _turns = new ChatTurnService(
             _chats, new NlQueryService(_connections, schemas, executor, _gateway), _connections);
@@ -157,6 +159,30 @@ public class ChatTurnServiceTests : IDisposable
         Assert.Empty(await _db.Chats.ToListAsync());
     }
 
+    [Fact]
+    public async Task A_cancellation_mid_query_still_leaves_a_question_and_an_answer_on_disk()
+    {
+        // QueryExecutionService deliberately turns a tripped token into a graceful execution_canceled
+        // result instead of throwing, precisely so a stop click still yields a real answer. If that
+        // answer were then persisted with the same spent token, the save itself would throw and undo
+        // the layer below's work — the orphaned-question shape this whole service exists to prevent.
+        var id = await NewConnectionAsync("prod");
+        _gateway.NextResponse = LlmSqlResponse.Generated("SELECT id FROM orders");
+        _provider.Block = true;
+
+        using var cts = new CancellationTokenSource();
+        cts.CancelAfter(TimeSpan.FromMilliseconds(100));
+
+        var turn = await _turns.SendAsync(null, "orders", [id], cts.Token);
+
+        Assert.Equal("execution_canceled", turn.AssistantMessage.ErrorCode);
+        var reloaded = await _chats.GetChatAsync(turn.ChatId);
+        Assert.Equal(2, reloaded!.Messages.Count);
+        Assert.Equal(ChatRole.User, reloaded.Messages[0].Role);
+        Assert.Equal(ChatRole.Assistant, reloaded.Messages[1].Role);
+        Assert.Equal("execution_canceled", reloaded.Messages[1].ErrorCode);
+    }
+
     private async Task<Guid> NewConnectionAsync(string name) =>
         (await _connections.CreateAsync(
             new DatabaseConnectionInput(name, DatabaseProviderType.Postgres, IsReadOnly: true), "cs")).Id;
@@ -183,10 +209,13 @@ sealed class TurnGatewayStub : ILlmSqlGateway
     }
 }
 
-/// <summary>Provider double returning a canned result set over an empty schema.</summary>
+/// <summary>Provider double returning a canned result set over an empty schema, or hanging on the
+/// supplied token until it is cancelled (<see cref="Block"/>) so QueryExecutionService's cancellation
+/// path can be driven the same way QueryExecutionServiceTests drives it.</summary>
 sealed class TurnProviderStub : IDatabaseProvider
 {
     public QueryResultSet NextResult { get; set; } = new([], [], false);
+    public bool Block { get; set; }
     public DatabaseProviderType ProviderType => DatabaseProviderType.Postgres;
 
     public Task<ConnectionTestResult> TestConnectionAsync(string cs, CancellationToken ct = default)
@@ -195,7 +224,10 @@ sealed class TurnProviderStub : IDatabaseProvider
     public Task<DatabaseSchema> GetSchemaAsync(string cs, CancellationToken ct = default)
         => Task.FromResult(new DatabaseSchema([]));
 
-    public Task<QueryResultSet> ExecuteQueryAsync(
+    public async Task<QueryResultSet> ExecuteQueryAsync(
         string cs, string sql, QueryExecutionOptions o, CancellationToken ct = default)
-        => Task.FromResult(NextResult);
+    {
+        if (Block) await Task.Delay(Timeout.Infinite, ct);
+        return NextResult;
+    }
 }

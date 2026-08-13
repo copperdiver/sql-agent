@@ -66,7 +66,15 @@ public class ChatTurnService(
                 // The ordinary path: NlQueryService applies policy, executes through the same
                 // QueryExecutionService every other surface uses, and audits the run.
                 var result = await nlQueries.AskAsync(databaseIds[0], question, ct);
-                return (result, await chats.AppendMessageAsync(FromResult(chat, result), ct));
+
+                // ct may already be tripped here even though `result` came back gracefully:
+                // QueryExecutionService deliberately catches OperationCanceledException and converts it
+                // to execution_canceled/execution_timeout instead of rethrowing (its own audit write
+                // does the same, using CancellationToken.None for the same reason). Persisting that
+                // already-computed answer with the same spent token would throw it away right here,
+                // leaving the question on disk with no reply — the exact outcome the layer below took
+                // care to avoid one level down.
+                return (result, await chats.AppendMessageAsync(FromResult(chat, result), CancellationToken.None));
 
             default:
                 // Today's gateway takes one schema and returns one SQL string. Querying the first
