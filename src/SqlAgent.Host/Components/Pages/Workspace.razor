@@ -1,3 +1,6 @@
+@* The root route stays here only until Chat.razor claims it in the chat-page task, which deletes this
+   line; it exists so the suite is green at every commit rather than only at the end of the phase. *@
+@page "/"
 @page "/sql"
 @implements IDisposable
 @inject ScopedRunner Runner
