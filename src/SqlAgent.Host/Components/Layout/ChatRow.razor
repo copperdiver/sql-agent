@@ -54,11 +54,19 @@
         Dialogs.Close();
         // Clearing the selection first: leaving it set would keep highlighting a row that no longer
         // exists, and the page would keep showing a conversation deleted out from under it.
+        // SetActiveChat already raises ChatsChanged when it actually changes the value — AppState's own
+        // guard exists so an unchanged selection doesn't re-query the whole history list for nothing.
+        // Calling NotifyChatsChanged unconditionally after it would defeat that guard for exactly the
+        // case it exists for, so the explicit call is the else branch: it only fires when deleting a
+        // chat that was not the active one, which SetActiveChat never touches.
         if (State.ActiveChatId == Chat.Id)
         {
             State.SetActiveChat(null);
             Nav.NavigateTo("/");
         }
-        State.NotifyChatsChanged();
+        else
+        {
+            State.NotifyChatsChanged();
+        }
     }
 }

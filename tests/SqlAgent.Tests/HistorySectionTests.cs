@@ -66,7 +66,7 @@ public class HistorySectionTests : IDisposable
     {
         var section = _ctx.RenderComponent<HistorySection>();
 
-        Assert.Empty(section.FindAll(".history-row"));
+        Assert.Empty(section.FindAll(".chat-row"));
         Assert.Contains("No chats yet", section.Markup);
         await Task.CompletedTask;
     }
@@ -117,6 +117,27 @@ public class HistorySectionTests : IDisposable
         Assert.NotNull(reloaded);
         Assert.Equal("keep me", reloaded.Title);
         Assert.Null(dialogs.Current);
+    }
+
+    [Fact]
+    public async Task Deleting_from_the_row_menu_removes_the_row_from_the_section()
+    {
+        // ChatRowTests covers the row's own delete flow against the store in isolation, and
+        // The_list_re_reads_itself_when_the_page_says_history_changed covers the section's reload in
+        // isolation, but neither composes them: this is the only test that drives a delete through the
+        // row's own menu inside a rendered HistorySection and checks the row actually disappears from it.
+        var id = await SeedAsync("throwaway", DateTime.UtcNow);
+        var section = _ctx.RenderComponent<HistorySection>();
+        var dialogs = _ctx.Services.GetRequiredService<DialogService>();
+
+        section.Find(".chat-row .menu-trigger").Click();
+        section.FindAll(".menu-item-action").First(r => r.TextContent.Contains("Delete")).Click();
+
+        var dialog = _ctx.Render(dialogs.Current!);
+        await dialog.Find("[data-testid=delete-confirm]").ClickAsync(new MouseEventArgs());
+
+        Assert.Null(await LoadAsync(id));
+        Assert.DoesNotContain("throwaway", section.Markup);
     }
 
     // --- Task 9 carry-forward: ActiveChatId had a fix (SetActiveChat now runs on the first render of
