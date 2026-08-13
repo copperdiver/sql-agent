@@ -84,4 +84,26 @@ public class ChatOutcomeTests
         Assert.Contains("SELECT count(*) FROM orders", view.Markup);
         Assert.Contains("42", view.Markup);
     }
+
+    [Fact]
+    public void A_restored_answer_shows_its_numbers_and_says_where_the_rows_went()
+    {
+        // A reloaded QueryResult has no rows — they are never stored. Rendering the usual table would
+        // draw an empty grid, which reads as "the query returned nothing" rather than "the rows are not
+        // kept". This is the only visible consequence of the rows-not-persisted rule, so it says so.
+        using var ctx = new Bunit.TestContext();
+        var restored = new NlQueryResult(
+            NlResponseKind.QueryResult, "SELECT id FROM orders", null, null, null,
+            [], [], RowCount: 214, Truncated: true, ElapsedMs: 38);
+
+        var view = ctx.RenderComponent<ChatOutcome>(p => p
+            .Add(c => c.Result, restored)
+            .Add(c => c.Restored, true));
+
+        Assert.Contains("214", view.Markup);
+        Assert.Contains("38", view.Markup);
+        Assert.Contains("truncated", view.Markup);
+        Assert.Contains("Rows are not stored", view.Markup);
+        Assert.Empty(view.FindAll("table"));
+    }
 }

@@ -68,6 +68,21 @@
         await OnSend.InvokeAsync();
     }
 
+    /// <summary>Moves the caret into the textarea. The suggestion chips fill the box and then call this,
+    /// because a filled box the user still has to click into is a worse affordance than an empty one.</summary>
+    public async Task FocusAsync()
+    {
+        try
+        {
+            await _textarea.FocusAsync();
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or OperationCanceledException)
+        {
+            Logger.Log(ex is JSException ? LogLevel.Warning : LogLevel.Debug, ex,
+                "Focusing the composer failed; the text is in the box but the caret is not.");
+        }
+    }
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;

@@ -1,0 +1,11 @@
+.chat { display: flex; flex-direction: column; gap: var(--space-5); min-height: 100%; }
+
+/* The hero pushes the composer to the middle of an empty page and collapses out of the way as soon as
+   there is a transcript to read. */
+.chat-hero { margin: auto auto var(--space-4); text-align: center; }
+.chat-hero h1 { margin-bottom: var(--space-2); }
+
+.chat-composer { position: sticky; bottom: 0; padding-top: var(--space-3); background: var(--background-100); }
+
+.suggestions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
+.suggestion { border: 1px solid var(--base-200); border-radius: var(--radius-pill); font-size: var(--text-xs); }

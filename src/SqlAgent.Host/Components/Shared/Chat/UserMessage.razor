@@ -1,0 +1,10 @@
+<div class="message user-message">
+    <div class="bubble">@Message.Text</div>
+    @* Read-only: these attachments are what the question was actually sent with, not a choice still
+       being made. *@
+    <AttachmentChips Databases="Message.Databases" ReadOnly="true" />
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ChatMessageView Message { get; set; } = default!;
+}

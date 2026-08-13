@@ -1,0 +1,27 @@
+<div class="transcript">
+    @foreach (var message in Messages)
+    {
+        @if (message.Role == ChatRole.User)
+        {
+            <UserMessage @key="message.Id" Message="message" />
+        }
+        else
+        {
+            @* Keyed by message id so appending a turn does not re-key the whole list and re-run every
+               child's lifecycle — the transcript is the one place in this app that grows without bound. *@
+            <AssistantMessage @key="message.Id" Message="message"
+                              Live="@(Live.TryGetValue(message.Id, out var live) ? live : null)"
+                              OnOpenInEditor="OnOpenInEditor" />
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public IReadOnlyList<ChatMessageView> Messages { get; set; } = [];
+
+    /// <summary>Results produced in this circuit, by message id. Empty after a reload.</summary>
+    [Parameter] public IReadOnlyDictionary<Guid, NlQueryResult> Live { get; set; } =
+        new Dictionary<Guid, NlQueryResult>();
+
+    [Parameter] public EventCallback<string> OnOpenInEditor { get; set; }
+}

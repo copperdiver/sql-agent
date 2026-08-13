@@ -8,6 +8,14 @@
 
     @switch (r.Kind)
     {
+        case NlResponseKind.QueryResult when Restored:
+            @* Reloaded from the store, which keeps the numbers and not the rows. Rendering the usual
+               table with an empty body would say "this query returned nothing", which is a different
+               and wrong statement. *@
+            <p class="meta">@r.RowCount rows · @r.ElapsedMs ms @(r.Truncated ? "· results truncated" : "")</p>
+            <p class="restored-note">Rows are not stored. Open the query in the editor and run it again to see them.</p>
+            break;
+
         case NlResponseKind.QueryResult:
             <p class="meta">@r.RowCount rows · @r.ElapsedMs ms @(r.Truncated ? "· results truncated" : "")</p>
             <div class="grid-scroll">
@@ -45,4 +53,8 @@
 @code {
     [Parameter] public NlQueryResult? Result { get; set; }
     [Parameter] public EventCallback<string> OnOpenInEditor { get; set; }
+
+    /// <summary>True when this outcome came back from the store rather than from a live call, so it has
+    /// metadata but no rows.</summary>
+    [Parameter] public bool Restored { get; set; }
 }

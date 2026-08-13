@@ -1,0 +1,178 @@
+@page "/"
+@page "/chat/{Id:guid}"
+@implements IDisposable
+@inject ScopedRunner Runner
+@inject AppState State
+@inject NavigationManager Nav
+
+<div class="chat">
+    @if (_messages.Count == 0)
+    {
+        <div class="chat-hero">
+            <h1>How can I help with your data?</h1>
+            <p class="muted">Attach a database, then ask in plain language.</p>
+        </div>
+    }
+    else
+    {
+        <MessageList Messages="_messages" Live="_live" OnOpenInEditor="OpenInEditor" />
+    }
+
+    <div class="chat-composer">
+        <Composer @ref="_composer"
+                  Value="@_question" ValueChanged="v => _question = v"
+                  Attached="_attached" OnRemoveAttachment="Detach"
+                  Busy="_busy" OnSend="SendAsync" OnStop="Stop">
+            <Tools>
+                <AttachmentMenu Connections="_connections"
+                                AttachedIds="@(_attached.Select(a => a.ConnectionId!.Value).ToList())"
+                                OnAttach="Attach" />
+            </Tools>
+        </Composer>
+
+        @if (_messages.Count == 0)
+        {
+            <div class="suggestions">
+                @foreach (var suggestion in Suggestions)
+                {
+                    @* Prefill and focus, never send. One click on a chip with no model configured would
+                       otherwise answer with an error panel before the question could be edited. *@
+                    <button type="button" class="ghost suggestion" data-testid="suggestion"
+                            @onclick="() => PrefillAsync(suggestion)">@suggestion</button>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public Guid? Id { get; set; }
+
+    private static readonly string[] Suggestions =
+    [
+        "Explain this schema",
+        "Show table relationships",
+        "Find the largest tables",
+    ];
+
+    private readonly List<ChatMessageView> _messages = [];
+    private readonly Dictionary<Guid, NlQueryResult> _live = [];
+    private readonly List<ChatDatabaseRef> _attached = [];
+    private IReadOnlyList<DatabaseConnectionInfo> _connections = [];
+    private Composer? _composer;
+    private string _question = "";
+    private bool _busy;
+    private CancellationTokenSource? _cts;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Connections change from the Connections page, which is a sibling route in the same circuit —
+        // the same reason SchemaRail subscribes to this event rather than reading its list once.
+        State.ConnectionsChanged += OnConnectionsChanged;
+        await ReloadConnectionsAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // The send below navigates to /chat/{id} after creating the chat, which re-enters this method
+        // with the id of the conversation already in memory. Reloading it from the store there would
+        // throw away _live and redraw the answer the user is looking at as a restored one, rows gone.
+        if (Id == _loadedChatId) return;
+        _loadedChatId = Id;
+        _messages.Clear();
+        _live.Clear();
+        if (Id is { } id)
+        {
+            var detail = await Runner.RunAsync<ChatService, ChatDetail?>(s => s.GetChatAsync(id));
+            if (detail is not null) _messages.AddRange(detail.Messages);
+        }
+        State.SetActiveChat(Id);
+    }
+
+    private Guid? _loadedChatId;
+
+    private async Task ReloadConnectionsAsync()
+    {
+        _connections = await Runner.RunAsync<DatabaseConnectionService, IReadOnlyList<DatabaseConnectionInfo>>(
+            s => s.ListAsync());
+        // A connection deleted elsewhere must not stay in the chips: sending it would resolve to
+        // "(deleted database)" and the user would have had no warning it was gone.
+        _attached.RemoveAll(a => !_connections.Any(c => c.Id == a.ConnectionId));
+    }
+
+    private void OnConnectionsChanged() => InvokeAsync(async () =>
+    {
+        await ReloadConnectionsAsync();
+        StateHasChanged();
+    });
+
+    private void Attach(DatabaseConnectionInfo connection)
+    {
+        if (_attached.Any(a => a.ConnectionId == connection.Id)) return;
+        _attached.Add(new ChatDatabaseRef(connection.Id, connection.Name));
+    }
+
+    private void Detach(ChatDatabaseRef database) =>
+        _attached.RemoveAll(a => a.ConnectionId == database.ConnectionId);
+
+    private async Task PrefillAsync(string suggestion)
+    {
+        _question = suggestion;
+        if (_composer is not null) await _composer.FocusAsync();
+    }
+
+    private async Task SendAsync()
+    {
+        // Mirrors the SQL page's guard, and for the same reason: Enter is a second entry point that does
+        // not go through the button's disabled attribute.
+        if (_busy || string.IsNullOrWhiteSpace(_question)) return;
+        _busy = true;
+        var question = _question;
+        _question = "";
+        var databaseIds = _attached.Select(a => a.ConnectionId!.Value).ToList();
+        _cts = new CancellationTokenSource();
+        try
+        {
+            var turn = await Runner.RunAsync<ChatTurnService, ChatTurnResult>(
+                s => s.SendAsync(_loadedChatId, question, databaseIds, _cts.Token));
+
+            _messages.Add(turn.UserMessage);
+            _messages.Add(turn.AssistantMessage);
+            if (turn.Live is { } live) _live[turn.AssistantMessage.Id] = live;
+
+            // The chips deliberately stay: attachments are per message, but re-attaching every turn
+            // would make a ten-question conversation ten attachments.
+            if (_loadedChatId != turn.ChatId)
+            {
+                _loadedChatId = turn.ChatId;
+                // replace, so Back does not walk into the same conversation's empty state.
+                Nav.NavigateTo($"/chat/{turn.ChatId}", replace: true);
+                State.SetActiveChat(turn.ChatId);
+            }
+            State.NotifyChatsChanged();
+        }
+        catch (OperationCanceledException)
+        {
+            // The user pressed stop. The question is already on disk (ChatTurnService writes it first),
+            // so nothing is lost; the answer simply never arrived. Reloading the chat is what shows the
+            // question again, which is honest about what happened.
+        }
+        finally
+        {
+            _busy = false;
+            _cts.Dispose();
+            _cts = null;
+        }
+    }
+
+    private void Stop() => _cts?.Cancel();
+
+    private void OpenInEditor(string sql)
+    {
+        // The editor is a separate route now, so the SQL travels through AppState rather than a tab flip.
+        State.HandOffSql(sql);
+        Nav.NavigateTo("/sql");
+    }
+
+    public void Dispose() => State.ConnectionsChanged -= OnConnectionsChanged;
+}

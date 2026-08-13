@@ -1,0 +1,9 @@
+.user-message { display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-2); }
+.bubble {
+  max-width: 70%;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-pill);
+  background: var(--background-soft-100);
+  color: var(--title-50);
+  white-space: pre-wrap;
+}
