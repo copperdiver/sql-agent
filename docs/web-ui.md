@@ -161,23 +161,23 @@ nobody spends time rediscovering them:
   Editing a connection never shows the stored connection string back; the field starts blank,
   and leaving it blank on save keeps the existing secret. Provider type and read-only mode are
   set here too.
-- **Workspace** (`/`) — the schema rail on the left plus two tabs:
-  - **SQL** — a CodeMirror editor with SQL syntax highlighting, a result grid, CSV/JSON export,
-    and Cancel for an in-flight query.
-  - **Chat** — ask a question in plain English; the generated SQL and its result (or an error)
-    appear in a running transcript, with a button to send the generated SQL to the SQL tab for
-    editing.
+- **Chat** (`/`, `/chat/{id}`) — ask a question in plain English; the generated SQL and its
+  result (or an error) appear in the transcript, with a button to open the generated SQL on the
+  SQL page for editing. See "Chats, and what is kept" below for what persists across a reload
+  and what deliberately does not.
+- **SQL** (`/sql`) — a CodeMirror editor with SQL syntax highlighting, a result grid, CSV/JSON
+  export, and Cancel for an in-flight query.
 
-  The rail lists every table for the selected connection with a visibility checkbox — unchecking
-  one hides it from both the schema the SQL policy allows and the context given to the chat
-  model. A filter box narrows the list by name.
+  The sidebar's schema rail, shared by both pages, lists every table for the selected connection
+  with a visibility checkbox — unchecking one hides it from both the schema the SQL policy
+  allows and the context given to the chat model. A filter box narrows the list by name.
 - **Settings** (`/settings`) — three panels: appearance (the same theme control as the user menu),
   language-model status (whether `ILlmSqlGateway.IsConfigured` is true, with a badge), and
   environment (version, bind URL, port, store path, account — read from `HostInfo`).
 
 ## Export
 
-The Export CSV / Export JSON buttons on the SQL tab format the rows already on screen — they
+The Export CSV / Export JSON buttons on the SQL page format the rows already on screen — they
 never re-run the query. CSV escapes commas/quotes/newlines, renders `byte[]` columns as base64
 (the default `.ToString()` would otherwise produce the useless `System.Byte[]`), and formats
 numbers and dates with `CultureInfo.InvariantCulture` so a file made on one machine reads
@@ -191,20 +191,42 @@ mean altering the user's own data on the way out, so it is a deliberate non-goal
 oversight — treat an exported CSV from an untrusted database the way you would treat any other
 untrusted spreadsheet.
 
-## Chat needs an LLM provider — and none ships configured
+## Chats, and what is kept
 
-Every `ask_database` call up through the CD-51 contract terminates in a provider seam
-(`ILlmSqlGateway`). The host wires a placeholder gateway that always fails closed — no LLM
-vendor is set up in this build — so **every question asked on the Chat tab today returns
-`llm_not_configured`**, and the tab shows an explanatory panel ("The LLM is not configured on
-this server...") instead of the bare code. That is expected, not a bug: wiring a real provider
-is out of scope for this phase (see `docs/runbook.md` when that lands).
+`/` is a new chat; `/chat/{id}` is a stored one; the sidebar lists them grouped by day in local time.
+
+- **The chat row is written on the first send.** Opening a new chat and navigating away leaves nothing
+  behind. The title is the first question cut to 60 characters — there is no model to summarize with —
+  and can be renamed from the `⋮` menu on its row.
+- **Databases attach to a message**, from the composer's attachment menu, and are listed there by the
+  name given in connection settings — the same name the MCP tools address them by. The chips carry over
+  to the next question until removed, and every sent message keeps its own snapshot of what was
+  attached, including the name. Deleting a connection therefore does not rewrite history: the
+  transcript still says what the question was asked against.
+- **Zero or several attached databases** answer with `no_database_attached` and
+  `multiple_databases_unsupported`. The second is a limit of today's gateway, which takes one schema and
+  returns one SQL string; querying the first attachment silently would misreport what was asked.
+- **Result rows are never stored.** A reloaded answer shows its row count, duration and truncation flag
+  with a note saying so; open the SQL in the editor and run it again to see the rows. This keeps the
+  local store from becoming a shadow copy of production data.
+- **Failed answers are stored too**, `llm_not_configured` among them. A reloaded conversation is the
+  one the user watched, not a shorter edit of it.
+
+The SQL editor has its own page at `/sql`. It is not going away: Phase D adds a scratchpad panel beside
+the chat built from the same components.
+
+## The store and its migrations
+
+The SQLite store is versioned with EF Core migrations. A store created before this release has the
+original tables and no `__EFMigrationsHistory`; startup stamps the initial migration as applied and then
+migrates, so an existing store keeps its data. A migration that fails stops the host rather than running
+against a half-migrated store — the log names the store path.
 
 `llm_not_configured` is deliberately distinct from `llm_error`: the former means no provider is
 wired at all (today's state); the latter is reserved for a *configured* provider's own failures
 (timeout, malformed response, network error) once one exists. Only `llm_not_configured` gets the
-friendly panel — `llm_error` and every other Chat-tab error render through the same
-`OutcomeMessage` component the SQL tab uses, showing the stable code and message.
+friendly panel — `llm_error` and every other chat error render through the same
+`OutcomeMessage` component the SQL page uses, showing the stable code and message.
 
 ## Manual regression checklist
 
@@ -221,9 +243,9 @@ files under `wwwroot/js/`:
 
 | Check | Expected |
 |---|---|
-| Open the URL from `launch-url.txt` | Workspace loads |
-| Navigate Workspace → Connections → Workspace via the header | Both pages render and stay interactive; no full page reload |
-| Create a connection while the Workspace is open | It appears in the rail's picker without reloading the tab |
+| Open the URL from `launch-url.txt` | Chat loads |
+| Navigate Chat → Connections → Chat via the sidebar nav | Both pages render and stay interactive; no full page reload |
+| Create a connection while Chat is open | It appears in the rail's picker without reloading the page |
 | Open `http://127.0.0.1:5099/` with no token in a private window | 401 |
 | Create a connection, then test it | Version and elapsed time reported |
 | Reopen the connection for editing | Connection-string field is empty |
@@ -233,7 +255,7 @@ files under `wwwroot/js/`:
 | Type SQL, press Ctrl+Enter | Query runs, syntax is highlighted |
 | Run a query returning more than 1000 rows | Truncation notice appears |
 | Export CSV, then JSON | Both files download and open cleanly |
-| Ask a question on the Chat tab | "LLM is not configured" explanation, not a raw code |
+| Ask a question in Chat | "LLM is not configured" explanation, not a raw code |
 | Start a slow query, press Cancel | `execution_canceled` |
 | Set theme to Dark, reload | Page is dark on first paint — no white flash |
 | Set theme to System, switch the OS between light and dark | Page follows the OS without a reload |
@@ -242,8 +264,19 @@ files under `wwwroot/js/`:
 | Narrow the window below 1024px | Sidebar becomes a drawer; the hamburger opens it; the scrim closes it, and so does Escape |
 | Open the user menu, adjust the theme from its row | Theme changes and the menu stays open |
 | Open About from the user menu | Version, bind URL, port, and store path are correct |
-| Tab through the sidebar and the Chat tab's question input | Focus ring is visible on every control, checkboxes included |
+| Tab through the sidebar and the chat's question input | Focus ring is visible on every control, checkboxes included |
 | Load the UI with `wwwroot/fonts/DMSans-Variable.woff2` removed | Text renders in the system sans-serif, not a serif |
+| Ask a question, reload the page | Question, answer, SQL and the database chips all come back; the result grid does not, and says why |
+| Open a new chat, type nothing, navigate away | No new row appears in the sidebar |
+| Send with no database attached, then with two | Both explain themselves; both survive a reload |
+| Attach a database, send twice | The chip is still there for the second question |
+| Delete a connection that an old message used | The old message still shows the name it was sent with |
+| Rename and delete a chat from its `⋮` menu | Rename updates the row; delete asks first and names the chat |
+| Do the same from inside the drawer below 1024px | The dialog centres on the viewport, not on the drawer, and survives the drawer closing |
+| Tab through the page below 1024px with the drawer closed | Focus never enters the drawer |
+| Open the drawer, close it with the scrim | Focus returns to the hamburger |
+| Press Enter in the composer, then Shift+Enter | Enter sends; Shift+Enter adds a line and grows the box |
+| Start the host against a store from before this release | It migrates, and the old connections are still listed |
 
 ## Approved scope that was consciously dropped
 
@@ -254,13 +287,13 @@ missed, and neither is scheduled:
   column's declared type in full (`total numeric(10,2)`), PK/FK markers, and the table's indexes.
   What shipped is a flat list of `schema.table` entries, each with the visibility checkbox and the
   name filter. The rail's job here is configuration — deciding what the agent may see — and the
-  checkbox is what does that; column detail is a browsing feature that the SQL tab already covers by
+  checkbox is what does that; column detail is a browsing feature that the SQL page already covers by
   querying. `SchemaColumn.TypeText` and the key/index data are all still extracted and still reach
   the LLM, so adding the detail later is a rendering change, not a data change.
-- **Copy SQL.** The spec listed copy-SQL alongside export CSV/JSON on the SQL tab. There is no such
+- **Copy SQL.** The spec listed copy-SQL alongside export CSV/JSON on the SQL page. There is no such
   button: the editor holds the text and the browser's own selection and clipboard already do the
   job, whereas a copy button needs clipboard interop and a permissions story of its own. The chat
-  tab's "open in editor" covers the one case where the SQL is somewhere the user cannot easily
+  page's "open in editor" covers the one case where the SQL is somewhere the user cannot easily
   select it.
 
 ## Out of scope (tracked for later phases)
