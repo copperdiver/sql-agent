@@ -234,8 +234,10 @@ There is no silent cascade: it is the only action here that can destroy a conver
 ## Search
 
 `Ctrl`/`Cmd`+`K` from anywhere, or the Search row in the sidebar. It searches chat titles, message text,
-project names and database names, grouped by kind, newest first within each group. Arrow keys move,
-Enter opens, Escape closes.
+project names and database names, grouped by kind — chats and messages newest first, projects and
+databases alphabetically, the same order each already appears in elsewhere in the app — and nothing
+else: not SQL text, query results, table or column names, or connection details. Arrow keys move, Enter
+opens, Escape closes.
 
 A message match shows the text around it, and opens the chat at the top — matches are not scrolled to.
 A project match opens that project in the sidebar; a database match goes to Connections.
