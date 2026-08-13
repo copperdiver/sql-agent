@@ -5,12 +5,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SqlAgent.Core;
 using SqlAgent.Host.Components.Layout;
+using SqlAgent.Host.Components.Pages;
 using SqlAgent.Host.Web;
 using SqlAgent.Storage;
-// `SqlAgent.Storage.Chat` (the entity, from `using SqlAgent.Storage`) and
-// `SqlAgent.Host.Components.Pages.Chat` (the page rendered in the ActiveChatId regression test below)
-// share the bare name "Chat". ChatPageTests carries the same alias for the same reason.
-using ChatPage = SqlAgent.Host.Components.Pages.Chat;
 
 namespace SqlAgent.Tests;
 

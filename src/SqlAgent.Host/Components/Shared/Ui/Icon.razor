@@ -42,7 +42,9 @@
             "M20 6 A8 3 0 1 1 4 6 A8 3 0 1 1 20 6",
             "M4 6 V18 C4 19.66 7.58 21 12 21 C16.42 21 20 19.66 20 18 V6",
             "M4 12 C4 13.66 7.58 15 12 15 C16.42 15 20 13.66 20 12"],
-        ["message-square"] = ["M20 4 H4 A1 1 0 0 0 3 5 V15 A1 1 0 0 0 4 16 H7 V20 L12.5 16 H20 A1 1 0 0 0 21 15 V5 A1 1 0 0 0 20 4 Z"],
+        // "message-square" (a chat-bubble glyph) lived here without ever being rendered — see
+        // UiPrimitiveTests.No_icon_ships_that_nothing_renders, which now scans the markup instead of a
+        // hardcoded list and caught exactly this.
         ["chevron-down"] = ["M6 9.5 L12 15.5 L18 9.5"],
         ["x"] = ["M6 6 L18 18", "M18 6 L6 18"],
 

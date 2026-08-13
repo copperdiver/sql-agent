@@ -6,15 +6,11 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using SqlAgent.Core;
+using SqlAgent.Host.Components.Pages;
 using SqlAgent.Host.Components.Shared.Chat;
 using SqlAgent.Host.Web;
 using SqlAgent.Storage;
 using static SqlAgent.Tests.AsyncTestHelpers;
-// `SqlAgent.Storage.Chat` (the entity, from `using SqlAgent.Storage`) and
-// `SqlAgent.Host.Components.Pages.Chat` (the page under test) share the bare name "Chat". A plain
-// `using SqlAgent.Host.Components.Pages;` makes every ordinary reference to the page ambiguous — this
-// alias is what the rest of the file names it by instead.
-using ChatPage = SqlAgent.Host.Components.Pages.Chat;
 
 namespace SqlAgent.Tests;
 
@@ -402,10 +398,14 @@ public class ChatPageTests : IDisposable
         // makes the in-flight send's eventual result stale.
         await page.InvokeAsync(() => page.SetParametersAndRender(p => p.Add(c => c.Id, chatB)));
 
+        // Snapshot here, not at the top: re-parameterizing to chat B already fired ChatsChanged through
+        // SetActiveChat, so a test that asserted notified > 0 would pass with the production fix
+        // reverted — the mechanism that makes the send stale is the same one that fires the event.
+        var before = notified;
         _gateway.Release(LlmSqlResponse.Generated("SELECT 1"));
         await send;
 
-        Assert.True(notified > 0);
+        Assert.True(notified > before);
         // And the chat it made is actually findable — the notification is not just a courtesy call.
         var chats = await ListChatsAsync();
         Assert.Contains(chats, c => c.Title == "new chat question");

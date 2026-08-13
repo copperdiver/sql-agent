@@ -203,7 +203,7 @@ public class ComposerTests
     [Fact]
     public void Value_changed_programmatically_with_no_DOM_input_event_resizes_the_textarea_via_js()
     {
-        // A suggestion chip filling the box, or Chat.razor clearing it after a send, sets Value from C#
+        // A suggestion chip filling the box, or ChatPage.razor clearing it after a send, sets Value from C#
         // with no corresponding DOM 'input' event — composer.js's own listener, which handles the live
         // typing case, never fires for either. Composer.razor has to notice the mismatch itself and call
         // sqlAgentComposer.resize, or the box keeps whatever height the last keystroke left it at.

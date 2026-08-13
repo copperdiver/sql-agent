@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Bunit;
 using SqlAgent.Host.Components.Shared.Ui;
 
@@ -51,7 +52,6 @@ public class UiPrimitiveTests
     [InlineData("settings")]
     [InlineData("info")]
     [InlineData("database")]
-    [InlineData("message-square")]
     [InlineData("chevron-down")]
     [InlineData("x")]
     [InlineData("plus")]
@@ -75,18 +75,36 @@ public class UiPrimitiveTests
     [Fact]
     public void No_icon_ships_that_nothing_renders()
     {
-        // Phase A ships only the glyphs Phase A draws. Phases B-D add theirs alongside the components
-        // that render them, so an unused glyph never sits in the set waiting for a caller that a later
-        // phase might rename or never write.
-        var rendered = new[]
-        {
-            "panel-left", "menu", "sun", "moon", "monitor", "settings",
-            "info", "database", "message-square", "chevron-down", "x",
-            "plus", "terminal", "paperclip", "more-vertical", "pencil", "trash", "arrow-up", "square",
-            "folder", "chevron-right", "search",
-        };
+        // Each phase ships only the glyphs it draws, so an unused glyph never sits in the set waiting
+        // for a caller a later phase might rename or never write.
+        //
+        // This used to compare Icon.Names against a hardcoded list, which made it a change-detector
+        // wearing a policy's name: adding a glyph and adding its name to the list satisfied it while
+        // nothing rendered the glyph — which is exactly how "message-square" shipped and sat unused
+        // until this rewrite caught it. It now reads the markup, so the only way to pass is to render it.
+        //
+        // Three shapes carry a glyph name in this codebase, and all three are plain literals rather than
+        // expressions, so a regex still suffices without becoming an expression parser:
+        //  - `<Icon Name="…">` directly (Task 5's project chevron is two elements under an @if rather
+        //    than one with a ternary name, precisely so this stays matchable);
+        //  - `Icon="…"` on MenuItem/EmptyState, which forward it to their own inner `<Icon Name="@Icon">`;
+        //  - the third positional string in ThemeToggle's `new("value", "Label", "icon-name")` options —
+        //    Segmented renders each as `<Icon Name="@option.Icon">`.
+        var componentsRoot = Path.GetDirectoryName(RepoPaths.Find("src/SqlAgent.Host/Components/App.razor"))!;
 
-        Assert.Equal(rendered.OrderBy(n => n, StringComparer.Ordinal), Icon.Names.OrderBy(n => n, StringComparer.Ordinal));
+        var rendered = Directory
+            .EnumerateFiles(componentsRoot, "*.razor", SearchOption.AllDirectories)
+            .Select(File.ReadAllText)
+            .SelectMany(text => Regex.Matches(text, @"<Icon\b[^>]*?\bName\s*=\s*""([a-z0-9-]+)""")
+                .Concat(Regex.Matches(text, @"\bIcon\s*=\s*""([a-z0-9-]+)"""))
+                .Concat(Regex.Matches(text, @"new\(\s*""[a-z0-9-]+""\s*,\s*""[^""]*""\s*,\s*""([a-z0-9-]+)""\s*\)")))
+            .Select(m => m.Groups[1].Value)
+            .ToHashSet(StringComparer.Ordinal);
+
+        Assert.NotEmpty(rendered);
+        Assert.Equal(
+            rendered.OrderBy(n => n, StringComparer.Ordinal),
+            Icon.Names.OrderBy(n => n, StringComparer.Ordinal));
     }
 
     [Fact]
