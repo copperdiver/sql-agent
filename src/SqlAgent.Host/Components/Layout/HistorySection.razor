@@ -1,0 +1,102 @@
+@implements IDisposable
+@inject ScopedRunner Runner
+@inject AppState State
+@inject DialogService Dialogs
+@inject NavigationManager Nav
+
+<div class="history">
+    @if (_chats.Count == 0)
+    {
+        <p class="history-empty muted">No chats yet</p>
+    }
+    else
+    {
+        @foreach (var group in ChatHistoryGrouping.Group(_chats, DateTime.Now))
+        {
+            <p class="history-heading">@group.Label</p>
+            @foreach (var chat in group.Chats)
+            {
+                <div class="history-row @(chat.Id == State.ActiveChatId ? "active" : "")" @key="chat.Id">
+                    @* Open(chat) rather than an inline lambda: the URL is a string literal inside a
+                       Razor attribute, which needs escaping the parser handles badly. *@
+                    <button type="button" class="ghost history-open truncate"
+                            @onclick="() => Open(chat)">@chat.Title</button>
+                    <Menu Placement="MenuPlacement.Bottom">
+                        <Trigger>
+                            <Icon Name="more-vertical" Size="16" />
+                            <span class="sr-only">@($"Actions for {chat.Title}")</span>
+                        </Trigger>
+                        <ChildContent>
+                            <MenuItem Icon="pencil" OnClick="() => ShowRename(chat)">Rename</MenuItem>
+                            <MenuItem Icon="trash" Danger="true" OnClick="() => ShowDelete(chat)">Delete</MenuItem>
+                        </ChildContent>
+                    </Menu>
+                </div>
+            }
+        }
+    }
+</div>
+
+@code {
+    private IReadOnlyList<ChatSummary> _chats = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        // The chat page is a sibling route under MainLayout, not an ancestor, and MainLayout is not
+        // recreated across navigation — so nothing re-runs this method when a chat is created, renamed
+        // or deleted. The subscription is what keeps the list true; SchemaRail carries the same one for
+        // the same reason.
+        State.ChatsChanged += OnChatsChanged;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync() =>
+        _chats = await Runner.RunAsync<ChatService, IReadOnlyList<ChatSummary>>(s => s.ListHistoryAsync());
+
+    private void Open(ChatSummary chat) => Nav.NavigateTo($"/chat/{chat.Id}");
+
+    private void OnChatsChanged() => InvokeAsync(async () =>
+    {
+        await ReloadAsync();
+        StateHasChanged();
+    });
+
+    // RenderFragment built in Razor rather than through RenderTreeBuilder by hand: the dialog is handed
+    // to DialogService, which renders it from MainLayout. Rendering it here would put a position:fixed
+    // element inside the sidebar, and below 1024px the sidebar's transform makes it the containing block
+    // — the dialog would centre on the drawer and ride off-screen with it.
+    private void ShowRename(ChatSummary chat) => Dialogs.Show(
+        @<ChatRenameDialog Chat="chat"
+                           OnSave="title => RenameAsync(chat, title)"
+                           OnCancel="Dialogs.Close" />);
+
+    private void ShowDelete(ChatSummary chat) => Dialogs.Show(
+        @<ChatDeleteDialog Chat="chat"
+                           OnConfirm="() => DeleteAsync(chat)"
+                           OnCancel="Dialogs.Close" />);
+
+    private async Task RenameAsync(ChatSummary chat, string title)
+    {
+        await Runner.RunAsync<ChatService, bool>(s => s.RenameChatAsync(chat.Id, title));
+        Dialogs.Close();
+        await ReloadAsync();
+        StateHasChanged();
+    }
+
+    private async Task DeleteAsync(ChatSummary chat)
+    {
+        await Runner.RunAsync<ChatService, bool>(s => s.DeleteChatAsync(chat.Id));
+        Dialogs.Close();
+        // Clearing the selection first: leaving it set would keep highlighting a row that no longer
+        // exists, and the page would keep showing a conversation deleted out from under it.
+        if (State.ActiveChatId == chat.Id)
+        {
+            State.SetActiveChat(null);
+            Nav.NavigateTo("/");
+        }
+        await ReloadAsync();
+        StateHasChanged();
+    }
+
+    public void Dispose() => State.ChatsChanged -= OnChatsChanged;
+}

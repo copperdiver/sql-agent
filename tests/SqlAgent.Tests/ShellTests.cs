@@ -533,6 +533,8 @@ public class ShellTests : IDisposable
         ctx.Services.AddScoped<TablePolicyService>();
         ctx.Services.AddScoped<ScopedRunner>();
         ctx.Services.AddScoped<AppState>();
+        ctx.Services.AddScoped<ChatService>();
+        ctx.Services.AddScoped<DialogService>();
         ctx.Services.AddLogging();
         // An explicit factory, not just an extra ILoggerProvider registration: bUnit pre-registers its
         // own ILoggerFactory, AddLogging()'s TryAdd leaves that in place, and it ignores providers
