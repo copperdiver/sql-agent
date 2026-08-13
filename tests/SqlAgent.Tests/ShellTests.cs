@@ -299,8 +299,10 @@ public class ShellTests : IDisposable
         var css = File.ReadAllText(RepoPaths.Find("src/SqlAgent.Host/wwwroot/css/app.css"));
 
         Assert.Contains("html.sidebar-collapsed .app aside.sidebar", css);
-        Assert.Contains("html.sidebar-collapsed .sidebar-body", css);
-        Assert.Contains("html.sidebar-collapsed .sidebar-foot", css);
+        // Anchored under ".app aside.sidebar" (Task 6): the bare class names would otherwise hide every
+        // .nav-label/.sidebar-body/.sidebar-foot on the page, not just the sidebar's own.
+        Assert.Contains("html.sidebar-collapsed .app aside.sidebar .sidebar-body", css);
+        Assert.Contains("html.sidebar-collapsed .app aside.sidebar .sidebar-foot", css);
     }
 
     [Fact]
@@ -412,12 +414,51 @@ public class ShellTests : IDisposable
     }
 
     [Fact]
+    public void A_closed_drawer_is_out_of_the_tab_order_below_1024px()
+    {
+        // transform: translateX(-100%) moves the drawer off-screen but leaves every control in it
+        // focusable, so Tab on a phone walks through an invisible sidebar before reaching the page —
+        // pre-existing since Phase A, and worse now that history rows live in there too. visibility:
+        // hidden is what actually removes a subtree from the tab order, and unlike an inert attribute it
+        // can be scoped to the viewport where the drawer exists: above 1024px the sidebar is permanent
+        // and must stay tabbable. bUnit runs no CSS engine, so this is pinned on source text.
+        var css = File.ReadAllText(RepoPaths.Find("src/SqlAgent.Host/Components/Layout/Sidebar.razor.css"));
+
+        var narrow = ExtractBlock(css, "@media (max-width: 1023px)");
+        Assert.Contains("visibility: hidden", narrow);
+        Assert.Contains(".sidebar.drawer-open", narrow);
+        Assert.Contains("visibility: visible", narrow);
+    }
+
+    [Fact]
+    public void Closing_the_drawer_returns_focus_to_the_hamburger_that_opened_it()
+    {
+        // Opening the drawer moves focus into it (Phase A). Closing it without giving focus back leaves
+        // the focus ring on an element that is now hidden, so the next Tab restarts from the top of the
+        // document — the classic dialog-dismissal defect, and the other half of carry-forward item 3.
+        var sidebar = _ctx.RenderComponent<Sidebar>();
+        sidebar.Find("[data-testid=drawer-open]").Click();
+        var afterOpen = FocusInvocationCount();
+
+        sidebar.Find(".sidebar-scrim").Click();
+
+        Assert.True(FocusInvocationCount() > afterOpen,
+            "Closing the drawer must move focus back to the trigger.");
+    }
+
+    [Fact]
     public void The_drawer_focus_move_happens_only_when_the_drawer_actually_opens()
     {
         // Focus is a shared, user-visible resource: stealing it on every render would yank the caret out
         // of whatever the user was typing in the SQL editor each time the sidebar re-rendered, and
         // grabbing it on first render would fight the browser's own restore-focus-on-reload. The pending
         // flag exists to keep the move to exactly the open transition, and this pins that.
+        //
+        // Closing the drawer is no longer a counter-example here (Task 6): it now deliberately moves
+        // focus back to the trigger, covered separately by
+        // Closing_the_drawer_returns_focus_to_the_hamburger_that_opened_it. The re-render used below
+        // (collapsing the sidebar) is neither an open nor a close, so it is still a valid case where no
+        // focus move should happen.
         var sidebar = _ctx.RenderComponent<Sidebar>();
 
         Assert.Equal(0, FocusInvocationCount());
@@ -426,8 +467,8 @@ public class ShellTests : IDisposable
         var afterOpen = FocusInvocationCount();
         Assert.NotEqual(0, afterOpen);
 
-        // A re-render that is not an open (closing via the scrim) must not focus again.
-        sidebar.Find(".sidebar-scrim").Click();
+        // A re-render that is neither an open nor a close (collapsing the rail) must not focus again.
+        sidebar.Find("[data-testid=collapse-toggle]").Click();
 
         Assert.Equal(afterOpen, FocusInvocationCount());
     }

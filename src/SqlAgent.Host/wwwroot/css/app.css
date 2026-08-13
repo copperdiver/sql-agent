@@ -284,17 +284,22 @@ th { color: var(--text-100); font-weight: 500; font-size: var(--text-xs); text-t
    default min-width:auto refusing to shrink either) spill across the sidebar's border into the main
    content card. Duplicating the clip here is intentional, not redundant: it covers exactly the gap the
    scoped rule cannot reach, and the two agree once the circuit does connect since both key off the same
-   collapsed state. */
+   collapsed state.
+
+   Every selector here is anchored to ".app aside.sidebar" rather than left as a bare class. The class
+   names happen to be unique to the sidebar today, so "html.sidebar-collapsed .nav-label" behaved
+   correctly — but it says "hide every .nav-label on the page", which is not the rule anyone means, and
+   SidebarCollapseParityTests now fails if a new one is added unanchored. */
 @media (min-width: 1024px) {
   html.sidebar-collapsed .app aside.sidebar {
     width: var(--sidebar-collapsed-width);
     flex-basis: var(--sidebar-collapsed-width);
     overflow: hidden;
   }
-  html.sidebar-collapsed .nav-label,
-  html.sidebar-collapsed .brand-name,
-  html.sidebar-collapsed .sidebar-body,
-  html.sidebar-collapsed .sidebar-foot { display: none; }
+  html.sidebar-collapsed .app aside.sidebar .nav-label,
+  html.sidebar-collapsed .app aside.sidebar .brand-name,
+  html.sidebar-collapsed .app aside.sidebar .sidebar-body,
+  html.sidebar-collapsed .app aside.sidebar .sidebar-foot { display: none; }
 }
 
 /* ============================================================================
