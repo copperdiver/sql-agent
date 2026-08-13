@@ -86,6 +86,22 @@ public class ProjectServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Renaming_a_project_to_a_different_case_of_its_own_name_is_allowed()
+    {
+        // The test above passes an identical string, so it would pass even without the `p.Id != id`
+        // exclusion in RenameProjectAsync — nothing else in the table matches "quarterly" either way.
+        // "quarterly" -> "Quarterly" is the case that actually exercises it: the column collates NOCASE,
+        // so without the exclusion the project's own unchanged name would compare equal to the new one and
+        // get reported back as taken.
+        var id = await NewProjectAsync("quarterly");
+
+        var result = await _projects.RenameProjectAsync(id, "Quarterly");
+
+        Assert.Equal(ProjectWriteOutcome.Ok, result.Outcome);
+        Assert.Equal("Quarterly", Assert.Single(await _projects.ListProjectsAsync()).Name);
+    }
+
+    [Fact]
     public async Task Deleting_a_project_and_keeping_its_chats_returns_them_to_history()
     {
         var id = await NewProjectAsync("quarterly");

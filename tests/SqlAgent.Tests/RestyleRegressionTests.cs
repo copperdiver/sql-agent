@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.RegularExpressions;
 
 namespace SqlAgent.Tests;
@@ -68,8 +69,17 @@ public class RestyleRegressionTests
     {
         var hostRoot = Path.GetDirectoryName(RepoPaths.Find("src/SqlAgent.Host/Components/App.razor"))!;
         hostRoot = Path.GetDirectoryName(hostRoot)!;
-        var scopedRoots = Directory.Exists(Path.Combine(hostRoot, "obj"))
-            ? Directory.GetDirectories(Path.Combine(hostRoot, "obj"), "scopedcss", SearchOption.AllDirectories)
+        // Scoped to obj/<Configuration>, not every scopedcss directory under obj: a Debug build left over
+        // from an earlier run sits right beside a Release one, and scanning both lets a stale Debug sheet
+        // answer a Release run — masking a real wrong-sheet regression instead of catching it.
+        // AssemblyConfigurationAttribute reports the configuration this test binary itself was built with,
+        // which is the Host project's configuration too, since one `dotnet test --configuration X` builds
+        // both from the same solution.
+        var configuration = Assembly.GetExecutingAssembly()
+            .GetCustomAttribute<AssemblyConfigurationAttribute>()?.Configuration ?? "Debug";
+        var configRoot = Path.Combine(hostRoot, "obj", configuration);
+        var scopedRoots = Directory.Exists(configRoot)
+            ? Directory.GetDirectories(configRoot, "scopedcss", SearchOption.AllDirectories)
             : [];
         Assert.NotEmpty(scopedRoots.Where(r => Directory.Exists(Path.Combine(r, "Components"))));
 

@@ -40,7 +40,7 @@ window.sqlAgentComposer = {
 
   // Recomputes height from content. bind's own 'input' listener already does this for anything the user
   // types, live, with no round trip to .NET — but a change to the textarea's value that never raises a DOM
-  // input event (Chat.razor clearing the box after a send, a suggestion chip filling it) leaves that
+  // input event (ChatPage.razor clearing the box after a send, a suggestion chip filling it) leaves that
   // listener silent, and the box keeps whatever height the last keystroke left it at. Composer.razor calls
   // this explicitly for exactly that case.
   resize: function (textarea) {

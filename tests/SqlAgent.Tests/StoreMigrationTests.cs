@@ -193,6 +193,66 @@ public class StoreMigrationTests : IDisposable
     }
 
     [Fact]
+    public async Task A_chat_and_its_message_survive_the_migration_that_rebuilds_the_Chats_table()
+    {
+        // Phase B2's Projects migration adds a foreign key from Chats to the new Projects table. SQLite
+        // has no ALTER TABLE ADD CONSTRAINT, so EF's migration generator rebuilds the whole Chats table to
+        // add it: create a new table, copy every row across, drop the old one, rename the new one into
+        // place. ChatMessages cascades to Chats, so this is the one path in the phase that touches a real
+        // user's conversations rather than just their connections — every other StoreMigrationTests test
+        // above seeds only a DatabaseConnection. Seeds a chat and a message the way a store that already
+        // went through Phase B1 would have them — via the real migrator, stopping at ChatPersistence, with
+        // proper history rows for it, not through the six-table LegacyStoreDbContext above, which predates
+        // chats entirely — then lets StoreInitializer apply the rest and checks both survive.
+        Guid chatId = Guid.NewGuid(), messageId = Guid.NewGuid();
+        await using (var db = NewContext())
+        {
+            await db.GetService<IMigrator>().MigrateAsync("20260812223903_ChatPersistence");
+
+            // SqlAgentDbContext's own model already declares Chat.ProjectId, which does not exist as a
+            // column yet at this point — inserting through it would fail with "no such column". This
+            // trimmed sibling context maps only what ChatPersistence actually created.
+            await using var seed = new ChatOnlyDbContext(
+                new DbContextOptionsBuilder<ChatOnlyDbContext>().UseSqlite(ConnectionString).Options);
+            seed.Chats.Add(new Chat
+            {
+                Id = chatId,
+                Title = "quarterly revenue",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+                LastMessageAt = DateTime.UtcNow,
+            });
+            seed.ChatMessages.Add(new ChatMessage
+            {
+                Id = messageId,
+                ChatId = chatId,
+                Sequence = 0,
+                Role = ChatRole.User,
+                Text = "how did we do last quarter?",
+                CreatedAt = DateTime.UtcNow,
+                OutcomeKind = ChatOutcomeKind.None,
+            });
+            await seed.SaveChangesAsync();
+        }
+        SqliteConnection.ClearAllPools();
+
+        await using var migrated = NewContext();
+        await StoreInitializer.InitializeAsync(migrated, NullLogger.Instance);
+
+        var chat = await migrated.Chats.SingleAsync();
+        Assert.Equal(chatId, chat.Id);
+        Assert.Equal("quarterly revenue", chat.Title);
+        // The rebuilt table's new column, unset by the seed above: proof the rebuild actually ran, not
+        // just that the row it copied still has a title.
+        Assert.Null(chat.ProjectId);
+
+        var message = await migrated.ChatMessages.SingleAsync();
+        Assert.Equal(messageId, message.Id);
+        Assert.Equal(chatId, message.ChatId);
+        Assert.Equal("how did we do last quarter?", message.Text);
+    }
+
+    [Fact]
     public async Task A_migration_failure_is_logged_with_the_file_path_not_the_full_connection_string()
     {
         // Regression test: the catch block used to log GetDbConnection().ConnectionString, which echoes
@@ -402,5 +462,36 @@ public sealed class LegacyStoreDbContext(DbContextOptions<LegacyStoreDbContext> 
         b.Entity<QueryAuditLog>().HasKey(x => x.Id);
         b.Entity<AppSetting>().HasKey(x => x.Key);
         b.Entity<Secret>().HasKey(x => x.Reference);
+    }
+}
+
+/// <summary>
+/// The store as it was right after Phase B1's ChatPersistence migration: Chats and ChatMessages exist, but
+/// Chat has no ProjectId column and there is no Projects table yet — Phase B2's own migration is what adds
+/// both. Used only to seed through a model that matches that schema; the actual tables are created by the
+/// real migrator (see <see cref="StoreMigrationTests.A_chat_and_its_message_survive_the_migration_that_rebuilds_the_Chats_table"/>),
+/// not by this context's own OnModelCreating.
+/// </summary>
+public sealed class ChatOnlyDbContext(DbContextOptions<ChatOnlyDbContext> options) : DbContext(options)
+{
+    public DbSet<Chat> Chats => Set<Chat>();
+    public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
+
+    protected override void OnModelCreating(ModelBuilder b)
+    {
+        b.Entity<Chat>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Ignore(x => x.ProjectId);
+            e.Ignore(x => x.Project);
+        });
+        b.Entity<ChatMessage>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasOne(x => x.Chat).WithMany(c => c.Messages)
+                .HasForeignKey(x => x.ChatId).OnDelete(DeleteBehavior.Cascade);
+            e.Property(x => x.Role).HasConversion<string>().HasMaxLength(16);
+            e.Property(x => x.OutcomeKind).HasConversion<string>().HasMaxLength(32);
+        });
     }
 }

@@ -146,7 +146,7 @@ public class HistorySectionTests : IDisposable
     public async Task Returning_from_a_stored_chat_to_a_new_one_clears_the_sidebars_highlight()
     {
         // Renders the real chat page rather than calling AppState.SetActiveChat directly: the bug this
-        // guards against lived in Chat.razor's OnParametersSetAsync (a guard that skipped SetActiveChat
+        // guards against lived in ChatPage.razor's OnParametersSetAsync (a guard that skipped SetActiveChat
         // on the first render of "/"), and calling AppState by hand would not exercise that guard at all.
         var chatB = await SeedAsync("already there", DateTime.UtcNow);
 

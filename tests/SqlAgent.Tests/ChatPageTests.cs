@@ -286,11 +286,11 @@ public class ChatPageTests : IDisposable
     [Fact]
     public async Task Navigating_to_another_chat_mid_send_drops_the_stale_turn_and_does_not_hijack_navigation()
     {
-        // Regression test for the corruption the review flagged: Chat.razor is the same component instance
-        // across "/" and "/chat/{Id}" (that reuse is why OnParametersSetAsync's guard exists at all), so
-        // nothing used to stop an in-flight turn from landing after the user had already opened a different
-        // chat. Before the fix this appended chat A's Q&A into B's transcript, then navigated the user OUT
-        // of B and back into A the moment the answer arrived.
+        // Regression test for the corruption the review flagged: ChatPage.razor is the same component
+        // instance across "/" and "/chat/{Id}" (that reuse is why OnParametersSetAsync's guard exists at
+        // all), so nothing used to stop an in-flight turn from landing after the user had already opened a
+        // different chat. Before the fix this appended chat A's Q&A into B's transcript, then navigated
+        // the user OUT of B and back into A the moment the answer arrived.
         await AddConnectionAsync("prod");
         var chatB = await CreateStoredChatAsync("already there");
         _gateway.Hold();

@@ -153,13 +153,13 @@
     {
         await Runner.RunAsync<ProjectService, bool>(s => s.DeleteProjectAsync(project.Id, mode));
         Dialogs.Close();
-        _expanded.Remove(project.Id);
-        _chats.Remove(project.Id);
-        await ReloadAsync();
-        // Deleting with the chats removes rows the history section is not showing, but keeping them adds
-        // rows it is — either way it has to re-read.
+        // Notify only, the way ChatRow's own writes do — this section is itself a ChatsChanged subscriber,
+        // so calling ReloadAsync here too would reload twice for one delete. OnChatsChanged's own
+        // ReloadAsync already drops the deleted project's id from _expanded and _chats (it keeps only the
+        // ones that still exist), and it reaches the history section as well: deleting with the chats
+        // removes rows it is showing, keeping them adds rows it should show, and either way it has to
+        // re-read.
         State.NotifyChatsChanged();
-        StateHasChanged();
     }
 
     public void Dispose() => State.ChatsChanged -= OnChatsChanged;

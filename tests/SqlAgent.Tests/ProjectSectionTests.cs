@@ -142,6 +142,52 @@ public class ProjectSectionTests : IDisposable
     }
 
     [Fact]
+    public async Task Deleting_an_expanded_project_removes_it_and_its_chats_from_the_section()
+    {
+        // ReloadAsync only keeps an expanded id that still resolves to a project, dropping the rest along
+        // with their cached chats — this is the path that guard exists for: deleting the very project the
+        // user has open, not one collapsed elsewhere in the list.
+        await SeedProjectAsync("quarterly", "kept");
+        var dialogs = _ctx.Services.GetRequiredService<DialogService>();
+        var section = _ctx.RenderComponent<ProjectSection>();
+
+        await section.Find(".project-open").ClickAsync(new MouseEventArgs());
+        Assert.Single(section.FindAll(".chat-row"));
+
+        section.Find(".project-row .menu-trigger").Click();
+        section.FindAll(".menu-item-action").First(r => r.TextContent.Contains("Delete")).Click();
+        var dialog = _ctx.Render(dialogs.Current!);
+        await dialog.Find("[data-testid=project-delete-keep]").ClickAsync(new MouseEventArgs());
+
+        Assert.Empty(section.FindAll(".project-row"));
+        Assert.Empty(section.FindAll(".chat-row"));
+    }
+
+    [Fact]
+    public async Task A_chat_moved_out_of_an_expanded_project_disappears_from_its_list()
+    {
+        // The companion case to the one above: the project itself survives, but ReloadAsync's per-expanded-
+        // id refresh (run every time something says the chats changed) has to re-read this project's chats
+        // too, not just recompute its count, or a chat moved elsewhere would keep showing under a project
+        // it already left.
+        await SeedProjectAsync("quarterly", "wandering");
+        var dialogs = _ctx.Services.GetRequiredService<DialogService>();
+        var section = _ctx.RenderComponent<ProjectSection>();
+
+        await section.Find(".project-open").ClickAsync(new MouseEventArgs());
+        Assert.Single(section.FindAll(".chat-row"));
+
+        section.Find(".chat-row .menu-trigger").Click();
+        section.FindAll(".menu-item-action").First(r => r.TextContent.Contains("Move")).Click();
+        var dialog = _ctx.Render(dialogs.Current!);
+        await dialog.FindAll("[data-testid=move-target]")
+            .First(b => b.TextContent.Contains("No project")).ClickAsync(new MouseEventArgs());
+
+        Assert.Empty(section.FindAll(".chat-row"));
+        Assert.Equal("0", section.Find(".project-count").TextContent);
+    }
+
+    [Fact]
     public async Task Requesting_a_project_expanded_opens_it_and_shows_its_chats()
     {
         // SearchDialogTests only proves the request lands in AppState.ProjectToExpand; this is the

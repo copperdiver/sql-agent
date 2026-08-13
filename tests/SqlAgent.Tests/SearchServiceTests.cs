@@ -92,10 +92,14 @@ public class SearchServiceTests : IDisposable
     }
 
     [Theory]
-    // Each wildcard gets its own case because each breaks differently and all three break quietly.
+    // Each wildcard gets its own case because each breaks differently and all three break quietly, plus
+    // one term combining all three: EscapeForLike replaces the backslash first specifically so that the
+    // backslashes it inserts for '%' and '_' are not themselves re-escaped by a later pass, and a term
+    // with only one of the three characters present can never exercise that ordering.
     [InlineData("50%")]
     [InlineData("a_b")]
     [InlineData("back\\slash")]
+    [InlineData("50%_off\\clearance")]
     public async Task A_wildcard_in_the_term_is_matched_literally(string literal)
     {
         await ChatWithMessageAsync($"about {literal} exactly", "unrelated");
