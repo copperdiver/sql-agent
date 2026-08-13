@@ -32,6 +32,7 @@ builder.Services.AddScoped<SchemaService>();
 builder.Services.AddScoped<TablePolicyService>();
 builder.Services.AddScoped<NlQueryService>();
 builder.Services.AddScoped<ChatService>();
+builder.Services.AddScoped<ProjectService>();
 builder.Services.AddScoped<ChatTurnService>();
 builder.Services.AddScoped<LocalTokenAuthenticator>();
 builder.Services.AddScoped<ScopedRunner>();

@@ -196,6 +196,25 @@ public class ChatServiceTests : IDisposable
         Assert.Equal(["prod"], message.Databases.Select(d => d.Name));
     }
 
+    [Fact]
+    public async Task A_chat_in_a_project_is_not_in_the_history_list()
+    {
+        // The sidebar shows each conversation in exactly one place. This is the store half of that rule;
+        // ProjectServiceTests covers the round trip back out.
+        var chat = await _chats.CreateChatAsync("grouped");
+        var project = new Project
+        {
+            Id = Guid.NewGuid(), Name = "quarterly",
+            CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+        };
+        _db.Projects.Add(project);
+        await _db.SaveChangesAsync();
+        (await _db.Chats.FirstAsync(c => c.Id == chat)).ProjectId = project.Id;
+        await _db.SaveChangesAsync();
+
+        Assert.DoesNotContain(await _chats.ListHistoryAsync(), c => c.Id == chat);
+    }
+
     public void Dispose()
     {
         _db.Dispose();

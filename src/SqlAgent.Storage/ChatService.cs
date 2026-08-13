@@ -55,6 +55,9 @@ public class ChatService(SqlAgentDbContext db)
     public async Task<IReadOnlyList<ChatSummary>> ListHistoryAsync(
         int take = 200, CancellationToken ct = default) =>
         await db.Chats
+            // Chats in a project are listed under that project instead. Without this filter the sidebar
+            // shows the same conversation twice, in two sections, with two ⋮ menus acting on one row.
+            .Where(c => c.ProjectId == null)
             // ThenByDescending(CreatedAt) for the same reason Sequence exists on messages: two chats
             // created or touched inside the same millisecond would otherwise reload in arbitrary order.
             .OrderByDescending(c => c.LastMessageAt).ThenByDescending(c => c.CreatedAt)
