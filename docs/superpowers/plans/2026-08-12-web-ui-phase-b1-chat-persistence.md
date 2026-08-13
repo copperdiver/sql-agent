@@ -4576,3 +4576,52 @@ in the `⋮` menu) and search with `Ctrl`/`Cmd`+K, because both are whole featur
 persistence; Phase A carry-forward 8 (Safari does not focus a button on mouse click), which waits for
 B2's document-level key listener to make a fix worth its cost; and carry-forward 11 and 12, two tests
 that do not test what their names claim.
+
+---
+
+## Carried forward from Phase B1
+
+Findings the reviews raised and Phase B1 consciously did not fix, recorded here
+rather than in a code comment because a defect that lives only in a comment is a
+defect nobody is assigned. Every task was reviewed; every Critical and Important
+finding was fixed. These are what remained.
+
+**Two need a decision before they are work.**
+
+| Item | Why it is open |
+|---|---|
+| **Copy the store before applying pending migrations.** `sqlagent.db.pre-<migrationId>.bak`, written only when `GetPendingMigrationsAsync()` is non-empty. EF wraps each migration in a transaction and SQLite DDL is transactional, so a migration that *fails* rolls back cleanly — that case is handled. What is not covered is a migration that **succeeds and is wrong**. A few lines turn the remaining worst case from unrecoverable into a file rename. | New behaviour, not a defect fix. The final reviewer recommended it; it was deliberately left out of the fix wave. |
+| **The manual checklist has not been walked.** Eleven rows in `docs/web-ui.md`, including the one no test substitutes for: starting the host against a store created before this release. Phase A carry-forward item 2 — whether `Modal`'s `autofocus` actually fires — also remains unverified, and it has a consequence either way: if it does not fire, `UiInteractionTests.The_modal_close_button_autofocuses_…` is asserting a mechanism that does not exist. | No one was at the screen. Record the result in a commit message either way. |
+
+**One test does not test what it claims.**
+
+| Item | Detail |
+|---|---|
+| `ChatPageTests.A_dropped_send_still_tells_the_sidebar_a_chat_was_created` **cannot fail.** Re-parameterizing the page to the second chat fires `ChatsChanged` through `SetActiveChat` before the gateway is released, so `notified > 0` holds with the production hoist reverted. The hoist at `Chat.razor` is correct and ships without a guard. | One line: snapshot the count immediately before releasing the gateway and assert it grew. |
+
+**The rest, by area.**
+
+| Area | Item |
+|---|---|
+| Store | `IsSequenceCollision` matches an English SQLite message substring — SQLite exposes no index name in constraint messages. Both outcomes are tested, and a wording change degrades to a thrown `DbUpdateException`, not silent corruption. |
+| Store | `ChatMessageDatabases` carries an index that is a strict prefix of its composite unique index: two index writes per attachment. Cheapest to drop while `ChatPersistence` is unreleased. |
+| Store | The schema-equivalence fingerprint compares columns, types, nullability, defaults, PK ordinals and index membership. It does **not** compare foreign keys, `CHECK`, `COLLATE`, partial-index predicates, views or triggers. Inert today — no legacy table has an FK — but the gap is real if a future `InitialCreate` gains a relationship. |
+| Store | Cancellation landing between `CreateChatAsync`'s commit and the user-message save leaves an empty chat row that the sidebar is never told about. The question is preserved twice (composer and chat title), so this is a leak, not a loss. |
+| UI | `Composer`'s `@oninput` round-trips every keystroke and re-renders the transcript with it, where `SqlEditor` deliberately engineered around the same problem. The likeliest of these to become a real complaint as conversations grow. Cheapest mitigation is a `ShouldRender` on `MessageList`; the real fix is letting the composer own the draft until send. |
+| UI | `SqlAgent.Storage.Chat` and the `Chat` page component collide by name; every test touching both needs a `using` alias. Renaming the page to `ChatPage.razor` (route unchanged) costs nothing but churn, and B2 is the moment to spend it. |
+| UI | `DialogService.Show` replaces an open dialog and gives the displaced one no signal. Fine for the one fire-and-forget caller; a caller awaiting a completion source through it would strand the awaiter. |
+| UI | Renaming or deleting a chat another tab already removed gives the user no feedback — the list just settles. Needs two tabs on a single-user local service. |
+| UI | `AppState` has one `ChatsChanged` event for both "the list changed" and "the selection moved", so navigating between chats re-queries the whole history list to move a CSS class. The connections pair (`Changed` / `ConnectionsChanged`) draws exactly the distinction that is missing. |
+| Tests | `StripComments` is duplicated verbatim in two test files; `SidebarCollapseParityTests.WideBlock` finds the first `@media (min-width:)` in a sheet rather than one anchored to the sidebar. |
+| Style | `paperclip`'s arc chords slightly exceed their declared radii (~1% renderer autoscale); `Workspace.razor.css` is now a zero-byte file; `.config/dotnet-tools.json` has no trailing newline. |
+
+### One lesson for B2
+
+**Ask a reviewer to trace a path, not to look at code.** Three of the four
+defects that would have cost data or trust — the non-atomic migration stamp,
+provider exception text reaching the transcript, and an in-flight send surviving
+a route change — were found because the review prompt named a specific path to
+follow through code the diff did not contain. The fourth, a Razor binding that
+silently became a string literal, was found by an implementer who noticed a
+promised behaviour had no test and wrote it. Neither is what a general request
+for a careful review produces.
