@@ -219,6 +219,29 @@ untrusted spreadsheet.
 The SQL editor has its own page at `/sql`. It is not going away: Phase D adds a scratchpad panel beside
 the chat built from the same components.
 
+## Projects
+
+A chat belongs to at most one project, and a chat in a project leaves the history list — each
+conversation is in exactly one place in the sidebar. Move one with **Move to project** in its `⋮` menu;
+"No project" in that dialog moves it back.
+
+Project names are unique and case-insensitive: `Quarterly` and `quarterly` are the same name, and the
+dialog says so rather than closing and doing nothing.
+
+Deleting a project asks what to do with its chats — return them to your history, or delete them with it.
+There is no silent cascade: it is the only action here that can destroy a conversation.
+
+## Search
+
+`Ctrl`/`Cmd`+`K` from anywhere, or the Search row in the sidebar. It searches chat titles, message text,
+project names and database names, grouped by kind, newest first within each group. Arrow keys move,
+Enter opens, Escape closes.
+
+A message match shows the text around it, and opens the chat at the top — matches are not scrolled to.
+A project match opens that project in the sidebar; a database match goes to Connections.
+
+Wildcards are searched for literally: `50%` finds a percent sign, and `a_b` does not match `axb`.
+
 ## The store and its migrations
 
 The SQLite store is versioned with EF Core migrations. A store created before this release has the
@@ -275,6 +298,13 @@ files under `wwwroot/js/`:
 | Open the drawer, close it with the scrim | Focus returns to the hamburger |
 | Press Enter in the composer, then Shift+Enter | Enter sends; Shift+Enter adds a line and grows the box |
 | Start the host against a store from before this release | It migrates, and the old connections are still listed |
+| Press `Ctrl`/`Cmd`+`K` with focus in the composer, then with nothing focused | The search modal opens both times |
+| Press `Ctrl`/`Cmd`+`K` in Chrome and Firefox | The browser's own shortcut does not fire — no address bar, no find bar |
+| In Safari, open the user menu with the mouse and press Escape | The menu closes |
+| Open a project, move a chat into it, reload | The chat is under the project and not in the history list |
+| Delete a project holding a chat, choosing "keep the chats" | The chat is back in the history list |
+| Search for a term that appears only in a message body | The result shows the surrounding text and opens the chat |
+| Open search with `Ctrl`/`Cmd`+`K`, then again from the Search row, and start typing immediately each time | Characters land in the search input right away; bUnit cannot see this — Task 7's focus fix was found broken only in a real browser |
 
 ## Approved scope that was consciously dropped
 
