@@ -133,7 +133,10 @@ public class ChatPageTests : IDisposable
         Assert.Contains("SELECT id FROM orders", reloaded.Markup);
         Assert.Contains("prod", reloaded.Markup);
         Assert.Contains("Rows are not stored", reloaded.Markup);
-        Assert.Empty(reloaded.FindAll(".grid-scroll table tbody tr"));
+        // ChatOutcome's Restored branch never emits .grid-scroll at all — asserting on the absence of a
+        // table the way ChatOutcomeTests does would still fail against a rendering that emitted the wrong
+        // wrapper markup with a table inside it, where the narrower selector above would pass.
+        Assert.Empty(reloaded.FindAll("table"));
     }
 
     [Fact]
@@ -154,8 +157,12 @@ public class ChatPageTests : IDisposable
     }
 
     [Fact]
-    public async Task Sending_with_nothing_attached_explains_itself_and_keeps_the_question()
+    public async Task Sending_with_nothing_attached_answers_with_an_explanation_and_still_records_the_question()
     {
+        // The question is cleared from the composer and persisted unconditionally — it is NOT kept in the
+        // box for editing. It shows up here because it was sent and now sits in the transcript as its own
+        // bubble, same as any other question; only the answer differs by explaining there was nothing to
+        // ask.
         var page = _ctx.RenderComponent<ChatPage>();
         Type(page, "how many orders");
 
@@ -238,6 +245,85 @@ public class ChatPageTests : IDisposable
         await ClickAsync(page.Find("[data-testid=send]"));
 
         Assert.True(notified > 0);
+    }
+
+    [Fact]
+    public async Task Two_questions_in_one_chat_each_keep_their_own_grid()
+    {
+        // _live is keyed by the assistant message's id (see MessageList). A mis-keyed result would hang
+        // one question's grid under another's answer instead of its own — invisible in a test that only
+        // sends once, which is why the earlier reload test alone did not cover this.
+        await AddConnectionAsync("prod");
+        var page = _ctx.RenderComponent<ChatPage>();
+        await AttachAsync(page, "prod");
+
+        _gateway.NextResponse = LlmSqlResponse.Generated("SELECT id FROM orders");
+        _provider.NextResult = new QueryResultSet(["id"], [new object?[] { 1 }], Truncated: false);
+        Type(page, "first question");
+        await ClickAsync(page.Find("[data-testid=send]"));
+
+        _gateway.NextResponse = LlmSqlResponse.Generated("SELECT id FROM customers");
+        _provider.NextResult = new QueryResultSet(["id"], [new object?[] { 2 }, new object?[] { 3 }], Truncated: false);
+        Type(page, "second question");
+        await ClickAsync(page.Find("[data-testid=send]"));
+
+        var tables = page.FindAll(".grid-scroll table");
+        Assert.Equal(2, tables.Count);
+        Assert.Contains("1", tables[0].TextContent);
+        Assert.DoesNotContain("2", tables[0].TextContent);
+        Assert.DoesNotContain("3", tables[0].TextContent);
+        Assert.Contains("2", tables[1].TextContent);
+        Assert.Contains("3", tables[1].TextContent);
+        Assert.DoesNotContain("1", tables[1].TextContent);
+    }
+
+    [Fact]
+    public async Task Navigating_to_another_chat_mid_send_drops_the_stale_turn_and_does_not_hijack_navigation()
+    {
+        // Regression test for the corruption the review flagged: Chat.razor is the same component instance
+        // across "/" and "/chat/{Id}" (that reuse is why OnParametersSetAsync's guard exists at all), so
+        // nothing used to stop an in-flight turn from landing after the user had already opened a different
+        // chat. Before the fix this appended chat A's Q&A into B's transcript, then navigated the user OUT
+        // of B and back into A the moment the answer arrived.
+        await AddConnectionAsync("prod");
+        var chatB = await CreateStoredChatAsync("already there");
+        _gateway.Hold();
+
+        var page = _ctx.RenderComponent<ChatPage>();
+        await AttachAsync(page, "prod");
+        Type(page, "new chat question");
+        var send = ClickAsync(page.Find("[data-testid=send]"));
+        await WaitForConditionAsync(() => _gateway.CallCount == 1);
+
+        // The same instance being handed a different Id is exactly what the router does navigating from
+        // "/" to a stored chat — bUnit's SetParametersAndRender is that re-parameterization. Routed through
+        // InvokeAsync so OnParametersSetAsync's own await (loading chat B) completes before we look at the
+        // markup, the same way ClickAsync dispatches an event through the renderer's sync context.
+        await page.InvokeAsync(() => page.SetParametersAndRender(p => p.Add(c => c.Id, chatB)));
+        Assert.Contains("already there", page.Markup);
+        var nav = _ctx.Services.GetRequiredService<FakeNavigationManager>();
+        var uriBeforeRelease = nav.Uri;
+
+        _gateway.Release(LlmSqlResponse.Generated("SELECT 1"));
+        await send;
+
+        // Chat B's transcript is exactly what it was — the stale turn was not appended to it...
+        Assert.Contains("already there", page.Markup);
+        Assert.DoesNotContain("new chat question", page.Markup);
+        // ...and the stale send did not navigate the user back into the chat it started in.
+        Assert.Equal(uriBeforeRelease, nav.Uri);
+        // The turn still landed on disk under its own chat, though — nothing about the fix should lose it.
+        var chats = await ListChatsAsync();
+        Assert.Contains(chats, c => c.Title == "new chat question");
+    }
+
+    private async Task<Guid> CreateStoredChatAsync(string question)
+    {
+        using var scope = _ctx.Services.CreateScope();
+        var chats = scope.ServiceProvider.GetRequiredService<ChatService>();
+        var id = await chats.CreateChatAsync(question);
+        await chats.AppendMessageAsync(new ChatMessageInput(id, ChatRole.User, question, []));
+        return id;
     }
 
     private async Task<Guid> AddConnectionAsync(string name)

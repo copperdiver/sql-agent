@@ -63,6 +63,7 @@
     private string _question = "";
     private bool _busy;
     private CancellationTokenSource? _cts;
+    private bool _disposed;
 
     protected override async Task OnInitializedAsync()
     {
@@ -77,10 +78,19 @@
         // The send below navigates to /chat/{id} after creating the chat, which re-enters this method
         // with the id of the conversation already in memory. Reloading it from the store there would
         // throw away _live and redraw the answer the user is looking at as a restored one, rows gone.
+        //
+        // _loadedChatId starts life as the sentinel below rather than null, specifically so this method
+        // still runs its body on the very first render of "/" (where Id is also null). Guarding on
+        // `Id == _loadedChatId` with both sides starting null would short-circuit that first call before
+        // State.SetActiveChat ever ran, leaving AppState pointing at whatever chat was active before —
+        // wrong, and with no consumer yet to make the symptom visible.
         if (Id == _loadedChatId) return;
         _loadedChatId = Id;
         _messages.Clear();
         _live.Clear();
+        // Attachments are per-conversation, not per-circuit: carrying prod's chips into a brand-new chat
+        // (or someone else's, reached via history) would send them somewhere the user never attached them.
+        _attached.Clear();
         if (Id is { } id)
         {
             var detail = await Runner.RunAsync<ChatService, ChatDetail?>(s => s.GetChatAsync(id));
@@ -89,7 +99,10 @@
         State.SetActiveChat(Id);
     }
 
-    private Guid? _loadedChatId;
+    /// <summary>Sentinel distinct from any real chat id AND from null, so the guard above still runs on
+    /// the first render of "/" (Id null) instead of matching this field's own uninitialized default.</summary>
+    private static readonly Guid Unloaded = Guid.NewGuid();
+    private Guid? _loadedChatId = Unloaded;
 
     private async Task ReloadConnectionsAsync()
     {
@@ -130,11 +143,31 @@
         var question = _question;
         _question = "";
         var databaseIds = _attached.Select(a => a.ConnectionId!.Value).ToList();
+        // Captured up front: this component instance is reused across "/" and "/chat/{Id}" (that reuse is
+        // why OnParametersSetAsync's guard exists), so _loadedChatId can change under us while the send
+        // below is in flight — the user opens a stored chat, or leaves for /sql entirely. Comparing the
+        // live field against this snapshot after the await, rather than trusting the field directly, is
+        // what tells the difference between "this send created/continued startedIn" (normal) and "the
+        // page moved on to something else while it was still running" (must be dropped).
+        var startedIn = _loadedChatId;
         _cts = new CancellationTokenSource();
         try
         {
             var turn = await Runner.RunAsync<ChatTurnService, ChatTurnResult>(
-                s => s.SendAsync(_loadedChatId, question, databaseIds, _cts.Token));
+                s => s.SendAsync(startedIn, question, databaseIds, _cts.Token));
+
+            if (_disposed || _loadedChatId != startedIn)
+            {
+                // The page moved on while this was in flight: to another stored chat, to a fresh "/", or
+                // off the route entirely (Dispose below cancels _cts, but ChatTurnService can still return
+                // an ordinary — if apologetic — result rather than throw, so this continuation still runs
+                // against a torn-down or repurposed instance). The turn landed on disk under its own
+                // ChatId regardless; that is ChatTurnService's job, not this method's. Appending it here
+                // would mix one conversation's messages into whatever is on screen now, and navigating
+                // would drag the user back into a chat — or off a route — they already left. Reopening the
+                // chat this send belonged to shows the answer, because it is on disk either way.
+                return;
+            }
 
             _messages.Add(turn.UserMessage);
             _messages.Add(turn.AssistantMessage);
@@ -153,14 +186,18 @@
         }
         catch (OperationCanceledException)
         {
-            // The user pressed stop. The question is already on disk (ChatTurnService writes it first),
-            // so nothing is lost; the answer simply never arrived. Reloading the chat is what shows the
-            // question again, which is honest about what happened.
+            // ChatTurnService now converts a cancellation during the model call or the query execution
+            // into an ordinary ChatTurnResult carrying execution_canceled, specifically so a stop click
+            // never orphans the chat row it already wrote — see ChatTurnService.AnswerAsync. What can
+            // still throw here is a cancellation that lands even earlier, before that row exists at all:
+            // while attachments are still being resolved, or while the chat/question themselves are being
+            // written. Nothing is on disk yet in that case, so there is nothing to reconcile — the send is
+            // simply abandoned.
         }
         finally
         {
             _busy = false;
-            _cts.Dispose();
+            _cts?.Dispose();
             _cts = null;
         }
     }
@@ -174,5 +211,14 @@
         Nav.NavigateTo("/sql");
     }
 
-    public void Dispose() => State.ConnectionsChanged -= OnConnectionsChanged;
+    public void Dispose()
+    {
+        _disposed = true;
+        // Leaving the page entirely (a route with a different component, e.g. /sql) does not change
+        // _loadedChatId — there is no re-parameterization to detect that here, unlike navigating between
+        // "/" and "/chat/{Id}". Cancelling lets ChatTurnService's own cancellation handling shorten the
+        // in-flight call instead of it running to completion in the background against a disposed page.
+        _cts?.Cancel();
+        State.ConnectionsChanged -= OnConnectionsChanged;
+    }
 }

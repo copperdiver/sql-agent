@@ -183,6 +183,34 @@ public class ChatTurnServiceTests : IDisposable
         Assert.Equal("execution_canceled", reloaded.Messages[1].ErrorCode);
     }
 
+    [Fact]
+    public async Task A_cancellation_while_the_model_is_still_generating_still_leaves_a_question_and_a_canceled_turn_on_disk()
+    {
+        // Unlike the query-execution path above, NlQueryService does NOT swallow a cancellation that
+        // happens while the model is still being asked — it rethrows (see its own
+        // `catch (OperationCanceledException) { throw; }`). Before this fix that exception passed
+        // straight through ChatTurnService and out to the caller: the chat row and the question were
+        // already on disk, but the caller never got a ChatId back, so it could not navigate to the
+        // conversation, could not tell the sidebar, and the next send created a second chat. This is the
+        // path stopping on the very first message of a new chat takes.
+        var id = await NewConnectionAsync("prod");
+        _gateway.Block = true;
+
+        using var cts = new CancellationTokenSource();
+        cts.CancelAfter(TimeSpan.FromMilliseconds(100));
+
+        var turn = await _turns.SendAsync(null, "orders", [id], cts.Token);
+
+        Assert.Equal("execution_canceled", turn.AssistantMessage.ErrorCode);
+        Assert.Null(turn.Live);
+        var reloaded = await _chats.GetChatAsync(turn.ChatId);
+        Assert.Equal(2, reloaded!.Messages.Count);
+        Assert.Equal(ChatRole.User, reloaded.Messages[0].Role);
+        Assert.Equal("orders", reloaded.Messages[0].Text);
+        Assert.Equal(ChatRole.Assistant, reloaded.Messages[1].Role);
+        Assert.Equal("execution_canceled", reloaded.Messages[1].ErrorCode);
+    }
+
     private async Task<Guid> NewConnectionAsync(string name) =>
         (await _connections.CreateAsync(
             new DatabaseConnectionInput(name, DatabaseProviderType.Postgres, IsReadOnly: true), "cs")).Id;
@@ -194,18 +222,22 @@ public class ChatTurnServiceTests : IDisposable
     }
 }
 
-/// <summary>Gateway double: a canned response, or an exception thrown from the call.</summary>
+/// <summary>Gateway double: a canned response, an exception thrown from the call, or a hang on the
+/// supplied token (<see cref="Block"/>) so the cancel-while-generating path can be driven the same way
+/// <see cref="TurnProviderStub.Block"/> drives cancel-while-executing.</summary>
 sealed class TurnGatewayStub : ILlmSqlGateway
 {
     public LlmSqlResponse? NextResponse { get; set; }
     public Exception? Throw { get; set; }
+    public bool Block { get; set; }
     public int CallCount { get; private set; }
 
-    public Task<LlmSqlResponse> GenerateSqlAsync(LlmSqlRequest request, CancellationToken ct = default)
+    public async Task<LlmSqlResponse> GenerateSqlAsync(LlmSqlRequest request, CancellationToken ct = default)
     {
         CallCount++;
+        if (Block) await Task.Delay(Timeout.Infinite, ct);
         if (Throw is { } ex) throw ex;
-        return Task.FromResult(NextResponse ?? LlmSqlResponse.Generated("SELECT 1"));
+        return NextResponse ?? LlmSqlResponse.Generated("SELECT 1");
     }
 }
 

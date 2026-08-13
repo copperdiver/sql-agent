@@ -65,7 +65,24 @@ public class ChatTurnService(
             case 1:
                 // The ordinary path: NlQueryService applies policy, executes through the same
                 // QueryExecutionService every other surface uses, and audits the run.
-                var result = await nlQueries.AskAsync(databaseIds[0], question, ct);
+                NlQueryResult result;
+                try
+                {
+                    result = await nlQueries.AskAsync(databaseIds[0], question, ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Cancelled before QueryExecutionService's own graceful handling could even apply —
+                    // while the schema was being read, or while the model was still generating SQL
+                    // (NlQueryService rethrows OperationCanceledException there rather than swallowing
+                    // it, unlike the execute step below). The chat row and the question are already on
+                    // disk; a bare exception here would leave both orphaned, with no id for the page to
+                    // navigate to and no record of what happened. CancellationToken.None for the same
+                    // reason as the graceful path below: the work already stopped, and the record of
+                    // that must not be lost to the very token that ended it.
+                    return (null, await SaveErrorAsync(chat, "execution_canceled",
+                        "The request was canceled.", CancellationToken.None));
+                }
 
                 // ct may already be tripped here even though `result` came back gracefully:
                 // QueryExecutionService deliberately catches OperationCanceledException and converts it
