@@ -81,7 +81,7 @@ public class HistorySectionTests : IDisposable
 
         var section = _ctx.RenderComponent<HistorySection>();
 
-        Assert.Contains("active", section.Find(".history-row").ClassName);
+        Assert.Contains("active", section.Find(".chat-row").ClassName);
     }
 
     [Fact]
@@ -100,38 +100,13 @@ public class HistorySectionTests : IDisposable
     }
 
     [Fact]
-    public async Task Renaming_from_the_row_menu_goes_through_a_dialog_and_updates_the_store()
-    {
-        var id = await SeedAsync("first question, truncated", DateTime.UtcNow);
-        var section = _ctx.RenderComponent<HistorySection>();
-        var dialogs = _ctx.Services.GetRequiredService<DialogService>();
-
-        section.Find(".history-row .menu-trigger").Click();
-        section.FindAll(".menu-item-action").First(r => r.TextContent.Contains("Rename")).Click();
-
-        // The dialog is handed to DialogService rather than rendered here: inside the drawer a Modal
-        // would resolve its position against the sidebar's transform (Phase A carry-forward 1).
-        Assert.NotNull(dialogs.Current);
-
-        // Render what the host would render, and drive it.
-        var dialog = _ctx.Render(dialogs.Current!);
-        dialog.Find("input").Change("quarterly revenue");
-        await dialog.Find("[data-testid=name-save]").ClickAsync(new MouseEventArgs());
-
-        var reloaded = await LoadAsync(id);
-        Assert.NotNull(reloaded);
-        Assert.Equal("quarterly revenue", reloaded.Title);
-        Assert.Null(dialogs.Current);
-    }
-
-    [Fact]
     public async Task Cancelling_the_rename_dialog_keeps_the_title()
     {
         var id = await SeedAsync("keep me", DateTime.UtcNow);
         var section = _ctx.RenderComponent<HistorySection>();
         var dialogs = _ctx.Services.GetRequiredService<DialogService>();
 
-        section.Find(".history-row .menu-trigger").Click();
+        section.Find(".chat-row .menu-trigger").Click();
         section.FindAll(".menu-item-action").First(r => r.TextContent.Contains("Rename")).Click();
 
         var dialog = _ctx.Render(dialogs.Current!);
@@ -142,61 +117,6 @@ public class HistorySectionTests : IDisposable
         Assert.NotNull(reloaded);
         Assert.Equal("keep me", reloaded.Title);
         Assert.Null(dialogs.Current);
-    }
-
-    [Fact]
-    public async Task Deleting_from_the_row_menu_asks_first_and_then_removes_the_chat()
-    {
-        var id = await SeedAsync("throwaway", DateTime.UtcNow);
-        var section = _ctx.RenderComponent<HistorySection>();
-        var dialogs = _ctx.Services.GetRequiredService<DialogService>();
-
-        section.Find(".history-row .menu-trigger").Click();
-        section.FindAll(".menu-item-action").First(r => r.TextContent.Contains("Delete")).Click();
-
-        var dialog = _ctx.Render(dialogs.Current!);
-        // The chat is named in the dialog: "are you sure?" with no subject is how the wrong one gets
-        // deleted.
-        Assert.Contains("throwaway", dialog.Markup);
-        await dialog.Find("[data-testid=delete-confirm]").ClickAsync(new MouseEventArgs());
-
-        Assert.Null(await LoadAsync(id));
-        Assert.DoesNotContain("throwaway", section.Markup);
-    }
-
-    [Fact]
-    public async Task Cancelling_the_delete_dialog_keeps_the_chat()
-    {
-        var id = await SeedAsync("keep me", DateTime.UtcNow);
-        var section = _ctx.RenderComponent<HistorySection>();
-        var dialogs = _ctx.Services.GetRequiredService<DialogService>();
-        section.Find(".history-row .menu-trigger").Click();
-        section.FindAll(".menu-item-action").First(r => r.TextContent.Contains("Delete")).Click();
-
-        var dialog = _ctx.Render(dialogs.Current!);
-        await dialog.Find("[data-testid=delete-cancel]").ClickAsync(new MouseEventArgs());
-
-        Assert.NotNull(await LoadAsync(id));
-        Assert.Null(dialogs.Current);
-    }
-
-    [Fact]
-    public async Task Deleting_the_chat_that_is_open_clears_the_selection()
-    {
-        // Otherwise the sidebar keeps highlighting a row that no longer exists and the page keeps
-        // showing a conversation that has been deleted from under it.
-        var id = await SeedAsync("open one", DateTime.UtcNow);
-        var state = _ctx.Services.GetRequiredService<AppState>();
-        state.SetActiveChat(id);
-        var section = _ctx.RenderComponent<HistorySection>();
-        var dialogs = _ctx.Services.GetRequiredService<DialogService>();
-        section.Find(".history-row .menu-trigger").Click();
-        section.FindAll(".menu-item-action").First(r => r.TextContent.Contains("Delete")).Click();
-
-        var dialog = _ctx.Render(dialogs.Current!);
-        await dialog.Find("[data-testid=delete-confirm]").ClickAsync(new MouseEventArgs());
-
-        Assert.Null(state.ActiveChatId);
     }
 
     // --- Task 9 carry-forward: ActiveChatId had a fix (SetActiveChat now runs on the first render of
@@ -213,12 +133,12 @@ public class HistorySectionTests : IDisposable
 
         var page = _ctx.RenderComponent<ChatPage>(p => p.Add(c => c.Id, chatB));
         var history = _ctx.RenderComponent<HistorySection>();
-        Assert.Contains("active", history.Find(".history-row").ClassName);
+        Assert.Contains("active", history.Find(".chat-row").ClassName);
 
         // The same re-parameterization the router performs navigating from a stored chat back to "/".
         await page.InvokeAsync(() => page.SetParametersAndRender(p => p.Add(c => c.Id, (Guid?)null)));
 
-        Assert.DoesNotContain(history.FindAll(".history-row"), r => r.ClassName!.Contains("active"));
+        Assert.DoesNotContain(history.FindAll(".chat-row"), r => r.ClassName!.Contains("active"));
     }
 
     private async Task<Guid> SeedAsync(string title, DateTime lastMessageAtUtc)

@@ -1,0 +1,64 @@
+@inject ScopedRunner Runner
+@inject AppState State
+@inject DialogService Dialogs
+@inject NavigationManager Nav
+
+<div class="chat-row @(Active ? "active" : "")">
+    @* Open() rather than an inline lambda: the URL is a string literal inside a Razor attribute, which
+       needs escaping the parser handles badly. *@
+    <button type="button" class="ghost chat-row-open truncate" @onclick="Open">@Chat.Title</button>
+    <Menu Placement="MenuPlacement.Bottom">
+        <Trigger>
+            <Icon Name="more-vertical" Size="16" />
+            <span class="sr-only">@($"Actions for {Chat.Title}")</span>
+        </Trigger>
+        <ChildContent>
+            <MenuItem Icon="pencil" OnClick="ShowRename">Rename</MenuItem>
+            <MenuItem Icon="trash" Danger="true" OnClick="ShowDelete">Delete</MenuItem>
+        </ChildContent>
+    </Menu>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ChatSummary Chat { get; set; } = default!;
+
+    /// <summary>Whether this is the conversation on screen. A parameter rather than a read of AppState
+    /// here: a child that reads circuit state directly can be skipped by the renderer's diff when its own
+    /// parameters have not changed, which strands the highlight on the chat the user just left.</summary>
+    [Parameter] public bool Active { get; set; }
+
+    private void Open() => Nav.NavigateTo($"/chat/{Chat.Id}");
+
+    // The dialogs are handed to DialogService, which renders them from MainLayout. Rendering one here
+    // would put a position:fixed element inside the sidebar, and below 1024px the sidebar's transform
+    // makes it the containing block — the dialog would centre on the drawer and ride off-screen with it.
+    private void ShowRename() => Dialogs.Show(
+        @<NameDialog Title="Rename chat" Label="Title" InitialValue="@Chat.Title"
+                     OnSave="RenameAsync" OnCancel="Dialogs.Close" />);
+
+    private void ShowDelete() => Dialogs.Show(
+        @<ChatDeleteDialog Chat="Chat" OnConfirm="DeleteAsync" OnCancel="Dialogs.Close" />);
+
+    private async Task RenameAsync(string title)
+    {
+        await Runner.RunAsync<ChatService, bool>(s => s.RenameChatAsync(Chat.Id, title));
+        Dialogs.Close();
+        // This row does not know which section is rendering it. Announcing through AppState is what makes
+        // the history list and every project reload themselves without the row referencing either.
+        State.NotifyChatsChanged();
+    }
+
+    private async Task DeleteAsync()
+    {
+        await Runner.RunAsync<ChatService, bool>(s => s.DeleteChatAsync(Chat.Id));
+        Dialogs.Close();
+        // Clearing the selection first: leaving it set would keep highlighting a row that no longer
+        // exists, and the page would keep showing a conversation deleted out from under it.
+        if (State.ActiveChatId == Chat.Id)
+        {
+            State.SetActiveChat(null);
+            Nav.NavigateTo("/");
+        }
+        State.NotifyChatsChanged();
+    }
+}
