@@ -21,8 +21,19 @@ public class SidebarCollapseParityTests
     [Fact]
     public void The_pre_paint_and_circuit_collapsed_rules_style_the_same_targets_the_same_way()
     {
-        var prePaint = PrePaintRules();
-        var circuit = CircuitRules();
+        var prePaintCss = File.ReadAllText(RepoPaths.Find("src/SqlAgent.Host/wwwroot/css/app.css"));
+        var circuitCss = File.ReadAllText(RepoPaths.Find("src/SqlAgent.Host/Components/Layout/Sidebar.razor.css"));
+
+        // RulesIn below extracts "selector { declarations }" pairs by brace matching alone -- its regex
+        // cannot match an @media wrapper, so it necessarily flattens every rule out of whatever media
+        // query contains it. That means two rules with identical selector and declaration text compare
+        // equal even if one sheet applies them at 1024px and the other at 768px, which is exactly the
+        // "renders one width and then snaps to another" defect this file exists to catch. The two
+        // sheets' shared breakpoint is therefore compared directly, not inferred from rule content.
+        Assert.Equal(WideBlock(circuitCss).Breakpoint, WideBlock(prePaintCss).Breakpoint);
+
+        var prePaint = PrePaintRules(prePaintCss);
+        var circuit = CircuitRules(circuitCss);
 
         Assert.NotEmpty(prePaint);
         Assert.Equal(circuit.Keys.OrderBy(k => k, StringComparer.Ordinal),
@@ -36,19 +47,26 @@ public class SidebarCollapseParityTests
     {
         // "html.sidebar-collapsed .nav-label" hides every .nav-label on the page, not just the ones in
         // the sidebar. Nothing else uses that class today, which is exactly why an unscoped selector
-        // would sit here undetected until something did.
+        // would sit here undetected until something did. Each selector LIST is split member-by-member
+        // (the same way Normalize splits them below) before the check runs: a four-selector rule with
+        // one anchored member and three bare ones would otherwise satisfy Assert.Contains on the joined
+        // text and let the other three through unanchored.
         var css = File.ReadAllText(RepoPaths.Find("src/SqlAgent.Host/wwwroot/css/app.css"));
 
-        foreach (var selector in Selectors(css).Where(s => s.Contains("html.sidebar-collapsed")))
-            Assert.Contains(".app aside.sidebar", selector);
+        foreach (var selectorList in Selectors(css).Where(s => s.Contains("html.sidebar-collapsed")))
+            foreach (var selector in selectorList.Split(','))
+                Assert.Contains(".app aside.sidebar", selector.Trim());
     }
 
     /// <summary>Target-to-declarations for the wide-viewport collapsed rules in app.css, with the
-    /// "html.sidebar-collapsed .app aside.sidebar" prefix stripped so the two sheets compare.</summary>
-    private static Dictionary<string, string> PrePaintRules()
+    /// "html.sidebar-collapsed .app aside.sidebar" prefix stripped so the two sheets compare. Scanning
+    /// only the wide-viewport block (not the whole file) is what lets the breakpoint check above matter:
+    /// otherwise a rule moved to a different @media query, or hoisted out of one entirely, would still
+    /// be found by marker text alone.</summary>
+    private static Dictionary<string, string> PrePaintRules(string css)
     {
-        var css = File.ReadAllText(RepoPaths.Find("src/SqlAgent.Host/wwwroot/css/app.css"));
-        return Normalize(RulesIn(css, "html.sidebar-collapsed"),
+        var (_, wide) = WideBlock(css);
+        return Normalize(RulesIn(wide, "html.sidebar-collapsed"),
             ["html.sidebar-collapsed .app aside.sidebar", "html.sidebar-collapsed"]);
     }
 
@@ -56,12 +74,24 @@ public class SidebarCollapseParityTests
     /// unconditional ".sidebar.collapsed" rule plus everything inside the wide-viewport media query. The
     /// narrow block is deliberately excluded — it undoes the collapse for the drawer, and the pre-paint
     /// sheet has no counterpart because it is guarded to wide viewports too.</summary>
-    private static Dictionary<string, string> CircuitRules()
+    private static Dictionary<string, string> CircuitRules(string css)
     {
-        var css = File.ReadAllText(RepoPaths.Find("src/SqlAgent.Host/Components/Layout/Sidebar.razor.css"));
         var narrow = Block(css, "@media (max-width: 1023px)");
-        var withoutNarrow = css.Replace(narrow, "");
-        return Normalize(RulesIn(withoutNarrow, ".sidebar.collapsed"), [".sidebar.collapsed", "::deep"]);
+        var (_, wide) = WideBlock(css);
+        var unconditional = css.Replace(narrow, "").Replace(wide, "");
+        return Normalize(
+            RulesIn(unconditional, ".sidebar.collapsed").Concat(RulesIn(wide, ".sidebar.collapsed")).ToList(),
+            [".sidebar.collapsed", "::deep"]);
+    }
+
+    /// <summary>Finds the sheet's single "@media (min-width: ...)" rule and returns both the breakpoint
+    /// number (for the cross-sheet check above) and its block content (so RulesIn only ever sees rules
+    /// that actually live at that breakpoint).</summary>
+    private static (string Breakpoint, string Block) WideBlock(string css)
+    {
+        var match = Regex.Match(css, @"@media \(min-width:\s*(\d+)px\)");
+        Assert.True(match.Success, "Expected an @media (min-width: ...) rule.");
+        return (match.Groups[1].Value, Block(css, match.Value));
     }
 
     /// <summary>Every "selector { declarations }" pair whose selector mentions <paramref name="marker"/>.</summary>

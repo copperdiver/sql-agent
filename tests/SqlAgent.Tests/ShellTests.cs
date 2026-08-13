@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Bunit;
 using Bunit.TestDoubles;
 using Microsoft.AspNetCore.Components;
@@ -442,8 +443,10 @@ public class ShellTests : IDisposable
 
         sidebar.Find(".sidebar-scrim").Click();
 
-        Assert.True(FocusInvocationCount() > afterOpen,
-            "Closing the drawer must move focus back to the trigger.");
+        // Exactly one more, not merely "more than before": a regression that never clears
+        // _focusTriggerPending and re-focuses on every subsequent render would satisfy a bare ">"
+        // assertion. The pending flag exists specifically to make this a once-only move.
+        Assert.Equal(afterOpen + 1, FocusInvocationCount());
     }
 
     [Fact]
@@ -555,6 +558,13 @@ public class ShellTests : IDisposable
     /// made of nested rule blocks, so the first "}" encountered would close only the first nested rule.</summary>
     private static string ExtractBlock(string css, string selector)
     {
+        // Comments are stripped before searching, not after: A_closed_drawer_is_out_of_the_tab_order_
+        // below_1024px pins a "visibility: hidden" declaration, and the explanatory comment right above
+        // that declaration in Sidebar.razor.css contains that exact phrase in prose. Without stripping,
+        // Assert.Contains("visibility: hidden", block) is satisfied by the comment alone and the
+        // assertion would still pass with the declaration deleted -- pinning documentation, not the
+        // rule. SidebarCollapseParityTests.StripComments exists for the identical reason.
+        css = StripComments(css);
         var start = css.IndexOf(selector, StringComparison.Ordinal);
         Assert.True(start >= 0, $"Expected to find '{selector}' in the stylesheet.");
         var open = css.IndexOf('{', start);
@@ -567,6 +577,9 @@ public class ShellTests : IDisposable
         }
         return css[(open + 1)..i];
     }
+
+    private static string StripComments(string css) =>
+        Regex.Replace(css, @"/\*.*?\*/", "", RegexOptions.Singleline);
 
     public void Dispose()
     {
