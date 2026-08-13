@@ -3487,3 +3487,59 @@ before applying pending migrations, and walking B1's manual checklist), the `IsS
 match, the redundant attachment index, the composer's per-keystroke round trip, `DialogService.Show`
 replacing without a signal, the schema fingerprint's blind spots, and the empty-chat leak on a cancelled
 first turn.
+
+---
+
+## Carried forward from Phase B2
+
+Findings the reviews raised and Phase B2 consciously did not fix. Every task was
+reviewed; every Critical and Important finding was fixed. These are what remained.
+
+**Needs a decision before it is work.**
+
+| Item | Why it is open |
+|---|---|
+| **Copy the store before applying pending migrations** — still open from B1. B2 made it sharper: this phase's migration adds a foreign key to `Chats`, which forces SQLite to rebuild the table under a cascade from `ChatMessages`. A test now proves that path preserves messages, but only for the migration that exists. A `.bak` written when `GetPendingMigrationsAsync()` is non-empty turns "a migration that succeeded and was wrong" from unrecoverable into a file rename. | New behaviour, not a defect fix. Recommended twice now. |
+| **Neither phase's manual checklist has been walked.** B1 left eleven rows, B2 added seven more, including the two that exist because focus broke twice. No agent can walk them. | No one at the screen. |
+| **`launch-url.txt` and `sqlagent.db` are not in `.gitignore`.** A review run left both in `src/SqlAgent.Host/`; they were deleted. `launch-url.txt` holds a launch token, so the gap is one careless `git add -A` away from committing a live secret. | Noticed after the review gate; not added unreviewed. |
+
+**Correctness, in rough order of how likely anyone is to meet them.**
+
+| Area | Item |
+|---|---|
+| Dialogs | Re-showing `NameDialog` with a "name already taken" error reuses the component, so `firstRender` is false and focus does not return to the field. The user must click back into it to correct the name — the same class of defect this phase fixed twice, in the one path that survived. |
+| Projects | A project deleted, or a chat moved, from a second tab between the read and the write surfaces as an uncaught `DbUpdateException` rather than `false`. Fail-closed and orphan-free thanks to `Restrict`, but the user sees Blazor's generic circuit banner. |
+| Search | An unrelated `ChatsChanged` already in flight can consume the project-expand request before its own reload runs, so the project silently does not open that once. |
+| Shortcuts | If `unbind`'s interop call fails while the circuit is alive, the document listener stays bound to a disposed reference until the next page load, silently no-opping. `bind` now unbinds first, which covers the common half. |
+| Shortcuts | No `e.repeat` check: a held key re-invokes per OS repeat tick. Idempotent, wasteful. |
+
+**Efficiency and tidiness.**
+
+| Area | Item |
+|---|---|
+| Projects | `ListProjectsAsync` and `ListChatsInProjectAsync` are unbounded where `ListHistoryAsync` caps at 200; `ReloadAsync` fetches chats once per expanded project, sequentially; `Project.UpdatedAt` is written by two paths and read by none. |
+| Search | `SearchDialog` calls `_hits.IndexOf(hit)` inside its render loop — O(n²) over record equality, capped at 200 hits. A flattened loop with a counter would also be immune to two value-equal hits collapsing onto one index. |
+| State | `AppState.RequestProjectExpanded` reuses `ChatsChanged`, so every project search hit makes the history section re-query for an event that cannot change it. |
+| Tests | The icon scan's second pattern matches any attribute named `Icon`, not only forwarding components; a guarded class moved into a `class="@(…)"` expression stops being checked silently; a `::deep` rule compiles into the parent's scoped file, so adding such a class to the guarded list would report a false unreachable. |
+
+**Still carried from B1**, unchanged: `IsSequenceCollision` matching an English SQLite
+message substring, the redundant attachment index, the composer's per-keystroke round
+trip, `DialogService.Show` replacing without signalling the displaced dialog, the schema
+fingerprint's blind spots (foreign keys, `CHECK`, `COLLATE`, partial-index predicates),
+and the empty-chat row a cancellation can leave between `CreateChatAsync` committing and
+the user message's save.
+
+### One lesson for C
+
+**Focus is not reviewable by reading.** This phase wrote three separate claims about
+focus ordering into three files. Each was plausible, each was written by someone
+reasoning carefully from the framework's documented behaviour, and each was wrong — the
+second one reintroduced, in the fix wave, the exact defect the first one had just fixed.
+All three were caught the same way: someone built the branch, opened a browser, and
+looked at `document.activeElement`.
+
+The suite is at 478 tests and not one of them can see focus. So when a change touches
+focus, the browser is the test — and the finding belongs in the manual checklist with a
+sentence saying why no automated test replaces it. Phase A's retrospective already said
+bUnit cannot see what breaks most often here; this phase is the proof, and the cost of
+relearning it was two review rounds and a reintroduced Critical.
