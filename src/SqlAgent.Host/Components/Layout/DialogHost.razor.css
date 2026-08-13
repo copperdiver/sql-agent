@@ -1,0 +1,3 @@
+/* Nothing of its own: the dialog inside brings its own scrim and panel (Modal.razor.css). This file
+   exists so the component has a stylesheet like every other one, and so a later phase has somewhere to
+   put stacking rules if a second host is ever needed. */

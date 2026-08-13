@@ -54,6 +54,14 @@ public class UiPrimitiveTests
     [InlineData("message-square")]
     [InlineData("chevron-down")]
     [InlineData("x")]
+    [InlineData("plus")]
+    [InlineData("terminal")]
+    [InlineData("paperclip")]
+    [InlineData("more-vertical")]
+    [InlineData("pencil")]
+    [InlineData("trash")]
+    [InlineData("arrow-up")]
+    [InlineData("square")]
     public void The_icons_the_shell_needs_all_exist(string name)
     {
         // The shell references these by string, so a missing one is invisible until someone opens the
@@ -71,6 +79,7 @@ public class UiPrimitiveTests
         {
             "panel-left", "menu", "sun", "moon", "monitor", "settings",
             "info", "database", "message-square", "chevron-down", "x",
+            "plus", "terminal", "paperclip", "more-vertical", "pencil", "trash", "arrow-up", "square",
         };
 
         Assert.Equal(rendered.OrderBy(n => n, StringComparer.Ordinal), Icon.Names.OrderBy(n => n, StringComparer.Ordinal));
