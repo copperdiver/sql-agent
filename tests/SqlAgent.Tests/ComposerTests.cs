@@ -100,6 +100,28 @@ public class ComposerTests
     }
 
     [Fact]
+    public void A_chip_for_a_deleted_connection_renders_and_removes_like_any_other()
+    {
+        // ConnectionId is null when the connection behind an attachment has been deleted; the id, never
+        // the name, is what proves a connection still exists. Nothing in AttachmentChips reads the id
+        // today, but pinning this here means a future change that starts keying chip identity off it
+        // fails loudly instead of silently dropping the attachment from a reloaded transcript.
+        using var ctx = NewContext();
+        var removed = default(ChatDatabaseRef);
+        var attached = new List<ChatDatabaseRef> { new(null, "deleted-connection") };
+
+        var chips = ctx.RenderComponent<AttachmentChips>(p => p
+            .Add(c => c.Databases, attached)
+            .Add(c => c.OnRemove, EventCallback.Factory.Create<ChatDatabaseRef>(
+                new object(), d => removed = d)));
+
+        Assert.Single(chips.FindAll(".chip"));
+        chips.Find(".chip-remove").Click();
+
+        Assert.Equal("deleted-connection", removed!.Name);
+    }
+
+    [Fact]
     public void Chips_on_a_sent_message_carry_no_remove_button()
     {
         // A sent message's attachments are history. Offering an × on them would imply the record can be

@@ -11,7 +11,12 @@ window.sqlAgentComposer = {
       // Korean) also raises Enter to accept a candidate; isComposing tells that apart from a send.
       if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
       e.preventDefault();
-      dotNetRef.invokeMethodAsync('SendFromEditor');
+      // .catch() swallows a rejection from calling into a DotNetObjectReference that was disposed after
+      // this key handler fired but before invokeMethodAsync's message reached .NET (a stray keystroke
+      // racing a tab switch or a dropped circuit, for instance) — without it, that shows up as an
+      // unhandled promise rejection in the browser console for something the user can't do anything
+      // about. Same reasoning as sql-editor.js's Ctrl-Enter handler.
+      dotNetRef.invokeMethodAsync('SendFromEditor').catch(() => {});
     };
 
     const onInput = function () {

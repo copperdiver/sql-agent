@@ -89,16 +89,27 @@
 
     public async ValueTask DisposeAsync()
     {
-        try
+        // Guarded on _self, exactly as SqlEditor.DisposeAsync guards its own JS call: _self is set only
+        // once OnAfterRenderAsync has run, so if disposal happens first (unmounted before its first
+        // render completed), the textarea was never bound and the call would be wasted at best, or throw
+        // into the catch below at worst.
+        if (_self is not null)
         {
-            await JS.InvokeVoidAsync("sqlAgentComposer.unbind", _textarea);
+            try
+            {
+                await JS.InvokeVoidAsync("sqlAgentComposer.unbind", _textarea);
+            }
+            catch (Exception ex) when (ex is JSException or JSDisconnectedException or OperationCanceledException)
+            {
+                // Teardown during a circuit that is already gone is the ordinary case here, not a fault.
+                Logger.Log(ex is JSException ? LogLevel.Warning : LogLevel.Debug, ex,
+                    "sqlAgentComposer.unbind failed.");
+            }
+            finally
+            {
+                _self.Dispose();
+                _self = null;
+            }
         }
-        catch (Exception ex) when (ex is JSException or JSDisconnectedException or OperationCanceledException)
-        {
-            // Teardown during a circuit that is already gone is the ordinary case here, not a fault.
-            Logger.Log(ex is JSException ? LogLevel.Warning : LogLevel.Debug, ex,
-                "sqlAgentComposer.unbind failed.");
-        }
-        _self?.Dispose();
     }
 }
