@@ -1,6 +1,7 @@
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.JSInterop;
 using SqlAgent.Host.Components.Shared.Chat;
 using SqlAgent.Host.Web;
 
@@ -15,6 +16,10 @@ public class NameDialogTests
         // begin by retyping the whole name.
         using var ctx = new Bunit.TestContext();
         ctx.Services.AddScoped<ShortcutService>();
+        // NameDialog now asks Modal to focus its input on open (a real JS interop call, replacing the
+        // autofocus attribute Modal used to render) rather than something bUnit's default strict interop
+        // mode allows through unconfigured.
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
 
         var dialog = ctx.RenderComponent<NameDialog>(p => p
             .Add(d => d.Title, "Rename chat")
@@ -29,6 +34,10 @@ public class NameDialogTests
     {
         using var ctx = new Bunit.TestContext();
         ctx.Services.AddScoped<ShortcutService>();
+        // NameDialog now asks Modal to focus its input on open (a real JS interop call, replacing the
+        // autofocus attribute Modal used to render) rather than something bUnit's default strict interop
+        // mode allows through unconfigured.
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
         var saved = "";
 
         var dialog = ctx.RenderComponent<NameDialog>(p => p
@@ -48,6 +57,10 @@ public class NameDialogTests
         // shows something the user did not type reads as a bug rather than as a default.
         using var ctx = new Bunit.TestContext();
         ctx.Services.AddScoped<ShortcutService>();
+        // NameDialog now asks Modal to focus its input on open (a real JS interop call, replacing the
+        // autofocus attribute Modal used to render) rather than something bUnit's default strict interop
+        // mode allows through unconfigured.
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
 
         var dialog = ctx.RenderComponent<NameDialog>(p => p
             .Add(d => d.Title, "New project")
@@ -67,6 +80,10 @@ public class NameDialogTests
     {
         using var ctx = new Bunit.TestContext();
         ctx.Services.AddScoped<ShortcutService>();
+        // NameDialog now asks Modal to focus its input on open (a real JS interop call, replacing the
+        // autofocus attribute Modal used to render) rather than something bUnit's default strict interop
+        // mode allows through unconfigured.
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
         var saves = 0;
         var cancels = 0;
 
@@ -88,6 +105,10 @@ public class NameDialogTests
         // "Save" is right for a rename and wrong for a creation. One dialog, two verbs.
         using var ctx = new Bunit.TestContext();
         ctx.Services.AddScoped<ShortcutService>();
+        // NameDialog now asks Modal to focus its input on open (a real JS interop call, replacing the
+        // autofocus attribute Modal used to render) rather than something bUnit's default strict interop
+        // mode allows through unconfigured.
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
 
         var dialog = ctx.RenderComponent<NameDialog>(p => p
             .Add(d => d.Title, "New project")

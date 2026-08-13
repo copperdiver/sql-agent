@@ -44,10 +44,18 @@
             </Menu>
         </div>
 
-        @if (_expanded.Contains(project.Id))
+        @* TryGetValue, not an indexer guarded by _expanded.Contains: ToggleAsync adds to _expanded before
+           awaiting its chat load, and ReloadAsync's TakeProjectToExpand branch does the same before
+           awaiting inside its own loop. ComponentBase calls StateHasChanged() as soon as either handler's
+           task comes back incomplete, so a render can land in that window with the id in _expanded but
+           not yet in _chats -- an indexer throws KeyNotFoundException out of this markup, and the sidebar
+           sits outside WorkArea's ErrorBoundary, so nothing catches it and the circuit goes down. Only
+           Microsoft.Data.Sqlite being synchronous under ToListAsync keeps that window from ever actually
+           landing a render today, which makes the safety a property of the provider, not of this guard. *@
+        @if (_expanded.Contains(project.Id) && _chats.TryGetValue(project.Id, out var chatsInProject))
         {
             <div class="project-chats">
-                @foreach (var chat in _chats[project.Id])
+                @foreach (var chat in chatsInProject)
                 {
                     <ChatRow @key="chat.Id" Chat="chat" CurrentProjectId="project.Id"
                              Active="@(chat.Id == State.ActiveChatId)" />

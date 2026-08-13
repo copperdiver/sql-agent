@@ -1,6 +1,7 @@
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.JSInterop;
 using SqlAgent.Host.Components.Shared.Ui;
 using SqlAgent.Host.Web;
 
@@ -220,6 +221,7 @@ public class UiInteractionTests
     {
         using var ctx = new Bunit.TestContext();
         ctx.Services.AddScoped<ShortcutService>();
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
         var closes = 0;
         var modal = ctx.RenderComponent<Modal>(p => p
             .Add(m => m.Title, "About SQL Agent")
@@ -236,19 +238,28 @@ public class UiInteractionTests
     }
 
     [Fact]
-    public void The_modal_close_button_autofocuses_so_a_real_Escape_keypress_can_reach_the_dialog()
+    public void The_modal_focuses_its_close_button_by_default_so_a_real_Escape_keypress_can_reach_the_dialog()
     {
         // .modal-root's Escape handler only fires via bubbling from whatever element currently has
         // focus. KeyDown() above invokes it directly and would pass even if focus never moved into the
-        // dialog, so it cannot catch a regression here — this test pins the autofocus attribute that
-        // is what actually gets a real Escape keypress to bubble from inside .modal-root at all.
+        // dialog, so it cannot catch a regression here. autofocus cannot do this job at all: a browser
+        // only honors it while the document's focused area is still <body> at insertion time, never true
+        // for a dialog opened by a click or a keydown (see Sidebar.razor's Chromium-verified note), which
+        // is exactly why this is a real FocusAsync call rather than an autofocus attribute. What actually
+        // closes a dialog with Escape in every browser regardless of focus is ShortcutService's global
+        // EscapePressed subscription (see ShortcutServiceTests) — this focus move only buys the *local*
+        // OnKeyDown path below and the ability to tab straight into the dialog's other controls. bUnit has
+        // no focus model, so this can only prove the interop call was issued, the same limit
+        // SearchDialogTests documents for its own input.
         using var ctx = new Bunit.TestContext();
         ctx.Services.AddScoped<ShortcutService>();
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
         var modal = ctx.RenderComponent<Modal>(p => p
             .Add(m => m.Title, "t")
             .AddChildContent("<p>body</p>"));
 
-        Assert.True(modal.Find(".modal-close").HasAttribute("autofocus"));
+        Assert.NotEqual(0, ctx.JSInterop.Invocations.Count(
+            i => i.Identifier.Contains("focus", StringComparison.OrdinalIgnoreCase)));
     }
 
     [Fact]
@@ -264,6 +275,7 @@ public class UiInteractionTests
         // catch. If someone later nests the panel inside the scrim, this fails immediately.
         using var ctx = new Bunit.TestContext();
         ctx.Services.AddScoped<ShortcutService>();
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
         var modal = ctx.RenderComponent<Modal>(p => p
             .Add(m => m.Title, "t")
             .AddChildContent("<p>body</p>"));
@@ -281,6 +293,7 @@ public class UiInteractionTests
         // every plain modal (About, for one) grows an empty bordered strip.
         using var ctx = new Bunit.TestContext();
         ctx.Services.AddScoped<ShortcutService>();
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
 
         var plain = ctx.RenderComponent<Modal>(p => p
             .Add(m => m.Title, "About")

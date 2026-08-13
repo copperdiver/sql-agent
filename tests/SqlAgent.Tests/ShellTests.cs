@@ -489,6 +489,42 @@ public class ShellTests : IDisposable
     }
 
     [Fact]
+    public void A_global_search_shortcut_does_not_replace_a_dialog_already_open()
+    {
+        // Ctrl/Cmd+K is a document-level shortcut (ShortcutService.SearchRequested), so it fires even
+        // while a rename or another dialog is already open and mid-edit. DialogService.Show()
+        // unconditionally replaces whatever it is holding, so without a guard a half-typed rename (or
+        // the search dialog itself, mid-query) would vanish under a fresh SearchDialog the user never
+        // asked to open. The nav row's own click on Search cannot exercise this: Modal's scrim covers
+        // the whole viewport while a dialog is open, so that click path is never reachable to begin
+        // with -- only the document-level shortcut can land here.
+        var sidebar = _ctx.RenderComponent<Sidebar>();
+        var dialogs = _ctx.Services.GetRequiredService<DialogService>();
+        var shortcuts = _ctx.Services.GetRequiredService<ShortcutService>();
+        RenderFragment other = b => b.AddMarkupContent(0, "<div id=\"other-dialog\">mid-rename</div>");
+        dialogs.Show(other);
+
+        sidebar.InvokeAsync(shortcuts.RaiseSearch);
+
+        Assert.Same(other, dialogs.Current);
+    }
+
+    [Fact]
+    public void A_global_search_shortcut_opens_search_when_nothing_else_is_open()
+    {
+        // The other half of the guard above: it must not swallow the shortcut entirely, only defer to
+        // whatever is already open.
+        var sidebar = _ctx.RenderComponent<Sidebar>();
+        var dialogs = _ctx.Services.GetRequiredService<DialogService>();
+        var shortcuts = _ctx.Services.GetRequiredService<ShortcutService>();
+        Assert.Null(dialogs.Current);
+
+        sidebar.InvokeAsync(shortcuts.RaiseSearch);
+
+        Assert.NotNull(dialogs.Current);
+    }
+
+    [Fact]
     public void Disposing_the_sidebar_unsubscribes_from_navigation_changes()
     {
         var sidebar = _ctx.RenderComponent<Sidebar>();

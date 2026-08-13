@@ -235,7 +235,7 @@ There is no silent cascade: it is the only action here that can destroy a conver
 
 `Ctrl`/`Cmd`+`K` from anywhere, or the Search row in the sidebar. It searches chat titles, message text,
 project names and database names, grouped by kind — chats and messages newest first, projects and
-databases alphabetically, the same order each already appears in elsewhere in the app — and nothing
+databases alphabetically, the same order each already appears elsewhere in the app — and nothing
 else: not SQL text, query results, table or column names, or connection details. Arrow keys move, Enter
 opens, Escape closes.
 
@@ -307,6 +307,7 @@ files under `wwwroot/js/`:
 | Delete a project holding a chat, choosing "keep the chats" | The chat is back in the history list |
 | Search for a term that appears only in a message body | The result shows the surrounding text and opens the chat |
 | Open search with `Ctrl`/`Cmd`+`K`, then again from the Search row, and start typing immediately each time | Characters land in the search input right away; bUnit cannot see this — Task 7's focus fix was found broken only in a real browser |
+| Open **New project** and start typing immediately, with no click into the field first | Characters land in the name field right away; bUnit cannot see this either — Modal's own focus move is JS interop, invisible to any test in this suite the same way the search row above is |
 
 ## Approved scope that was consciously dropped
 

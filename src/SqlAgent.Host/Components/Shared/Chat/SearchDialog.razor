@@ -9,13 +9,14 @@
     <ChildContent>
         @* Enter, the arrows and Escape are handled here rather than by a document listener: focus is in
            this box for the dialog's whole life, so Blazor hears them without any interop.
-           No autofocus here: Modal's own close button already carries one, and per the HTML spec a
-           browser only honors autofocus while the document's focused area is still <body> at insertion
-           time -- never true here, since this dialog is always opened by a click or a keydown, both of
-           which have already moved focus away from body before this input exists. Sidebar.razor documents
-           the identical failure (verified in Chromium, not assumed) and NameDialog has no autofocus on
-           its own field for the same reason. Fixed the same way Sidebar fixes it: an explicit FocusAsync
-           in OnAfterRenderAsync below. *@
+           No autofocus here: per the HTML spec a browser only honors autofocus while the document's
+           focused area is still <body> at insertion time -- never true here, since this dialog is always
+           opened by a click or a keydown, both of which have already moved focus away from body before
+           this input exists. Sidebar.razor documents the identical failure (verified in Chromium, not
+           assumed). Fixed the same way Sidebar fixes it: an explicit FocusAsync in OnAfterRenderAsync
+           below, kept separate from Modal's own InitialFocus default (which would otherwise land on its
+           close button) rather than routed through it -- Modal renders before this component's own
+           OnAfterRenderAsync runs, so this call executes after Modal's default and wins. *@
         <input class="search-input" placeholder="Search chats, projects and databases"
                value="@_term" @oninput="OnTermChanged" @onkeydown="OnKeyDown" @ref="_input" />
 

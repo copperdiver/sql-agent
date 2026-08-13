@@ -34,7 +34,17 @@
 
     private void OnSearchRequested() => InvokeAsync(() => { ShowSearch(); StateHasChanged(); });
 
-    private void ShowSearch() => Dialogs.Show(@<SearchDialog OnClose="Dialogs.Close" />);
+    // Guarded on Current being empty: Ctrl/Cmd+K is a document-level shortcut, so it fires even while a
+    // rename or another dialog is already open and mid-edit, and Show() unconditionally replaces whatever
+    // DialogService is holding. Without this a half-typed rename (or the search dialog itself, mid-query)
+    // vanishes under a fresh SearchDialog for no reason the user asked for. The click that also calls this
+    // method is never actually reachable while a dialog is open -- Modal's scrim covers the whole viewport
+    // at z-index 60 -- so the guard costs that path nothing.
+    private void ShowSearch()
+    {
+        if (Dialogs.Current is not null) return;
+        Dialogs.Show(@<SearchDialog OnClose="Dialogs.Close" />);
+    }
 
     public void Dispose() => Shortcuts.SearchRequested -= OnSearchRequested;
 }
