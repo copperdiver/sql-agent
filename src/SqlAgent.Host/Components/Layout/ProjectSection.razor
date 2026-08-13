@@ -77,6 +77,10 @@
     {
         _projects = await Runner.RunAsync<ProjectService, IReadOnlyList<ProjectSummary>>(
             s => s.ListProjectsAsync());
+
+        if (State.TakeProjectToExpand() is { } requested && _projects.Any(p => p.Id == requested))
+            _expanded.Add(requested);
+
         // Only the open ones, and only the ones that still exist: a project deleted elsewhere must not
         // leave its chats cached under an id nothing renders.
         foreach (var id in _expanded.ToList())

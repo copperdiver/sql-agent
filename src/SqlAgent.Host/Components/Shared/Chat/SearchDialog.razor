@@ -1,0 +1,109 @@
+@inject ScopedRunner Runner
+@inject AppState State
+@inject NavigationManager Nav
+
+<Modal Title="Search" OnClose="OnClose">
+    <ChildContent>
+        @* Enter, the arrows and Escape are handled here rather than by a document listener: focus is in
+           this box for the dialog's whole life, so Blazor hears them without any interop. *@
+        <input class="search-input" placeholder="Search chats, projects and databases"
+               value="@_term" @oninput="OnTermChanged" @onkeydown="OnKeyDown" autofocus />
+
+        @if (_term.Length == 0)
+        {
+            <p class="muted search-hint">Search your chats, their messages, your projects and your databases.</p>
+        }
+        else if (_hits.Count == 0)
+        {
+            <p class="muted search-hint">No matches.</p>
+        }
+        else
+        {
+            @foreach (var group in _hits.GroupBy(h => h.Kind))
+            {
+                <p class="search-heading">@LabelOf(group.Key)</p>
+                @foreach (var hit in group)
+                {
+                    var index = _hits.IndexOf(hit);
+                    <button type="button" data-testid="search-hit"
+                            class="ghost search-hit @(index == _highlighted ? "highlighted" : "")"
+                            @onclick="() => OpenAsync(hit)">
+                        <span class="search-hit-label truncate">@hit.Label</span>
+                        @if (hit.Snippet is { Length: > 0 } snippet)
+                        {
+                            <span class="search-hit-snippet truncate">@snippet</span>
+                        }
+                    </button>
+                }
+            }
+        }
+    </ChildContent>
+</Modal>
+
+@code {
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private string _term = "";
+    private List<SearchHit> _hits = [];
+    private int _highlighted;
+
+    private async Task OnTermChanged(ChangeEventArgs e)
+    {
+        _term = e.Value?.ToString() ?? "";
+        // Queried on every keystroke, deliberately: the store is a local file and the corpus is one
+        // person's history, so an artificial delay would only add drag. SearchService returns early on a
+        // blank term, so clearing the box costs no query at all.
+        _hits = (await Runner.RunAsync<SearchService, IReadOnlyList<SearchHit>>(
+            s => s.SearchAsync(_term))).ToList();
+        _highlighted = 0;
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case "ArrowDown":
+                // Clamped rather than wrapped: a list that jumps from the last row to the first loses the
+                // user's place in a list they are reading top to bottom.
+                _highlighted = Math.Min(_highlighted + 1, Math.Max(_hits.Count - 1, 0));
+                break;
+            case "ArrowUp":
+                _highlighted = Math.Max(_highlighted - 1, 0);
+                break;
+            case "Enter" when _hits.Count > 0:
+                await OpenAsync(_hits[_highlighted]);
+                break;
+            case "Escape":
+                await OnClose.InvokeAsync();
+                break;
+        }
+    }
+
+    private async Task OpenAsync(SearchHit hit)
+    {
+        await OnClose.InvokeAsync();
+        switch (hit.Kind)
+        {
+            case SearchHitKind.Chat:
+            case SearchHitKind.Message:
+                // A message hit carries its chat's id: the chat is what opens, and the snippet in the row
+                // is what explained why it matched.
+                Nav.NavigateTo($"/chat/{hit.TargetId}");
+                break;
+            case SearchHitKind.Project:
+                State.RequestProjectExpanded(hit.TargetId);
+                break;
+            case SearchHitKind.Database:
+                Nav.NavigateTo("/connections");
+                break;
+        }
+    }
+
+    private static string LabelOf(SearchHitKind kind) => kind switch
+    {
+        SearchHitKind.Chat => "Chats",
+        SearchHitKind.Message => "In messages",
+        SearchHitKind.Project => "Projects",
+        _ => "Databases",
+    };
+}

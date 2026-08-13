@@ -16,3 +16,11 @@
 .sidebar-nav ::deep .nav-row:hover { background: var(--background-soft-100); color: var(--title-50); text-decoration: none; }
 .sidebar-nav ::deep .nav-row.active { background: var(--primary-50); color: var(--primary-500); }
 .nav-label { white-space: nowrap; overflow: hidden; }
+
+/* The Search row is a <button>, not an <a>, so it needs the border and background reset the base button
+   style applies and the nav rows do not want. */
+.sidebar-nav ::deep button.nav-row {
+  width: 100%;
+  border: none;
+  background: none;
+}
