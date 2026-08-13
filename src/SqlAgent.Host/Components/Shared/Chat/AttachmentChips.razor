@@ -1,0 +1,29 @@
+@if (Databases.Count > 0)
+{
+    <div class="chips">
+        @foreach (var database in Databases)
+        {
+            <span class="chip" data-database="@database.Name">
+                <Icon Name="database" Size="14" />
+                <span class="chip-name truncate">@database.Name</span>
+                @if (!ReadOnly)
+                {
+                    <button type="button" class="ghost chip-remove"
+                            @onclick="() => OnRemove.InvokeAsync(database)"
+                            aria-label="@($"Detach {database.Name}")">
+                        <Icon Name="x" Size="12" />
+                    </button>
+                }
+            </span>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public IReadOnlyList<ChatDatabaseRef> Databases { get; set; } = [];
+    [Parameter] public EventCallback<ChatDatabaseRef> OnRemove { get; set; }
+
+    /// <summary>True for chips under a message that has already been sent. Those attachments are a
+    /// record, not a choice, so they carry no remove button.</summary>
+    [Parameter] public bool ReadOnly { get; set; }
+}

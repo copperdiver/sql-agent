@@ -1,0 +1,104 @@
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject ILogger<Composer> Logger
+
+<div class="composer">
+    <AttachmentChips Databases="Attached" OnRemove="OnRemoveAttachment" />
+
+    <textarea @ref="_textarea" class="composer-input custom-scroll" rows="1"
+              placeholder="Ask a question about your data"
+              value="@Value"
+              @oninput="OnInput"></textarea>
+
+    <div class="composer-actions">
+        <div class="composer-tools">@Tools</div>
+
+        @if (Busy)
+        {
+            <Spinner Size="14" Label="Waiting for an answer" />
+            <button type="button" class="composer-send" data-testid="stop"
+                    @onclick="OnStop" aria-label="Stop">
+                <Icon Name="square" Size="16" />
+            </button>
+        }
+        else
+        {
+            <button type="button" class="composer-send primary" data-testid="send"
+                    @onclick="OnSend" disabled="@(!CanSend)" aria-label="Send">
+                <Icon Name="arrow-up" Size="16" />
+            </button>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public string Value { get; set; } = "";
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+    [Parameter] public IReadOnlyList<ChatDatabaseRef> Attached { get; set; } = [];
+    [Parameter] public EventCallback<ChatDatabaseRef> OnRemoveAttachment { get; set; }
+
+    /// <summary>The attachment menu, supplied by the page. The composer does not read connections
+    /// itself: it is a leaf component with no service dependencies, which is what keeps it testable
+    /// without a database. Named Tools rather than Menu because a child element named &lt;Menu&gt;
+    /// inside &lt;Composer&gt; also names the Menu UI component, and one of the two readings is a
+    /// silent surprise.</summary>
+    [Parameter] public RenderFragment? Tools { get; set; }
+
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public EventCallback OnSend { get; set; }
+    [Parameter] public EventCallback OnStop { get; set; }
+
+    private ElementReference _textarea;
+    private DotNetObjectReference<Composer>? _self;
+
+    private bool CanSend => !Busy && !string.IsNullOrWhiteSpace(Value);
+
+    private Task OnInput(ChangeEventArgs e) => ValueChanged.InvokeAsync(e.Value?.ToString() ?? "");
+
+    /// <summary>
+    /// Enter without Shift, routed from composer.js. The button's disabled attribute cannot gate this —
+    /// a key handler bypasses it entirely — so the same rule is checked here, exactly as the SQL page
+    /// re-checks its own guard for Ctrl+Enter.
+    /// </summary>
+    [JSInvokable]
+    public async Task SendFromEditor()
+    {
+        if (!CanSend) return;
+        await OnSend.InvokeAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        _self = DotNetObjectReference.Create(this);
+        try
+        {
+            await JS.InvokeVoidAsync("sqlAgentComposer.bind", _textarea, _self);
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or OperationCanceledException)
+        {
+            // Losing the binding costs Enter-to-send and auto-grow; the send button still works, so
+            // there is nothing to recover and nothing worth telling the user. Level split by meaning,
+            // as everywhere else in this project: a JSException means composer.js is missing or threw,
+            // which is a real bug worth clearing the Information default.
+            Logger.Log(ex is JSException ? LogLevel.Warning : LogLevel.Debug, ex,
+                "sqlAgentComposer.bind failed; Enter will insert a newline instead of sending.");
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("sqlAgentComposer.unbind", _textarea);
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or OperationCanceledException)
+        {
+            // Teardown during a circuit that is already gone is the ordinary case here, not a fault.
+            Logger.Log(ex is JSException ? LogLevel.Warning : LogLevel.Debug, ex,
+                "sqlAgentComposer.unbind failed.");
+        }
+        _self?.Dispose();
+    }
+}
