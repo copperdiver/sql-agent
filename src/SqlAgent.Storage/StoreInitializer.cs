@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
@@ -50,11 +51,13 @@ public static class StoreInitializer
         catch (Exception ex)
         {
             // A half-migrated store loses or corrupts data on every subsequent write, so this is fatal by
-            // design (see the spec's decision table). The connection string is logged because the first
-            // question anyone asks is "which store?" — it is a local file path, not a secret; the
-            // database passwords live in ISecretStore and never appear here.
+            // design (see the spec's decision table). Just the file path is logged, not the full
+            // connection string, because the first question anyone asks is "which store?" — DataSource is
+            // that path; ConnectionString can carry other keywords (e.g. a Password=) that have no
+            // business in a log even for a local SQLite file. Database passwords for attached databases
+            // live in ISecretStore and never appear here either way.
             logger.LogError(ex, "The local store at {Store} could not be migrated. The host cannot start.",
-                db.Database.GetDbConnection().ConnectionString);
+                ((SqliteConnection)db.Database.GetDbConnection()).DataSource);
             throw;
         }
     }

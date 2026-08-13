@@ -45,7 +45,11 @@ public class ChatTurnService(
                 : new ChatDatabaseRef(info.Id, info.Name));
         }
 
-        var chat = chatId ?? await chats.CreateChatAsync(ChatService.TitleFrom(question), ct);
+        // CreateChatAsync applies TitleFrom itself, so passing the raw question here (rather than
+        // pre-cutting it) is not a missed step — it is not doing this twice. Kept in CreateChatAsync
+        // specifically because that is the one place no caller can bypass it; RenameChatAsync applies
+        // it too, independently, for the same reason.
+        var chat = chatId ?? await chats.CreateChatAsync(question, ct);
         var userMessage = await chats.AppendMessageAsync(
             new ChatMessageInput(chat, ChatRole.User, question.Trim(), attachments), ct);
 
@@ -59,8 +63,14 @@ public class ChatTurnService(
         switch (databaseIds.Count)
         {
             case 0:
+                // CancellationToken.None, matching the persist call below rather than the token this
+                // method was called with: the question is already on disk (SendAsync wrote it before
+                // this switch ran), and a stop click landing in this exact window would let saving this
+                // answer with the caller's own spent token throw the save away — orphaning the question
+                // with no reply, the outcome this whole service exists to prevent.
                 return (null, await SaveErrorAsync(chat, NoDatabaseAttached,
-                    "Attach a database from the composer's attachment menu, then ask again.", ct));
+                    "Attach a database from the composer's attachment menu, then ask again.",
+                    CancellationToken.None));
 
             case 1:
                 // The ordinary path: NlQueryService applies policy, executes through the same
@@ -97,8 +107,13 @@ public class ChatTurnService(
                 // Today's gateway takes one schema and returns one SQL string. Querying the first
                 // attachment and calling it an answer would misreport what was asked. The model-service
                 // phase replaces this branch with a tool-calling loop.
+                //
+                // CancellationToken.None for the same reason as the zero-database case above: the
+                // question is already written, and persisting this answer with a spent token would
+                // throw the save away and leave it orphaned.
                 return (null, await SaveErrorAsync(chat, MultipleDatabasesUnsupported,
-                    "One database at a time for now — detach the others and ask again.", ct));
+                    "One database at a time for now — detach the others and ask again.",
+                    CancellationToken.None));
         }
     }
 

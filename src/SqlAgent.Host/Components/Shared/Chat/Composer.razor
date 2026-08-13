@@ -52,9 +52,22 @@
     private ElementReference _textarea;
     private DotNetObjectReference<Composer>? _self;
 
+    /// <summary>What the DOM's own height already reflects. Set from two places: here in <see
+    /// cref="OnInput"/>, synchronously, before the value even reaches the parent — composer.js's own
+    /// 'input' listener already resized the box for a keystroke by the time this fires, so the render
+    /// that keystroke eventually causes must not trigger a second, redundant resize call. And in <see
+    /// cref="OnAfterRenderAsync"/>, after every render, so a value that arrived any other way (a
+    /// suggestion chip, a send clearing the box) is recognized as reflected once handled.</summary>
+    private string _domReflectsValue = "";
+
     private bool CanSend => !Busy && !string.IsNullOrWhiteSpace(Value);
 
-    private Task OnInput(ChangeEventArgs e) => ValueChanged.InvokeAsync(e.Value?.ToString() ?? "");
+    private Task OnInput(ChangeEventArgs e)
+    {
+        var value = e.Value?.ToString() ?? "";
+        _domReflectsValue = value;
+        return ValueChanged.InvokeAsync(value);
+    }
 
     /// <summary>
     /// Enter without Shift, routed from composer.js. The button's disabled attribute cannot gate this —
@@ -85,20 +98,40 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender) return;
-        _self = DotNetObjectReference.Create(this);
+        if (firstRender)
+        {
+            _self = DotNetObjectReference.Create(this);
+            try
+            {
+                await JS.InvokeVoidAsync("sqlAgentComposer.bind", _textarea, _self);
+            }
+            catch (Exception ex) when (ex is JSException or JSDisconnectedException or OperationCanceledException)
+            {
+                // Losing the binding costs Enter-to-send and auto-grow; the send button still works, so
+                // there is nothing to recover and nothing worth telling the user. Level split by meaning,
+                // as everywhere else in this project: a JSException means composer.js is missing or threw,
+                // which is a real bug worth clearing the Information default.
+                Logger.Log(ex is JSException ? LogLevel.Warning : LogLevel.Debug, ex,
+                    "sqlAgentComposer.bind failed; Enter will insert a newline instead of sending.");
+            }
+            // bind() already resizes once for whatever Value the textarea rendered with (see
+            // composer.js), so this is reflected without a redundant resize call below.
+            _domReflectsValue = Value;
+            return;
+        }
+
+        if (_domReflectsValue == Value) return;
+        _domReflectsValue = Value;
         try
         {
-            await JS.InvokeVoidAsync("sqlAgentComposer.bind", _textarea, _self);
+            await JS.InvokeVoidAsync("sqlAgentComposer.resize", _textarea);
         }
         catch (Exception ex) when (ex is JSException or JSDisconnectedException or OperationCanceledException)
         {
-            // Losing the binding costs Enter-to-send and auto-grow; the send button still works, so
-            // there is nothing to recover and nothing worth telling the user. Level split by meaning,
-            // as everywhere else in this project: a JSException means composer.js is missing or threw,
-            // which is a real bug worth clearing the Information default.
+            // Cosmetic only — the composer still works, it just keeps its grown height until the next
+            // keystroke resizes it live.
             Logger.Log(ex is JSException ? LogLevel.Warning : LogLevel.Debug, ex,
-                "sqlAgentComposer.bind failed; Enter will insert a newline instead of sending.");
+                "sqlAgentComposer.resize failed; the composer may keep its grown height until the next keystroke.");
         }
     }
 

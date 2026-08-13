@@ -210,7 +210,11 @@ untrusted spreadsheet.
   with a note saying so; open the SQL in the editor and run it again to see the rows. This keeps the
   local store from becoming a shadow copy of production data.
 - **Failed answers are stored too**, `llm_not_configured` among them. A reloaded conversation is the
-  one the user watched, not a shorter edit of it.
+  one the user watched, not a shorter edit of it. `llm_not_configured` is deliberately distinct from
+  `llm_error`: the former means no provider is wired at all (today's state); the latter is reserved for
+  a *configured* provider's own failures (timeout, malformed response, network error) once one exists.
+  Only `llm_not_configured` gets the friendly panel — `llm_error` and every other chat error render
+  through the same `OutcomeMessage` component the SQL page uses, showing the stable code and message.
 
 The SQL editor has its own page at `/sql`. It is not going away: Phase D adds a scratchpad panel beside
 the chat built from the same components.
@@ -221,12 +225,6 @@ The SQLite store is versioned with EF Core migrations. A store created before th
 original tables and no `__EFMigrationsHistory`; startup stamps the initial migration as applied and then
 migrates, so an existing store keeps its data. A migration that fails stops the host rather than running
 against a half-migrated store — the log names the store path.
-
-`llm_not_configured` is deliberately distinct from `llm_error`: the former means no provider is
-wired at all (today's state); the latter is reserved for a *configured* provider's own failures
-(timeout, malformed response, network error) once one exists. Only `llm_not_configured` gets the
-friendly panel — `llm_error` and every other chat error render through the same
-`OutcomeMessage` component the SQL page uses, showing the stable code and message.
 
 ## Manual regression checklist
 

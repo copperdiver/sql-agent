@@ -53,8 +53,12 @@ public class ChatHistoryGroupingTests
     {
         // Clock skew, a store copied from another machine, or a timezone change while the host runs. A
         // negative day difference must not fall through to Older, which would bury the newest chat at
-        // the bottom of the list.
-        Assert.Equal(HistoryBucket.Today, Bucket(NowLocal.AddHours(6)));
+        // the bottom of the list. NowLocal.AddHours(6) would not actually test this: 00:30 + 6h is 06:30
+        // on the same calendar day, so `.Date - .Date` is still 0, not negative — the `<= 0` arm's `<= `
+        // half would cover it just as well as its `0` half, and a regression to `days < 0 => Older` would
+        // slip past unnoticed. AddDays(2) lands on a later calendar day than NowLocal, making the day
+        // difference genuinely negative.
+        Assert.Equal(HistoryBucket.Today, Bucket(NowLocal.AddDays(2)));
     }
 
     [Fact]

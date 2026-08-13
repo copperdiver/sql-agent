@@ -19,12 +19,7 @@ window.sqlAgentComposer = {
       dotNetRef.invokeMethodAsync('SendFromEditor').catch(() => {});
     };
 
-    const onInput = function () {
-      // Auto-grow to content, capped at 40vh so a pasted essay cannot push the transcript off screen.
-      textarea.style.height = 'auto';
-      const cap = window.innerHeight * 0.4;
-      textarea.style.height = Math.min(textarea.scrollHeight, cap) + 'px';
-    };
+    const onInput = function () { resizeTextarea(textarea); };
 
     textarea.addEventListener('keydown', onKeyDown);
     textarea.addEventListener('input', onInput);
@@ -42,4 +37,20 @@ window.sqlAgentComposer = {
     textarea.removeEventListener('input', handlers.onInput);
     delete textarea._sqlAgentComposer;
   },
+
+  // Recomputes height from content. bind's own 'input' listener already does this for anything the user
+  // types, live, with no round trip to .NET — but a change to the textarea's value that never raises a DOM
+  // input event (Chat.razor clearing the box after a send, a suggestion chip filling it) leaves that
+  // listener silent, and the box keeps whatever height the last keystroke left it at. Composer.razor calls
+  // this explicitly for exactly that case.
+  resize: function (textarea) {
+    if (textarea) resizeTextarea(textarea);
+  },
 };
+
+function resizeTextarea(textarea) {
+  // Auto-grow to content, capped at 40vh so a pasted essay cannot push the transcript off screen.
+  textarea.style.height = 'auto';
+  const cap = window.innerHeight * 0.4;
+  textarea.style.height = Math.min(textarea.scrollHeight, cap) + 'px';
+}

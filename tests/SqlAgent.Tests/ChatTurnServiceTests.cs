@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using SqlAgent.Core;
 using SqlAgent.Storage;
@@ -211,6 +212,65 @@ public class ChatTurnServiceTests : IDisposable
         Assert.Equal("execution_canceled", reloaded.Messages[1].ErrorCode);
     }
 
+    [Fact]
+    public async Task A_stop_pressed_after_the_question_is_saved_still_leaves_the_zero_database_answer_on_disk()
+    {
+        // Regression test for the zero-database branch reusing the caller's own token to persist its
+        // error message: cancel right after the question lands (the 2nd SaveChangesAsync — the 1st
+        // creates the chat) and, before the fix, the 3rd SaveChangesAsync (the error message) would see
+        // an already-cancelled token and throw, leaving the question on disk with no reply. The
+        // interceptor stands in for a real Stop click landing in that window, which a fast in-memory
+        // SQLite store gives no genuine I/O delay to race against.
+        using var cts = new CancellationTokenSource();
+        var interceptor = new CancelOnNthSaveInterceptor(2, cts);
+        await using var db = new SqlAgentDbContext(new DbContextOptionsBuilder<SqlAgentDbContext>()
+            .UseSqlite(_conn).AddInterceptors(interceptor).Options);
+        var chats = new ChatService(db);
+        var turns = NewTurnServiceOver(chats);
+
+        var turn = await turns.SendAsync(null, "how many orders", [], cts.Token);
+
+        Assert.Equal(ChatOutcomeKind.Error, turn.AssistantMessage.OutcomeKind);
+        Assert.Equal("no_database_attached", turn.AssistantMessage.ErrorCode);
+        var reloaded = await chats.GetChatAsync(turn.ChatId);
+        Assert.Equal([ChatRole.User, ChatRole.Assistant], reloaded!.Messages.Select(m => m.Role));
+    }
+
+    [Fact]
+    public async Task A_stop_pressed_after_the_question_is_saved_still_leaves_the_multiple_database_answer_on_disk()
+    {
+        // Same regression as the zero-database test above, for the other branch that reused the caller's
+        // token: two attachments so AnswerAsync's `default` arm runs instead of `case 0`.
+        var a = await NewConnectionAsync("a");
+        var b = await NewConnectionAsync("b");
+        using var cts = new CancellationTokenSource();
+        var interceptor = new CancelOnNthSaveInterceptor(2, cts);
+        await using var db = new SqlAgentDbContext(new DbContextOptionsBuilder<SqlAgentDbContext>()
+            .UseSqlite(_conn).AddInterceptors(interceptor).Options);
+        var chats = new ChatService(db);
+        var turns = NewTurnServiceOver(chats);
+
+        var turn = await turns.SendAsync(null, "compare them", [a, b], cts.Token);
+
+        Assert.Equal(ChatOutcomeKind.Error, turn.AssistantMessage.OutcomeKind);
+        Assert.Equal("multiple_databases_unsupported", turn.AssistantMessage.ErrorCode);
+        var reloaded = await chats.GetChatAsync(turn.ChatId);
+        Assert.Equal([ChatRole.User, ChatRole.Assistant], reloaded!.Messages.Select(m => m.Role));
+    }
+
+    /// <summary>A ChatTurnService wired to <paramref name="chats"/> (so its writes land through
+    /// whichever DbContext/interceptor the test set up) but otherwise built the same way the
+    /// constructor wires <see cref="_turns"/> — reusing <see cref="_connections"/> and <see
+    /// cref="_gateway"/>, neither of which the zero/multiple-database branches under test ever call.</summary>
+    private ChatTurnService NewTurnServiceOver(ChatService chats)
+    {
+        var registry = new DatabaseProviderRegistry([_provider]);
+        var executor = new QueryExecutionService(
+            _connections, registry, _db, NullLogger<QueryExecutionService>.Instance);
+        var schemas = new SchemaService(_connections, registry, _db);
+        return new ChatTurnService(chats, new NlQueryService(_connections, schemas, executor, _gateway), _connections);
+    }
+
     private async Task<Guid> NewConnectionAsync(string name) =>
         (await _connections.CreateAsync(
             new DatabaseConnectionInput(name, DatabaseProviderType.Postgres, IsReadOnly: true), "cs")).Id;
@@ -238,6 +298,22 @@ sealed class TurnGatewayStub : ILlmSqlGateway
         if (Block) await Task.Delay(Timeout.Infinite, ct);
         if (Throw is { } ex) throw ex;
         return NextResponse ?? LlmSqlResponse.Generated("SELECT 1");
+    }
+}
+
+/// <summary>Cancels <paramref name="cts"/> right after the Nth <c>SaveChangesAsync</c> completes —
+/// standing in for a Stop click landing in a window a fast in-memory SQLite store gives no genuine I/O
+/// delay to race against. <c>SavedChangesAsync</c> is a post-completion hook, so the save that just
+/// finished is unaffected; only whatever save comes next observes the token as already spent.</summary>
+sealed class CancelOnNthSaveInterceptor(int n, CancellationTokenSource cts) : SaveChangesInterceptor
+{
+    private int _count;
+
+    public override ValueTask<int> SavedChangesAsync(
+        SaveChangesCompletedEventData eventData, int result, CancellationToken cancellationToken = default)
+    {
+        if (++_count == n) cts.Cancel();
+        return base.SavedChangesAsync(eventData, result, cancellationToken);
     }
 }
 

@@ -16,6 +16,10 @@ public class ComposerTests
         // because one of them is an ElementReference the test cannot predict.
         ctx.JSInterop.SetupVoid("sqlAgentComposer.bind", _ => true);
         ctx.JSInterop.SetupVoid("sqlAgentComposer.unbind", _ => true);
+        // Any test that changes Value without going through a real DOM input event (SetParametersAndRender
+        // with a new Value, exactly as a suggestion chip or a post-send clear would) makes Composer call
+        // this; strict bUnit JSInterop needs it planned even for tests that don't care about it themselves.
+        ctx.JSInterop.SetupVoid("sqlAgentComposer.resize", _ => true);
         return ctx;
     }
 
@@ -191,6 +195,43 @@ public class ComposerTests
         await composer.InvokeAsync(() => composer.Instance.SendFromEditor());
 
         Assert.Equal(0, sends);
+    }
+
+    [Fact]
+    public void Value_changed_programmatically_with_no_DOM_input_event_resizes_the_textarea_via_js()
+    {
+        // A suggestion chip filling the box, or Chat.razor clearing it after a send, sets Value from C#
+        // with no corresponding DOM 'input' event — composer.js's own listener, which handles the live
+        // typing case, never fires for either. Composer.razor has to notice the mismatch itself and call
+        // sqlAgentComposer.resize, or the box keeps whatever height the last keystroke left it at.
+        using var ctx = NewContext();
+
+        var composer = ctx.RenderComponent<Composer>(p => p.Add(c => c.Value, "how many orders"));
+        composer.SetParametersAndRender(p => p.Add(c => c.Value, "select every order"));
+
+        ctx.JSInterop.VerifyInvoke("sqlAgentComposer.resize");
+    }
+
+    [Fact]
+    public void Typing_does_not_trigger_a_second_redundant_resize_call()
+    {
+        // composer.js's own 'input' listener already resizes the box live for a keystroke, before the
+        // resulting render even happens. Wiring ValueChanged back into Value here, synchronously, mimics
+        // what a real @bind-Value parent does: by the time the render that keystroke causes actually
+        // happens, Value already matches what OnInput already recorded as reflected. If Composer.razor
+        // could not tell that apart from "Value changed some other way", every keystroke would cost a
+        // second, pointless JS round trip on top of the one composer.js already made live.
+        using var ctx = NewContext();
+        IRenderedComponent<Composer>? composerRef = null;
+        var composer = ctx.RenderComponent<Composer>(p => p
+            .Add(c => c.Value, "")
+            .Add(c => c.ValueChanged, EventCallback.Factory.Create<string>(new object(),
+                v => composerRef!.SetParametersAndRender(p2 => p2.Add(c => c.Value, v)))));
+        composerRef = composer;
+
+        composer.Find("textarea").Input("how many orders");
+
+        Assert.DoesNotContain(ctx.JSInterop.Invocations, i => i.Identifier == "sqlAgentComposer.resize");
     }
 
     [Fact]

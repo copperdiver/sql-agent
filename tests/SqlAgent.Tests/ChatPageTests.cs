@@ -3,6 +3,7 @@ using Bunit.TestDoubles;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using SqlAgent.Core;
 using SqlAgent.Host.Components.Shared.Chat;
@@ -30,10 +31,18 @@ public class ChatPageTests : IDisposable
     private readonly ChatGatewayStub _gateway = new();
     private readonly TurnProviderStub _provider = new();
 
+    // Read afresh every time a scope resolves SqlAgentDbContext, so a test can arm it (see
+    // ThrowCanceledOnFirstSaveInterceptor's use below) after the constructor has already run.
+    private SaveChangesInterceptor? _saveInterceptor;
+
     public ChatPageTests()
     {
         _conn.Open();
-        _ctx.Services.AddDbContext<SqlAgentDbContext>(o => o.UseSqlite(_conn));
+        _ctx.Services.AddDbContext<SqlAgentDbContext>(o =>
+        {
+            o.UseSqlite(_conn);
+            if (_saveInterceptor is { } interceptor) o.AddInterceptors(interceptor);
+        });
         _ctx.Services.AddSingleton<ISecretStore, InMemorySecretStore>();
         _ctx.Services.AddSingleton<IDatabaseProvider>(_provider);
         _ctx.Services.AddSingleton<IDatabaseProviderRegistry, DatabaseProviderRegistry>();
@@ -317,6 +326,90 @@ public class ChatPageTests : IDisposable
         Assert.Contains(chats, c => c.Title == "new chat question");
     }
 
+    [Fact]
+    public async Task Opening_a_stale_chat_link_redirects_home_instead_of_throwing_on_the_next_send()
+    {
+        // Regression test for the review finding: a bookmarked/sidebar link to a chat deleted (here, by
+        // never having existed at all — same effect as "since deleted") used to leave _loadedChatId
+        // pointed at a chat that is not there. The very next send would resolve `chatId` to that missing
+        // id and ChatTurnService's CreateChatAsync-skipping path would try to append to it, throwing
+        // InvalidOperationException uncaught by anything in the send path — losing the typed question to
+        // an unhandled error instead of a message. The fix redirects home and clears the sentinel so the
+        // next send instead starts a brand-new chat, same as if the user had never followed the link.
+        await AddConnectionAsync("prod");
+        var missingId = Guid.NewGuid();
+
+        var page = _ctx.RenderComponent<ChatPage>(p => p.Add(c => c.Id, missingId));
+
+        var nav = _ctx.Services.GetRequiredService<FakeNavigationManager>();
+        Assert.Equal(nav.BaseUri, nav.Uri);
+        Assert.Empty(page.FindAll(".message"));
+
+        await AttachAsync(page, "prod");
+        Type(page, "how many orders");
+        await ClickAsync(page.Find("[data-testid=send]"));
+
+        // No exception, and the question landed in a fresh chat rather than vanishing into a throw.
+        var chat = Assert.Single(await ListChatsAsync());
+        Assert.Equal("how many orders", chat.Title);
+        Assert.NotEqual(missingId, chat.Id);
+    }
+
+    [Fact]
+    public async Task A_cancellation_before_anything_reaches_disk_restores_the_typed_question()
+    {
+        // Regression test: SendAsync's `catch (OperationCanceledException)` used to discard the typed
+        // question unconditionally. ChatTurnService writes the user's message before anything else can
+        // fail, so the only window where nothing is on disk yet is earlier still — while CreateChatAsync's
+        // own save for a brand-new chat is in flight. This interceptor throws OperationCanceledException
+        // right there, standing in for a cancellation landing in that exact window, before ChatTurnService
+        // has written anything.
+        await AddConnectionAsync("prod");
+        _saveInterceptor = new ThrowCanceledOnFirstSaveInterceptor();
+        var page = _ctx.RenderComponent<ChatPage>();
+        await AttachAsync(page, "prod");
+        Type(page, "how many orders");
+
+        await ClickAsync(page.Find("[data-testid=send]"));
+
+        Assert.Empty(await ListChatsAsync());
+        Assert.Equal("how many orders", page.Find("textarea").GetAttribute("value"));
+        // The send button is back (not the stop button), proving _busy was reset alongside _question.
+        Assert.NotEmpty(page.FindAll("[data-testid=send]"));
+    }
+
+    [Fact]
+    public async Task A_dropped_send_still_tells_the_sidebar_a_chat_was_created()
+    {
+        // Regression test: before the fix, State.NotifyChatsChanged() sat inside the drop-check, so a send
+        // that landed after the page moved on to another chat never fired it. The chat the dropped send
+        // created is on disk regardless (ChatTurnService's job) — without this notification the sidebar
+        // has no reason to reload and the new chat stays invisible until something unrelated refreshes it.
+        await AddConnectionAsync("prod");
+        var chatB = await CreateStoredChatAsync("already there");
+        _gateway.Hold();
+        var notified = 0;
+        _ctx.Services.GetRequiredService<AppState>().ChatsChanged += () => notified++;
+
+        var page = _ctx.RenderComponent<ChatPage>();
+        await AttachAsync(page, "prod");
+        Type(page, "new chat question");
+        var send = ClickAsync(page.Find("[data-testid=send]"));
+        await WaitForConditionAsync(() => _gateway.CallCount == 1);
+
+        // Same re-parameterization the router performs navigating "/" -> a stored chat, which is what
+        // makes the in-flight send's eventual result stale.
+        await page.InvokeAsync(() => page.SetParametersAndRender(p => p.Add(c => c.Id, chatB)));
+
+        _gateway.Release(LlmSqlResponse.Generated("SELECT 1"));
+        await send;
+
+        Assert.True(notified > 0);
+        // And the chat it made is actually findable — the notification is not just a courtesy call.
+        var chats = await ListChatsAsync();
+        Assert.Contains(chats, c => c.Title == "new chat question");
+    }
+
     private async Task<Guid> CreateStoredChatAsync(string question)
     {
         using var scope = _ctx.Services.CreateScope();
@@ -366,4 +459,22 @@ public class ChatPageTests : IDisposable
         _ctx.Dispose();
         _conn.Dispose();
     }
+}
+
+/// <summary>Throws OperationCanceledException the moment any save is about to run, standing in for a
+/// cancellation landing before ChatTurnService has written anything at all — a window a fast in-memory
+/// SQLite store gives no genuine I/O delay to race against for real. Unlike
+/// <c>CancelOnNthSaveInterceptor</c> in ChatTurnServiceTests (which cancels a real token so a later save
+/// observes it), this throws directly, because the scenario under test is precisely "no save gets to
+/// complete first" — there is no earlier save whose post-hook could set up that state.</summary>
+sealed class ThrowCanceledOnFirstSaveInterceptor : SaveChangesInterceptor
+{
+    public override InterceptionResult<int> SavingChanges(
+        DbContextEventData eventData, InterceptionResult<int> result) =>
+        throw new OperationCanceledException("stands in for a cancellation landing before anything reached disk");
+
+    public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+        DbContextEventData eventData, InterceptionResult<int> result,
+        CancellationToken cancellationToken = default) =>
+        throw new OperationCanceledException("stands in for a cancellation landing before anything reached disk");
 }

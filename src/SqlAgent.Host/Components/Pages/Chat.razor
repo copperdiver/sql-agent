@@ -94,7 +94,24 @@
         if (Id is { } id)
         {
             var detail = await Runner.RunAsync<ChatService, ChatDetail?>(s => s.GetChatAsync(id));
-            if (detail is not null) _messages.AddRange(detail.Messages);
+            if (detail is null)
+            {
+                // A bookmarked link to a chat that was since deleted, or another tab deleted it while
+                // this one sat on the route. _loadedChatId is reset to null here — not left at the
+                // missing id — because SendAsync reads _loadedChatId directly as the id to continue;
+                // leaving it pointed at a chat that does not exist would have the very next send reach
+                // ChatService.AppendOnceAsync's `?? throw new InvalidOperationException("Chat ...
+                // does not exist.")`, uncaught (SendAsync's catch is OperationCanceledException only,
+                // and ScopedRunner does not catch either), losing the typed question to an error panel.
+                // Navigating home is the visible half of the fix, syncing the address bar to what the
+                // page now shows; the reset above is what actually keeps the next send safe, in case the
+                // router does not re-enter this method before the user acts.
+                _loadedChatId = null;
+                State.SetActiveChat(null);
+                Nav.NavigateTo("/", replace: true);
+                return;
+            }
+            _messages.AddRange(detail.Messages);
         }
         State.SetActiveChat(Id);
     }
@@ -156,6 +173,15 @@
             var turn = await Runner.RunAsync<ChatTurnService, ChatTurnResult>(
                 s => s.SendAsync(startedIn, question, databaseIds, _cts.Token));
 
+            // Raised before the drop check below, and unconditionally: the chat this turn created or
+            // continued is on disk either way (ChatTurnService's job, not this method's), even when the
+            // send is about to be dropped for landing after the page moved on. Unlike SetActiveChat and
+            // NavigateTo just below — which assume the page is still showing the chat this turn belongs
+            // to — telling the sidebar to reload assumes nothing about what is on screen now, so it is
+            // safe here too. Doing it after the drop check would leave a chat the user can no longer see
+            // missing from the sidebar until something unrelated happened to refresh it.
+            State.NotifyChatsChanged();
+
             if (_disposed || _loadedChatId != startedIn)
             {
                 // The page moved on while this was in flight: to another stored chat, to a fresh "/", or
@@ -182,7 +208,6 @@
                 Nav.NavigateTo($"/chat/{turn.ChatId}", replace: true);
                 State.SetActiveChat(turn.ChatId);
             }
-            State.NotifyChatsChanged();
         }
         catch (OperationCanceledException)
         {
@@ -191,8 +216,13 @@
             // never orphans the chat row it already wrote — see ChatTurnService.AnswerAsync. What can
             // still throw here is a cancellation that lands even earlier, before that row exists at all:
             // while attachments are still being resolved, or while the chat/question themselves are being
-            // written. Nothing is on disk yet in that case, so there is nothing to reconcile — the send is
-            // simply abandoned.
+            // written. Nothing is on disk yet in that case, so the typed text is the only copy anywhere —
+            // dropping it too would be exactly the outcome ChatTurnService's own doc comment says this
+            // design refuses. Restored only if the page is still where this send started: if it moved on
+            // (disposed, or re-parameterized into a different chat) there is no composer left to put it
+            // back into, and doing it anyway would inject this text into whatever the user is looking at
+            // now.
+            if (!_disposed && _loadedChatId == startedIn) _question = question;
         }
         finally
         {
