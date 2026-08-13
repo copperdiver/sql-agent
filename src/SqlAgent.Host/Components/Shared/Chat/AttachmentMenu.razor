@@ -1,0 +1,44 @@
+@* Phase E adds a Files section beside this one. The section heading exists from the start so that
+   addition is a second block rather than a restructuring. *@
+<Menu Placement="MenuPlacement.Top">
+    <Trigger>
+        <Icon Name="paperclip" Size="18" />
+        <span class="sr-only">Attach a database</span>
+    </Trigger>
+    <ChildContent>
+        <p class="menu-section">Databases</p>
+        @if (Selectable.Count == 0)
+        {
+            <EmptyState Icon="database"
+                        Title="@(Connections.Count == 0 ? "No databases yet" : "All databases attached")"
+                        Hint="@(Connections.Count == 0 ? "Add a connection to ask questions about it." : null)">
+                @if (Connections.Count == 0)
+                {
+                    <a href="/connections">Add a connection</a>
+                }
+            </EmptyState>
+        }
+        else
+        {
+            @foreach (var connection in Selectable)
+            {
+                <MenuItem Icon="database" OnClick="() => OnAttach.InvokeAsync(connection)">
+                    @connection.Name
+                </MenuItem>
+            }
+        }
+    </ChildContent>
+</Menu>
+
+@code {
+    [Parameter] public IReadOnlyList<DatabaseConnectionInfo> Connections { get; set; } = [];
+
+    /// <summary>What the composer already carries. Those rows are left out rather than shown and
+    /// ignored: a row that does nothing when clicked reads as a broken menu.</summary>
+    [Parameter] public IReadOnlyList<Guid> AttachedIds { get; set; } = [];
+
+    [Parameter] public EventCallback<DatabaseConnectionInfo> OnAttach { get; set; }
+
+    private IReadOnlyList<DatabaseConnectionInfo> Selectable =>
+        Connections.Where(c => !AttachedIds.Contains(c.Id)).ToList();
+}

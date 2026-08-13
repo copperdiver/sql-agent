@@ -47,7 +47,7 @@
 @if (_status is not null)
 {
     @* Every outcome on this page — refusal, provider result, or breakage — goes through the same
-       component the SQL and Chat tabs use, so a stable code is shown when there is one and the user
+       component the SQL and chat pages use, so a stable code is shown when there is one and the user
        can tell a deliberate refusal from a failure. Nothing here hand-builds its own status markup. *@
     <OutcomeMessage Code="@_statusCode" Message="@_status" />
 }

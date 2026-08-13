@@ -72,12 +72,12 @@ public class WorkspaceTests : IDisposable
     {
         // SchemaRail and Workspace are siblings under MainLayout, not parent and child, so a
         // connection picked from the rail's dropdown re-renders only the rail's own subtree unless
-        // Workspace itself listens for AppState.Changed. Every other test in this file (and in
-        // WorkspaceChatTests) calls SelectConnectionAsync BEFORE rendering Workspace, so Workspace
-        // always observes the connection on its own first render regardless of whether it
-        // subscribes — that blind spot is exactly why this went unnoticed. Here the order is
-        // deliberately reversed, and nothing else happens afterwards (no button click, no tab
-        // switch) that could force a render some other way.
+        // Workspace itself listens for AppState.Changed. Every other test in this file calls
+        // SelectConnectionAsync BEFORE rendering Workspace, so Workspace always observes the
+        // connection on its own first render regardless of whether it subscribes — that blind spot
+        // is exactly why this went unnoticed. Here the order is deliberately reversed, and nothing
+        // else happens afterwards (no button click, no tab switch) that could force a render some
+        // other way.
         var page = _ctx.RenderComponent<Workspace>();
         Assert.Contains("Select a connection to start querying.", page.Markup);
 
@@ -324,7 +324,7 @@ public class WorkspaceTests : IDisposable
     }
 
     // WaitForConditionAsync (the bUnit WaitForStateAsync stand-in referenced above) now lives in
-    // AsyncTestHelpers so WorkspaceChatTests can share it instead of carrying its own copy.
+    // AsyncTestHelpers so SchemaRailTests can share it instead of carrying its own copy.
 
     private static AngleSharp.Dom.IElement FindButton(IRenderedComponent<Workspace> page, string text) =>
         page.FindAll("button").First(b => b.TextContent.Trim() == text);

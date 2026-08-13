@@ -1,0 +1,32 @@
+<div class="message assistant-message">
+    <ChatOutcome Result="Outcome" Restored="Live is null" OnOpenInEditor="OnOpenInEditor" />
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ChatMessageView Message { get; set; } = default!;
+
+    /// <summary>The in-memory result for an answer produced in this circuit, rows included. Null for
+    /// every message read back from the store, which is what makes ChatOutcome render the restored
+    /// shape instead of an empty grid.</summary>
+    [Parameter] public NlQueryResult? Live { get; set; }
+
+    [Parameter] public EventCallback<string> OnOpenInEditor { get; set; }
+
+    private NlQueryResult? Outcome => Live ?? Restore(Message);
+
+    /// <summary>
+    /// Rebuilds the outcome shape ChatOutcome renders from what the store keeps. Columns and rows are
+    /// deliberately empty — they were never written — and the Restored flag above is what stops that
+    /// emptiness being drawn as a result.
+    /// </summary>
+    private static NlQueryResult? Restore(ChatMessageView m) => m.OutcomeKind switch
+    {
+        ChatOutcomeKind.QueryResult => new NlQueryResult(
+            NlResponseKind.QueryResult, m.GeneratedSql, null, null, null,
+            [], [], m.RowCount ?? 0, m.Truncated, m.ElapsedMs ?? 0),
+        ChatOutcomeKind.Clarification => NlQueryResult.Clarification(m.Text),
+        ChatOutcomeKind.Error => NlQueryResult.Error(
+            m.ErrorCode ?? "", m.Text, m.GeneratedSql, m.ElapsedMs ?? 0),
+        _ => null,
+    };
+}

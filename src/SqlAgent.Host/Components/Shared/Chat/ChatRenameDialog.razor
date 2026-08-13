@@ -1,0 +1,31 @@
+@* Presentational: it collects a title and reports it. The rename itself happens in HistorySection,
+   which owns the service scope — a dialog that writes to the store as a side effect of being rendered
+   would be much harder to reason about from the caller. *@
+<Modal Title="Rename chat" OnClose="OnCancel">
+    <ChildContent>
+        <label for="chat-title">Title</label>
+        @* OnTitleChanged is a method rather than an inline lambda: a lambda with a string literal inside
+           a Razor attribute needs escaped quotes, which the parser handles badly — SchemaRail's filter
+           input carries the same note for the same reason. *@
+        <input id="chat-title" value="@_title" @onchange="OnTitleChanged" />
+    </ChildContent>
+    <Footer>
+        <button type="button" data-testid="rename-cancel" @onclick="OnCancel">Cancel</button>
+        <button type="button" class="primary" data-testid="rename-save"
+                disabled="@string.IsNullOrWhiteSpace(_title)"
+                @onclick="() => OnSave.InvokeAsync(_title)">Save</button>
+    </Footer>
+</Modal>
+
+@code {
+    [Parameter, EditorRequired] public ChatSummary Chat { get; set; } = default!;
+    [Parameter] public EventCallback<string> OnSave { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private string _title = "";
+
+    // OnInitialized, not a field initializer: parameters are not set yet when fields initialize.
+    protected override void OnInitialized() => _title = Chat.Title;
+
+    private void OnTitleChanged(ChangeEventArgs e) => _title = e.Value?.ToString() ?? string.Empty;
+}

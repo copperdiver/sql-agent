@@ -2,7 +2,11 @@
 
 @* The header nav is gone: the sidebar owns navigation now. WorkArea stays exactly where it was —
    it is the error boundary for every page, and its LocationChanged recovery depends on living
-   above @Body rather than inside a page. *@
+   above @Body rather than inside a page.
+
+   DialogHost is a sibling of the sidebar and of the page, deliberately. A dialog rendered inside the
+   sidebar would resolve its position:fixed against the drawer's transform below 1024px; rendered inside
+   the page it would vanish on navigation. Here it belongs to the layout, which outlives both. *@
 <div class="app">
     <Sidebar />
     <main class="app-main">
@@ -10,4 +14,5 @@
             <WorkArea>@Body</WorkArea>
         </div>
     </main>
+    <DialogHost />
 </div>

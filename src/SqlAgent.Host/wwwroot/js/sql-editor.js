@@ -29,7 +29,7 @@ window.sqlAgentEditor = {
   // closures captured can be garbage collected. CodeMirror 5 (constructed this way, not via
   // fromTextArea) has no built-in destroy: the documented way to tear one down is to stop referencing it
   // and let its DOM go. Explicitly off()-ing the 'change' listener and removing the wrapper matters
-  // because the SQL tab can be unmounted and remounted repeatedly (switching to the chat tab and back),
+  // because the SQL page can be unmounted and remounted repeatedly (navigating to the chat page and back),
   // and without this each remount would leak one editor instance plus one live 'change' closure still
   // holding a DotNetObjectReference into a component that no longer exists.
   destroy: (element) => {

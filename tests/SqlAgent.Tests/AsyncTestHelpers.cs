@@ -8,7 +8,8 @@ namespace SqlAgent.Tests;
 /// Bunit.Core ... and ... Bunit.Web", while the extension-method call site just reports CS1061 "not
 /// found"). This is a minimal local stand-in — same non-blocking polling idea, no dependency on the
 /// ambiguous type. Originally written inline in <c>WorkspaceTests</c> (SQL tab cancel/re-run tests);
-/// hoisted here so <c>WorkspaceChatTests</c> (chat tab in-flight/guard tests) does not need its own copy.
+/// hoisted here so <c>SchemaRailTests</c> (rail-refresh-after-save/delete/edit tests) does not need
+/// its own copy.
 /// </summary>
 internal static class AsyncTestHelpers
 {

@@ -23,7 +23,7 @@
         }
         else if (Value != _lastPushed)
         {
-            // Only push when the parent changed the text (e.g. "open in editor" from the chat tab);
+            // Only push when the parent changed the text (e.g. "open in editor" from the chat page);
             // echoing the user's own keystrokes back would move the caret.
             await JS.InvokeVoidAsync("sqlAgentEditor.setValue", _host, Value);
             _lastPushed = Value;

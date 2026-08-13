@@ -45,6 +45,25 @@
         ["message-square"] = ["M20 4 H4 A1 1 0 0 0 3 5 V15 A1 1 0 0 0 4 16 H7 V20 L12.5 16 H20 A1 1 0 0 0 21 15 V5 A1 1 0 0 0 20 4 Z"],
         ["chevron-down"] = ["M6 9.5 L12 15.5 L18 9.5"],
         ["x"] = ["M6 6 L18 18", "M18 6 L6 18"],
+
+        // Phase B1: New chat, the SQL page, the composer's attach/send/stop, and the history row menu.
+        ["plus"] = ["M12 5 V19", "M5 12 H19"],
+        ["terminal"] = [
+            "M4 4 H20 A1 1 0 0 1 21 5 V19 A1 1 0 0 1 20 20 H4 A1 1 0 0 1 3 19 V5 A1 1 0 0 1 4 4 Z",
+            "M7 9 L10 12 L7 15", "M12.5 15.5 H17"],
+        ["paperclip"] = [
+            "M20 11.5 L11.7 19.8 A4.5 4.5 0 0 1 5.3 13.4 L13.6 5.1 A3 3 0 0 1 17.9 9.4 L9.9 17.4 A1.5 1.5 0 0 1 7.8 15.3 L15 8.1"],
+        // Three dots drawn as degenerate segments, the same trick the "info" glyph uses for its dot:
+        // round line caps turn a zero-length stroke into a circle, so no per-icon fill flag is needed.
+        ["more-vertical"] = ["M12 5.9 V6", "M12 11.9 V12", "M12 17.9 V18"],
+        ["pencil"] = ["M4 20 V16 L16 4 A2.83 2.83 0 0 1 20 8 L8 20 Z", "M14 6 L18 10"],
+        ["trash"] = [
+            "M4 7 H20",
+            "M9 7 V5 A1 1 0 0 1 10 4 H14 A1 1 0 0 1 15 5 V7",
+            "M6 7 V19 A1 1 0 0 0 7 20 H17 A1 1 0 0 0 18 19 V7",
+            "M10 11 V16", "M14 11 V16"],
+        ["arrow-up"] = ["M12 20 V4", "M5 11 L12 4 L19 11"],
+        ["square"] = ["M7 8 A1 1 0 0 1 8 7 H16 A1 1 0 0 1 17 8 V16 A1 1 0 0 1 16 17 H8 A1 1 0 0 1 7 16 Z"],
     };
 
     /// <summary>Available icon names. Exposed so a test can fail the build on a missing glyph rather

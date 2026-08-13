@@ -1,0 +1,17 @@
+<Modal Title="Delete chat" OnClose="OnCancel">
+    <ChildContent>
+        @* The title is in the question. "Are you sure?" with no subject is how the wrong chat gets
+           deleted from a list of twenty. *@
+        <p>Delete <strong>@Chat.Title</strong> and its messages? This cannot be undone.</p>
+    </ChildContent>
+    <Footer>
+        <button type="button" data-testid="delete-cancel" @onclick="OnCancel">Cancel</button>
+        <button type="button" class="danger" data-testid="delete-confirm" @onclick="OnConfirm">Delete</button>
+    </Footer>
+</Modal>
+
+@code {
+    [Parameter, EditorRequired] public ChatSummary Chat { get; set; } = default!;
+    [Parameter] public EventCallback OnConfirm { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+}

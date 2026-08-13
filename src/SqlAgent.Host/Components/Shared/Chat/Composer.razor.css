@@ -1,0 +1,37 @@
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--base-200);
+  border-radius: var(--radius-card);
+  background: var(--input-background);
+}
+.composer:focus-within { border-color: var(--primary-300); }
+
+/* No border or background of its own: the wrapper above is the visible control, and a second box
+   inside it reads as an input nested in an input. */
+.composer-input {
+  border: none;
+  background: none;
+  padding: 0;
+  resize: none;
+  min-height: 24px;
+  max-height: 40vh;
+  color: var(--title-50);
+  font: inherit;
+}
+.composer-input:focus { outline: none; }
+
+.composer-actions { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.composer-tools { display: flex; align-items: center; gap: var(--space-1); }
+
+.composer-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: var(--radius-round);
+}

@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using SqlAgent.Core;
 using SqlAgent.Storage;
 
@@ -55,7 +56,8 @@ public class QueryExecutionServiceTests
         var created = await connections.CreateAsync(
             new DatabaseConnectionInput("c", provider.ProviderType, isReadOnly), "conn-string");
         var registry = new DatabaseProviderRegistry([provider]);
-        var svc = new QueryExecutionService(connections, registry, db, options);
+        var svc = new QueryExecutionService(
+            connections, registry, db, NullLogger<QueryExecutionService>.Instance, options);
         return (svc, created.Id);
     }
 
@@ -143,7 +145,7 @@ public class QueryExecutionServiceTests
         var (db, conn) = NewStore();
         var connections = new DatabaseConnectionService(db, new InMemorySecretStore());
         var registry = new DatabaseProviderRegistry([new ExecFakeProvider(DatabaseProviderType.Postgres)]);
-        var svc = new QueryExecutionService(connections, registry, db);
+        var svc = new QueryExecutionService(connections, registry, db, NullLogger<QueryExecutionService>.Instance);
 
         var r = await svc.ExecuteSqlAsync(Guid.NewGuid(), "SELECT 1");
 
@@ -221,7 +223,8 @@ public class QueryExecutionServiceTests
 
         Assert.False(r.Success);
         Assert.Equal("execution_error", r.ErrorCode);
-        Assert.Equal("boom", r.ErrorMessage);
+        // The driver's own text ("boom") must never reach the caller — it can echo a connection string.
+        Assert.Equal("The query could not be executed. The details are in the server log.", r.ErrorMessage);
 
         var audit = Assert.Single(await AuditAsync(db));
         Assert.Equal("error", audit.Decision);

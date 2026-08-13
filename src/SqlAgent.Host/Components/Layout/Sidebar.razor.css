@@ -19,7 +19,9 @@
   padding: var(--space-5);
   background: var(--background-50);
   border-right: 1px solid var(--base-100);
-  transition: width .25s, flex-basis .25s, transform .25s;
+  /* visibility is in the list so the closed drawer stays visible for the length of the slide-out rather
+     than blinking away at frame one; visibility interpolates discretely, so it flips at the end. */
+  transition: width .25s, flex-basis .25s, transform .25s, visibility .25s;
 }
 .sidebar.collapsed { width: var(--sidebar-collapsed-width); flex-basis: var(--sidebar-collapsed-width); }
 
@@ -45,8 +47,13 @@
     inset: 0 auto 0 0;
     z-index: 50;
     transform: translateX(-100%);
+    /* transform alone moves the drawer off-screen but leaves everything in it focusable, so Tab walks
+       an invisible sidebar before reaching the page. visibility: hidden is what actually removes a
+       subtree from the tab order, and scoping it to this media query keeps the permanent sidebar above
+       1024px tabbable. */
+    visibility: hidden;
   }
-  .sidebar.drawer-open { transform: translateX(0); }
+  .sidebar.drawer-open { transform: translateX(0); visibility: visible; }
   .sidebar.collapsed { width: var(--sidebar-width); flex-basis: var(--sidebar-width); }
 }
 @media (min-width: 1024px) {

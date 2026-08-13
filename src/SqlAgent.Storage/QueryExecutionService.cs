@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using SqlAgent.Core;
 using SqlAgent.Core.Policy;
 
@@ -14,6 +15,7 @@ public class QueryExecutionService(
     DatabaseConnectionService connections,
     IDatabaseProviderRegistry providers,
     SqlAgentDbContext db,
+    ILogger<QueryExecutionService> logger,
     QueryExecutionOptions? options = null)
 {
     private readonly QueryExecutionOptions _options = options ?? QueryExecutionOptions.Default;
@@ -69,8 +71,14 @@ public class QueryExecutionService(
         catch (Exception ex)
         {
             sw.Stop();
-            await AuditAsync(connectionId, sql, decision.NormalizedSql, "error", ex.Message, null, sw.ElapsedMilliseconds);
-            return QueryExecutionResult.Failure(sql, "execution_error", ex.Message, sw.ElapsedMilliseconds);
+            // The driver's own exception text can echo a connection string or other server detail, so it
+            // is never returned or audited verbatim — it goes to the server log only. Both the audit row
+            // and the caller (from where it flows into the persisted chat transcript) get the same fixed,
+            // user-safe sentence instead.
+            logger.LogError(ex, "Query execution failed for connection {ConnectionId}.", connectionId);
+            const string message = "The query could not be executed. The details are in the server log.";
+            await AuditAsync(connectionId, sql, decision.NormalizedSql, "error", message, null, sw.ElapsedMilliseconds);
+            return QueryExecutionResult.Failure(sql, "execution_error", message, sw.ElapsedMilliseconds);
         }
     }
 

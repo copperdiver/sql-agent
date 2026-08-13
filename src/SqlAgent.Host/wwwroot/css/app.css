@@ -284,17 +284,22 @@ th { color: var(--text-100); font-weight: 500; font-size: var(--text-xs); text-t
    default min-width:auto refusing to shrink either) spill across the sidebar's border into the main
    content card. Duplicating the clip here is intentional, not redundant: it covers exactly the gap the
    scoped rule cannot reach, and the two agree once the circuit does connect since both key off the same
-   collapsed state. */
+   collapsed state.
+
+   Every selector here is anchored to ".app aside.sidebar" rather than left as a bare class. The class
+   names happen to be unique to the sidebar today, so "html.sidebar-collapsed .nav-label" behaved
+   correctly — but it says "hide every .nav-label on the page", which is not the rule anyone means, and
+   SidebarCollapseParityTests now fails if a new one is added unanchored. */
 @media (min-width: 1024px) {
   html.sidebar-collapsed .app aside.sidebar {
     width: var(--sidebar-collapsed-width);
     flex-basis: var(--sidebar-collapsed-width);
     overflow: hidden;
   }
-  html.sidebar-collapsed .nav-label,
-  html.sidebar-collapsed .brand-name,
-  html.sidebar-collapsed .sidebar-body,
-  html.sidebar-collapsed .sidebar-foot { display: none; }
+  html.sidebar-collapsed .app aside.sidebar .nav-label,
+  html.sidebar-collapsed .app aside.sidebar .brand-name,
+  html.sidebar-collapsed .app aside.sidebar .sidebar-body,
+  html.sidebar-collapsed .app aside.sidebar .sidebar-foot { display: none; }
 }
 
 /* ============================================================================
@@ -317,11 +322,11 @@ th { color: var(--text-100); font-weight: 500; font-size: var(--text-xs); text-t
 }
 .meta { color: var(--text-100); font-size: var(--text-xs); }
 .actions { display: flex; gap: var(--space-2); flex-wrap: wrap; margin: var(--space-3) 0; }
-/* Both ResultGrid.razor (the SQL tab) and ChatOutcome.razor (the Chat tab's QueryResult branch)
+/* Both ResultGrid.razor (the SQL page) and ChatOutcome.razor (the chat page's QueryResult branch)
    render their own "<div class="grid-scroll"><table>" markup directly, each in its own CSS-isolation
    scope — a scoped .grid-scroll rule in either component's stylesheet could never reach the other's
    markup. These rules live here, unscoped, so one definition covers both callers instead of the two
-   tabs' identical result tables silently drifting apart (see ChatOutcome.razor's QueryResult case). */
+   pages' identical result tables silently drifting apart (see ChatOutcome.razor's QueryResult case). */
 .grid-scroll {
   max-height: 60vh;
   overflow: auto;

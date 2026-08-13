@@ -10,7 +10,7 @@
     <div class="sidebar-scrim" @onclick="CloseDrawer"></div>
 }
 
-<button type="button" class="ghost drawer-trigger" data-testid="drawer-open"
+<button type="button" class="ghost drawer-trigger" data-testid="drawer-open" @ref="_trigger"
         @onclick="OpenDrawer" aria-label="Open menu">
     <Icon Name="menu" Size="20" />
 </button>
@@ -47,6 +47,8 @@
     <SidebarNav Collapsed="_collapsed" />
 
     <div class="sidebar-body custom-scroll">
+        <HistorySection />
+
         @* Phase C replaces the rail with the Databases section and the config page. Until then it is
            the only place a connection can be picked or a table hidden, so it stays. *@
         <SchemaRail />
@@ -61,7 +63,9 @@
     private bool _collapsed;
     private bool _drawerOpen;
     private ElementReference _aside;
+    private ElementReference _trigger;
     private bool _focusDrawerPending;
+    private bool _focusTriggerPending;
 
     // On a phone: tap the hamburger, tap a nav row, and the route changes behind a still-open drawer
     // and scrim unless something closes it. Same pattern as WorkArea's LocationChanged subscription —
@@ -70,7 +74,7 @@
     protected override void OnInitialized() => Nav.LocationChanged += OnLocationChanged;
 
     private void OnLocationChanged(object? sender, LocationChangedEventArgs e) =>
-        InvokeAsync(() => { _drawerOpen = false; StateHasChanged(); });
+        InvokeAsync(() => { CloseDrawer(); StateHasChanged(); });
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -81,6 +85,7 @@
         if (!firstRender)
         {
             await FocusDrawerIfJustOpenedAsync();
+            await FocusTriggerIfJustClosedAsync();
             return;
         }
         try
@@ -149,7 +154,19 @@
         _focusDrawerPending = true;
     }
 
-    private void CloseDrawer() => _drawerOpen = false;
+    /// <summary>
+    /// Closes the drawer and hands focus back to the hamburger that opened it. Without the second half,
+    /// focus is left on an element the closing drawer has just made visibility:hidden, and the browser
+    /// restarts the tab order from the top of the document — the same defect an unrestored dialog leaves
+    /// behind. The move is deferred to OnAfterRenderAsync for the same reason opening one is: the class
+    /// that hides the drawer is applied by the render this handler triggers.
+    /// </summary>
+    private void CloseDrawer()
+    {
+        if (!_drawerOpen) return;
+        _drawerOpen = false;
+        _focusTriggerPending = true;
+    }
 
     /// <summary>
     /// Moves focus into the drawer once it has actually rendered open, which is the only thing that lets
@@ -178,6 +195,23 @@
             // a JSException means Blazor's own focus interop is missing, which is a real bug.
             Logger.Log(ex is JSException ? LogLevel.Warning : LogLevel.Debug, ex,
                 "Focusing the drawer failed; Escape-to-close will not work until it is reopened.");
+        }
+    }
+
+    /// <summary>The mirror of FocusDrawerIfJustOpenedAsync. Same three interop failures, same reasoning
+    /// about which are fatal to the circuit and which only cost evidence — see ToggleCollapseAsync.</summary>
+    private async Task FocusTriggerIfJustClosedAsync()
+    {
+        if (!_focusTriggerPending) return;
+        _focusTriggerPending = false;
+        try
+        {
+            await _trigger.FocusAsync();
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or OperationCanceledException)
+        {
+            Logger.Log(ex is JSException ? LogLevel.Warning : LogLevel.Debug, ex,
+                "Returning focus to the drawer trigger failed; the tab order restarts from the document top.");
         }
     }
 
