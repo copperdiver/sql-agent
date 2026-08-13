@@ -305,10 +305,16 @@ Priority **P0**. Depends on A. Split in two during design: **B1** ships
 persistence, message-level database context, and history; **B2** ships projects
 and search.
 
-B1 has its own spec —
-[2026-08-12 phase B1](2026-08-12-web-ui-phase-b1-chat-persistence-design.md) —
-which supersedes this section wherever the two disagree. What follows is the
-shape of the whole of B, with each part marked.
+Each half has its own spec —
+[2026-08-12 phase B1](2026-08-12-web-ui-phase-b1-chat-persistence-design.md) and
+[2026-08-13 phase B2](2026-08-13-web-ui-phase-b2-projects-and-search-design.md) —
+and both supersede this section wherever they disagree with it. What follows is
+the shape of the whole of B, with each part marked.
+
+Two decisions B2's design settled, which this section left open: a chat in a
+project leaves the history list rather than appearing in both, and `Project`
+ships without the `Description` column listed below, because no screen renders
+it.
 
 ### Migrations come first (B1)
 
