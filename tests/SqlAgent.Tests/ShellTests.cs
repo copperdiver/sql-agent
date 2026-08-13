@@ -38,9 +38,9 @@ public class ShellTests : IDisposable
         var sidebar = _ctx.RenderComponent<Sidebar>();
 
         Assert.Contains("SQL Agent", sidebar.Markup);
-        // Phase A ships the routes that exist. New Chat and Search arrive in Phase B with the pages
-        // behind them; a button that does nothing is worse than the link it replaced.
-        Assert.Contains("Workspace", sidebar.Markup);
+        // Phase B1 replaced the Workspace row: conversations are the front door now, and the SQL editor
+        // keeps its own row rather than a tab inside a page. Search arrives in B2 with its modal.
+        Assert.Contains("New chat", sidebar.Markup);
         Assert.Contains("Connections", sidebar.Markup);
     }
 

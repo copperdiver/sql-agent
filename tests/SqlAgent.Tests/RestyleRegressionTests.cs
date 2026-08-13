@@ -11,16 +11,21 @@ namespace SqlAgent.Tests;
 /// </summary>
 public class RestyleRegressionTests
 {
+    // "tabs", "transcript" and "question" left with Phase B1: the tab strip is gone and the transcript
+    // moved to Components/Shared/Chat, which brings its own stylesheets and its own assertion.
     private static readonly string[] ClassesUsedByExistingMarkup =
     [
-        "tabs", "rail", "tree", "label", "meta", "actions", "grid-scroll",
-        "transcript", "question", "generated-sql", "clarification", "editor",
+        "rail", "tree", "label", "meta", "actions", "grid-scroll",
+        "generated-sql", "clarification", "editor",
         "outcome", "outcome-code",
     ];
 
+    // Workspace.razor.css is deliberately absent here: Phase B1 emptied it along with the tab strip it
+    // used to style, and this theory exists to catch a stylesheet silently dropped, not one that
+    // legitimately has nothing left to say. It stays in the sheets array below, harmlessly, since /sql
+    // still needs a page to render even with no scoped rules of its own.
     [Theory]
     [InlineData("src/SqlAgent.Host/Components/Pages/Connections.razor.css")]
-    [InlineData("src/SqlAgent.Host/Components/Pages/Workspace.razor.css")]
     [InlineData("src/SqlAgent.Host/Components/Layout/SchemaRail.razor.css")]
     [InlineData("src/SqlAgent.Host/Components/Shared/ChatOutcome.razor.css")]
     [InlineData("src/SqlAgent.Host/Components/Shared/OutcomeMessage.razor.css")]
