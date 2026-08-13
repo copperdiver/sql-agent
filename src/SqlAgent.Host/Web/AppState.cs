@@ -66,6 +66,25 @@ public sealed class AppState
 
     private string? _pendingSql;
 
+    /// <summary>A project the sidebar should open, set by a search hit. There is no project route to
+    /// navigate to, so this is how a hit reaches a section that is not on the navigation path.</summary>
+    public Guid? ProjectToExpand { get; private set; }
+
+    public void RequestProjectExpanded(Guid projectId)
+    {
+        ProjectToExpand = projectId;
+        ChatsChanged?.Invoke();
+    }
+
+    /// <summary>Reads the request and clears it, so re-rendering the sidebar for an unrelated reason does
+    /// not keep re-opening a project the user has since collapsed.</summary>
+    public Guid? TakeProjectToExpand()
+    {
+        var id = ProjectToExpand;
+        ProjectToExpand = null;
+        return id;
+    }
+
     /// <summary>Hands generated SQL to the /sql page across a navigation. The page and the chat are
     /// separate routes, so there is no parameter to pass it through.</summary>
     public void HandOffSql(string sql) => _pendingSql = sql;

@@ -19,6 +19,11 @@ public class Chat
     public DateTime UpdatedAt { get; set; }
     public DateTime LastMessageAt { get; set; }
     public List<ChatMessage> Messages { get; set; } = [];
+
+    /// <summary>The project this chat lives in, or null for an ungrouped chat — which is what the
+    /// history list shows. A chat is never in both places.</summary>
+    public Guid? ProjectId { get; set; }
+    public Project? Project { get; set; }
 }
 
 /// <summary>

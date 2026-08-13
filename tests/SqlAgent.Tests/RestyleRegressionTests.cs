@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.RegularExpressions;
 
 namespace SqlAgent.Tests;
@@ -37,31 +38,80 @@ public class RestyleRegressionTests
     }
 
     [Fact]
-    public void Every_class_the_existing_markup_uses_is_styled_somewhere()
+    public void Every_class_the_markup_uses_is_styled_where_it_can_reach_it()
     {
-        // These class names were in the markup with no stylesheet at all, which is how the UI shipped
-        // unstyled. Any one of them left unstyled is an unstyled region of a real screen.
-        var sheets = new[]
+        // The old version concatenated every stylesheet and searched the result, so a rule that had
+        // drifted into the wrong component's sheet still passed — precisely the failure that hit Phase A
+        // twice. Blazor's scoped CSS is per component: a rule in Foo.razor.css compiles to
+        // scopedcss/Components/.../Foo.razor.rz.scp.css and matches only elements Foo itself rendered.
+        // So the honest question is not "is this class styled somewhere" but "is it styled somewhere
+        // that can reach the markup using it" — this component's own scoped sheet, or a global rule.
+        var componentsRoot = Path.GetDirectoryName(RepoPaths.Find("src/SqlAgent.Host/Components/App.razor"))!;
+        var global = StripComments(File.ReadAllText(RepoPaths.Find("src/SqlAgent.Host/wwwroot/css/app.css")));
+
+        var unreachable = new List<string>();
+        foreach (var razor in Directory.EnumerateFiles(componentsRoot, "*.razor", SearchOption.AllDirectories))
         {
-            "src/SqlAgent.Host/wwwroot/css/app.css",
-            "src/SqlAgent.Host/Components/Pages/Connections.razor.css",
-            "src/SqlAgent.Host/Components/Pages/Workspace.razor.css",
-            "src/SqlAgent.Host/Components/Layout/SchemaRail.razor.css",
-            "src/SqlAgent.Host/Components/Shared/ChatOutcome.razor.css",
-            "src/SqlAgent.Host/Components/Shared/OutcomeMessage.razor.css",
-            "src/SqlAgent.Host/Components/Shared/SqlEditor.razor.css",
-        };
-        // Comments are stripped before concatenation: Connections.razor.css's own explanatory comment
-        // literally contains the words "connections-list", "form", "fieldset", and "legend" (documenting
-        // that none of those exist in the page's real markup), and a raw substring search over that
-        // prose would treat it as if it were a styling rule for all four.
-        var all = string.Concat(sheets.Select(s =>
-            Regex.Replace(File.ReadAllText(RepoPaths.Find(s)), @"/\*.*?\*/", "", RegexOptions.Singleline)));
+            var markup = File.ReadAllText(razor);
+            var scoped = CompiledScopedCssFor(razor);
+            foreach (var className in ClassesUsedByExistingMarkup.Where(c => UsesClass(markup, c)))
+                if (!IsClassStyled(global, className) && !IsClassStyled(scoped, className))
+                    unreachable.Add($"{Path.GetFileName(razor)} uses .{className}");
+        }
 
-        var unstyled = ClassesUsedByExistingMarkup.Where(c => !IsClassStyled(all, c)).ToList();
-
-        Assert.Empty(unstyled);
+        Assert.Empty(unreachable);
     }
+
+    /// <summary>The build output for one component's scoped stylesheet, or empty when the component has
+    /// none. Missing output for the whole project is a failure rather than an empty pass: a guard that
+    /// disappears when its artifact is absent is the same defect in a new place.</summary>
+    private static string CompiledScopedCssFor(string razorPath)
+    {
+        var hostRoot = Path.GetDirectoryName(RepoPaths.Find("src/SqlAgent.Host/Components/App.razor"))!;
+        hostRoot = Path.GetDirectoryName(hostRoot)!;
+        // Scoped to obj/<Configuration>, not every scopedcss directory under obj: a Debug build left over
+        // from an earlier run sits right beside a Release one, and scanning both lets a stale Debug sheet
+        // answer a Release run — masking a real wrong-sheet regression instead of catching it.
+        // AssemblyConfigurationAttribute reports the configuration this test binary itself was built with,
+        // which is the Host project's configuration too, since one `dotnet test --configuration X` builds
+        // both from the same solution.
+        var configuration = Assembly.GetExecutingAssembly()
+            .GetCustomAttribute<AssemblyConfigurationAttribute>()?.Configuration ?? "Debug";
+        var configRoot = Path.Combine(hostRoot, "obj", configuration);
+        var scopedRoots = Directory.Exists(configRoot)
+            ? Directory.GetDirectories(configRoot, "scopedcss", SearchOption.AllDirectories)
+            : [];
+        Assert.NotEmpty(scopedRoots.Where(r => Directory.Exists(Path.Combine(r, "Components"))));
+
+        var relative = Path.GetRelativePath(hostRoot, razorPath) + ".rz.scp.css";
+        foreach (var root in scopedRoots)
+        {
+            var candidate = Path.Combine(root, relative);
+            if (File.Exists(candidate)) return StripComments(File.ReadAllText(candidate));
+        }
+        return "";
+    }
+
+    /// <summary>Whether this component's own markup carries the class, so the question is asked only of
+    /// the components that actually use it.
+    ///
+    /// The brief's original version of this check matched `\b{className}\b` inside the attribute string.
+    /// `\b` treats a hyphen as a boundary, so `\blabel\b` matches the tail of "projects-label",
+    /// "nav-label", "menu-item-label" and "search-hit-label" — four unrelated, real class names that
+    /// happen to end in "-label". Phase B1/B2 introduced all four; the false positives they produce here
+    /// are exactly the shape of bug this rewrite exists to avoid, just on the markup side instead of the
+    /// CSS side that IsClassStyled below already guards with its own lookahead. HTML's class attribute is
+    /// a whitespace-separated token list, so membership has to be checked as a whole token, not a
+    /// substring bounded by "not a letter/digit/underscore" — splitting the captured attribute value on
+    /// whitespace and comparing tokens exactly is what "carries the class" actually means.</summary>
+    private static bool UsesClass(string markup, string className) =>
+        Regex.Matches(markup, @"class\s*=\s*""([^""]*)""")
+            .Select(m => m.Groups[1].Value)
+            .Any(value => value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+                .Contains(className, StringComparer.Ordinal));
+
+    private static string StripComments(string css) =>
+        Regex.Replace(css, @"/\*.*?\*/", "", RegexOptions.Singleline);
 
     /// <summary>
     /// A bare substring search for ".outcome" is satisfied by ".outcome-code" — a prefix match, not a

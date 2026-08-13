@@ -1,0 +1,18 @@
+.chat-row { display: flex; align-items: center; gap: var(--space-1); border-radius: var(--radius-control); }
+.chat-row:hover { background: var(--background-soft-100); }
+.chat-row.active { background: var(--primary-50); }
+
+.chat-row-open {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  padding: var(--space-2);
+  color: var(--text-50);
+}
+.chat-row.active .chat-row-open { color: var(--primary-500); font-weight: 500; }
+
+/* The row menu appears on hover, and unconditionally while it is open or focused — a control that
+   exists only under a mouse pointer is unreachable from the keyboard. */
+.chat-row ::deep .menu-root { opacity: 0; }
+.chat-row:hover ::deep .menu-root,
+.chat-row:focus-within ::deep .menu-root { opacity: 1; }

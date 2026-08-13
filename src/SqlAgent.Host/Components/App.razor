@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SQL Agent</title>
     <base href="/" />
+    @* No icon file exists yet, and every page load without one is a 404 -- the only console error the
+       app produces, which is enough to send a reviewer chasing it as if it were a real bug. The empty
+       data URI tells the browser "there is no icon" without a network request, same trick as favicon.ico
+       being absent everywhere else this pattern is used. *@
+    <link rel="icon" href="data:," />
     @*
         Order matters. CodeMirror ships its own colors, so it comes first and app.css overrides it.
         SqlAgent.Host.styles.css is the Blazor CSS-isolation bundle (every *.razor.css in this
@@ -39,6 +44,7 @@
     <script src="lib/codemirror/sql.min.js"></script>
     <script src="js/sql-editor.js"></script>
     <script src="js/composer.js"></script>
+    <script src="js/shortcuts.js"></script>
     <script src="_framework/blazor.web.js"></script>
 </body>
 </html>

@@ -1,0 +1,12 @@
+/* Without this, .move-target falls back to the global button rule and app.css's flex-wrapping button
+   row, so the picker renders as a row of chips instead of the vertical list it exists to be — see
+   SearchDialog.razor.css's .search-hit for the same fix for the same reason. */
+.move-targets { display: flex; flex-direction: column; gap: 2px; }
+
+.move-target {
+  display: flex;
+  width: 100%;
+  padding: var(--space-2);
+  text-align: left;
+  border-radius: var(--radius-control);
+}

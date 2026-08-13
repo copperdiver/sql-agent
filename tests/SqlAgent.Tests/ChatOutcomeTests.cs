@@ -6,7 +6,7 @@ namespace SqlAgent.Tests;
 
 /// <summary>
 /// ChatOutcome in isolation. The tab that used to wrap it is gone — Phase B1 moved conversations to
-/// Chat.razor and the SQL editor to /sql — but the component itself survives until Phase D replaces it
+/// ChatPage.razor and the SQL editor to /sql — but the component itself survives until Phase D replaces it
 /// with SqlBlock and DataTable, and these five outcomes are exactly what it has to keep rendering.
 /// </summary>
 public class ChatOutcomeTests

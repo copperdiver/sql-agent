@@ -1,0 +1,24 @@
+@* Two outcomes, both spelled out. This is the only operation in the phase that can destroy a
+   conversation, so neither answer is a default and neither is hidden behind the other. *@
+<Modal Title="Delete project" OnClose="OnCancel">
+    <ChildContent>
+        <p>Delete <strong>@Project.Name</strong>?</p>
+        <p class="muted">
+            It holds @Project.ChatCount @(Project.ChatCount == 1 ? "chat" : "chats").
+            Keeping them returns them to your history.
+        </p>
+    </ChildContent>
+    <Footer>
+        <button type="button" data-testid="project-delete-cancel" @onclick="OnCancel">Cancel</button>
+        <button type="button" data-testid="project-delete-keep"
+                @onclick="() => OnConfirm.InvokeAsync(ProjectDeleteMode.KeepChats)">Delete, keep the chats</button>
+        <button type="button" class="danger" data-testid="project-delete-with-chats"
+                @onclick="() => OnConfirm.InvokeAsync(ProjectDeleteMode.DeleteChats)">Delete the chats too</button>
+    </Footer>
+</Modal>
+
+@code {
+    [Parameter, EditorRequired] public ProjectSummary Project { get; set; } = default!;
+    [Parameter] public EventCallback<ProjectDeleteMode> OnConfirm { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+}

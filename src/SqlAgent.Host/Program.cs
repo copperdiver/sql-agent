@@ -32,11 +32,14 @@ builder.Services.AddScoped<SchemaService>();
 builder.Services.AddScoped<TablePolicyService>();
 builder.Services.AddScoped<NlQueryService>();
 builder.Services.AddScoped<ChatService>();
+builder.Services.AddScoped<ProjectService>();
+builder.Services.AddScoped<SearchService>();
 builder.Services.AddScoped<ChatTurnService>();
 builder.Services.AddScoped<LocalTokenAuthenticator>();
 builder.Services.AddScoped<ScopedRunner>();
 builder.Services.AddScoped<AppState>();
 builder.Services.AddScoped<DialogService>();
+builder.Services.AddScoped<ShortcutService>();
 
 // Fail-closed LLM seam: ask_database resolves to a stable llm_not_configured until a vendor gateway is wired.
 builder.Services.AddSingleton<ILlmSqlGateway, UnavailableLlmSqlGateway>();

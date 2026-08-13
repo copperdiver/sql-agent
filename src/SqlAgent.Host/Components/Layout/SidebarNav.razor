@@ -1,10 +1,18 @@
-@* Search joins these in Phase B2, with the modal behind it. A row that navigates nowhere is worse than
-   no row, which is why Phase A shipped only the routes that existed. *@
+@implements IDisposable
+@inject DialogService Dialogs
+@inject ShortcutService Shortcuts
+
 <nav class="sidebar-nav">
     <NavLink class="nav-row" href="/" Match="NavLinkMatch.All">
         <Icon Name="plus" Size="18" />
         <span class="nav-label">New chat</span>
     </NavLink>
+    @* A button rather than a NavLink: search is a dialog, not a route, and a link that navigates nowhere
+       is a lie in the markup. *@
+    <button type="button" class="nav-row" data-testid="nav-search" @onclick="ShowSearch">
+        <Icon Name="search" Size="18" />
+        <span class="nav-label">Search</span>
+    </button>
     <NavLink class="nav-row" href="/sql">
         <Icon Name="terminal" Size="18" />
         <span class="nav-label">SQL</span>
@@ -21,4 +29,22 @@
 
 @code {
     [Parameter] public bool Collapsed { get; set; }
+
+    protected override void OnInitialized() => Shortcuts.SearchRequested += OnSearchRequested;
+
+    private void OnSearchRequested() => InvokeAsync(() => { ShowSearch(); StateHasChanged(); });
+
+    // Guarded on Current being empty: Ctrl/Cmd+K is a document-level shortcut, so it fires even while a
+    // rename or another dialog is already open and mid-edit, and Show() unconditionally replaces whatever
+    // DialogService is holding. Without this a half-typed rename (or the search dialog itself, mid-query)
+    // vanishes under a fresh SearchDialog for no reason the user asked for. The click that also calls this
+    // method is never actually reachable while a dialog is open -- Modal's scrim covers the whole viewport
+    // at z-index 60 -- so the guard costs that path nothing.
+    private void ShowSearch()
+    {
+        if (Dialogs.Current is not null) return;
+        Dialogs.Show(@<SearchDialog OnClose="Dialogs.Close" />);
+    }
+
+    public void Dispose() => Shortcuts.SearchRequested -= OnSearchRequested;
 }

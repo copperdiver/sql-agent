@@ -1,3 +1,9 @@
+@implements IDisposable
+@using Microsoft.Extensions.Logging
+@using Microsoft.JSInterop
+@inject ShortcutService Shortcuts
+@inject ILogger<Modal> Logger
+
 <div class="modal-root" @onkeydown="OnKeyDown" tabindex="-1">
     <div class="modal-scrim" @onclick="Close"></div>
     @* No stopPropagation needed: the scrim and the panel are siblings under .modal-root, not nested,
@@ -7,10 +13,7 @@
     <div class="modal-panel" role="dialog" aria-modal="true" aria-label="@Title">
         <div class="modal-head">
             <h3>@Title</h3>
-            @* autofocus moves focus inside the dialog as soon as it renders, with no JS interop. That
-               is also what lets a real Escape keypress bubble to OnKeyDown below: without it, focus
-               stays wherever it was before the dialog opened and Escape never reaches .modal-root. *@
-            <button type="button" class="ghost modal-close" @onclick="Close" aria-label="Close" autofocus>
+            <button type="button" class="ghost modal-close" @onclick="Close" aria-label="Close" @ref="_closeButton">
                 <Icon Name="x" Size="18" />
             </button>
         </div>
@@ -28,7 +31,70 @@
     [Parameter] public RenderFragment? Footer { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
 
+    /// <summary>What to focus once the dialog has actually rendered. A <c>Func</c> rather than an
+    /// <see cref="ElementReference"/> directly: a caller's own field (e.g. NameDialog's input) is still
+    /// <c>default</c> at the point this parameter is bound -- its element does not exist in the DOM yet
+    /// -- and only resolves to something real by the time <see cref="OnAfterRenderAsync"/> below actually
+    /// invokes the callback. Defaults to this dialog's own close button, so every caller gets a real
+    /// focus move even when it supplies nothing more specific -- MoveToProjectDialog and the About dialog,
+    /// for instance, have no single field that deserves it more than another.
+    ///
+    /// This is the only FocusAsync call a dialog should make. NameDialog and SearchDialog both pass their
+    /// own field through this parameter rather than also calling FocusAsync themselves in their own
+    /// OnAfterRenderAsync -- SearchDialog used to do exactly that, on the assumption that its own call,
+    /// running after this component's default per the child-before-parent OnAfterRenderAsync ordering,
+    /// would simply overwrite it. Checked in a real browser rather than trusted, that assumption was
+    /// backwards: this component's own focus move landed second and silently won, leaving the search
+    /// input unfocused while typing did nothing. Routing every caller's target through this one parameter
+    /// removes the ordering question entirely -- there is exactly one FocusAsync call per dialog, made
+    /// here, and nothing left to race.
+    ///
+    /// autofocus cannot do this job, on the close button or anywhere else: per the HTML spec a browser
+    /// only honors autofocus while the document's focused area is still &lt;body&gt; at insertion time,
+    /// and every dialog here is opened by a click or a keydown, both of which move focus away from body
+    /// before the dialog exists. Verified in Chromium rather than assumed -- see Sidebar.razor's
+    /// FocusDrawerIfJustOpenedAsync for the standalone probe. FocusAsync, called explicitly here, has no
+    /// such restriction.
+    ///
+    /// This is what lets a real Escape keypress reach OnKeyDown below via bubbling, but it is not what
+    /// makes Escape close a dialog in every browser: that is Shortcuts.EscapePressed, subscribed below,
+    /// which fires regardless of where focus is and is the only path that reaches a dialog whose focus
+    /// move above failed or raced the interop call. Do not delete that subscription on the strength of
+    /// this one -- Safari in particular does not focus a button on a plain mouse click at all (see
+    /// ShortcutService's own doc comment), so a dialog opened by mouse there has nothing for a bubbling
+    /// Escape to start from regardless of what this parameter focuses.</summary>
+    [Parameter] public Func<ElementReference>? InitialFocus { get; set; }
+
+    private ElementReference _closeButton;
+
+    protected override void OnInitialized() => Shortcuts.EscapePressed += OnGlobalEscape;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            await (InitialFocus?.Invoke() ?? _closeButton).FocusAsync();
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or OperationCanceledException)
+        {
+            // Same three failures FocusAsync can throw everywhere else in this codebase (see
+            // Sidebar.FocusDrawerIfJustOpenedAsync) and the same level split: a JSException means
+            // Blazor's own focus interop is missing, a real bug worth Warning; a gone circuit or an
+            // interop timeout is routine and stays at Debug. Losing the move costs only the
+            // keyboard-first workflow and local Escape bubbling -- the scrim, the close button and the
+            // document-level Escape shortcut still dismiss the dialog -- so there is nothing to recover
+            // and nothing worth surfacing to the user.
+            Logger.Log(ex is JSException ? LogLevel.Warning : LogLevel.Debug, ex,
+                "Focusing the dialog on open failed; typing will require a manual click into it.");
+        }
+    }
+
     private Task Close() => OnClose.InvokeAsync();
 
     private Task OnKeyDown(KeyboardEventArgs e) => e.Key == "Escape" ? Close() : Task.CompletedTask;
+
+    private void OnGlobalEscape() => InvokeAsync(Close);
+
+    public void Dispose() => Shortcuts.EscapePressed -= OnGlobalEscape;
 }

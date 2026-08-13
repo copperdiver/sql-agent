@@ -20,6 +20,7 @@ public class UserCardTests
             .Build();
         ctx.Services.AddSingleton<IConfiguration>(config);
         ctx.Services.AddSingleton<HostInfo>();
+        ctx.Services.AddScoped<ShortcutService>();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
         ctx.JSInterop.Setup<string>("sqlAgentUi.getTheme").SetResult("system");
         return ctx;

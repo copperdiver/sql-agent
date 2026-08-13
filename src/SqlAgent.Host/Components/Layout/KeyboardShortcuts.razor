@@ -1,0 +1,54 @@
+@implements IAsyncDisposable
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
+@inject ShortcutService Shortcuts
+@inject ILogger<KeyboardShortcuts> Logger
+
+@code {
+    private DotNetObjectReference<KeyboardShortcuts>? _self;
+
+    [JSInvokable]
+    public void OnEscape() => Shortcuts.RaiseEscape();
+
+    [JSInvokable]
+    public void OnSearch() => Shortcuts.RaiseSearch();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        _self = DotNetObjectReference.Create(this);
+        try
+        {
+            await JS.InvokeVoidAsync("sqlAgentShortcuts.bind", _self);
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or OperationCanceledException)
+        {
+            // Losing the binding costs the global shortcut and Safari's Escape; every menu still closes
+            // by click and by its own local handler, so there is nothing to recover and nothing worth
+            // telling the user. Level split by meaning, as everywhere else here.
+            Logger.Log(ex is JSException ? LogLevel.Warning : LogLevel.Debug, ex,
+                "sqlAgentShortcuts.bind failed; Ctrl/Cmd+K and document-level Escape are unavailable.");
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_self is not null)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("sqlAgentShortcuts.unbind");
+            }
+            catch (Exception ex) when (ex is JSException or JSDisconnectedException or OperationCanceledException)
+            {
+                Logger.Log(ex is JSException ? LogLevel.Warning : LogLevel.Debug, ex,
+                    "sqlAgentShortcuts.unbind failed.");
+            }
+            finally
+            {
+                _self.Dispose();
+                _self = null;
+            }
+        }
+    }
+}

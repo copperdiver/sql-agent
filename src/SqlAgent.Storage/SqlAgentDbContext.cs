@@ -14,6 +14,7 @@ public class SqlAgentDbContext(DbContextOptions<SqlAgentDbContext> options) : Db
     public DbSet<Chat> Chats => Set<Chat>();
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
     public DbSet<ChatMessageDatabase> ChatMessageDatabases => Set<ChatMessageDatabase>();
+    public DbSet<Project> Projects => Set<Project>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -36,6 +37,7 @@ public class SqlAgentDbContext(DbContextOptions<SqlAgentDbContext> options) : Db
         {
             e.HasKey(x => x.Id);
             e.HasIndex(x => x.LastMessageAt);
+            e.HasIndex(x => x.ProjectId);
         });
         b.Entity<ChatMessage>(e =>
         {
@@ -68,6 +70,22 @@ public class SqlAgentDbContext(DbContextOptions<SqlAgentDbContext> options) : Db
             // constraint on a table that has nothing to do with chat and make
             // DatabaseConnectionService's delete path depend on chat schema. DatabaseName is what a
             // transcript actually relies on to say what a question was asked against.
+        });
+
+        b.Entity<Project>(e =>
+        {
+            e.HasKey(x => x.Id);
+            // NOCASE so "Quarterly" and "quarterly" are the same name. Two projects differing only in
+            // case would be indistinguishable in a sidebar row and useful to nobody; collating the
+            // column rather than lower-casing in the query means the unique index enforces it too,
+            // instead of the check and the index disagreeing.
+            e.Property(x => x.Name).UseCollation("NOCASE").HasMaxLength(60);
+            e.HasIndex(x => x.Name).IsUnique();
+            // Restrict, not Cascade or SetNull: deleting a project has to be an explicit decision about
+            // its chats, and ProjectService.DeleteProjectAsync is where that decision is made. With a
+            // cascade, a stray Remove() on a Project would silently take conversations with it.
+            e.HasMany(x => x.Chats).WithOne(c => c.Project)
+                .HasForeignKey(c => c.ProjectId).OnDelete(DeleteBehavior.Restrict);
         });
     }
 }
