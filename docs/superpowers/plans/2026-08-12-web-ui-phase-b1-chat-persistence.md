@@ -2332,8 +2332,17 @@ COMMIT
 
 **Interfaces:**
 - Consumes: `AppState.TakePendingSql()` from Task 5.
-- Produces: route `/sql`. `/` is left with no page until Task 9, so the app is briefly a 404 at the
-  root — the two tasks ship in one session and the whole suite is only green again after Task 9.
+- Produces: route `/sql`. `Workspace` **keeps `@page "/"` as well**, temporarily, and Task 9 deletes
+  that line when `Chat.razor` claims the root.
+
+  This was a correction made during execution. The plan originally left `/` with no page until Task 9,
+  on the assumption that Blazor's `<NotFound>` fallback would answer the root with a 200 and the
+  integration tests that fetch `/` would pass. It does not: `MapRazorComponents` registers endpoints
+  only for discovered `@page` routes, so with no component claiming `/` the request 404s at routing and
+  the router never runs. Five `TokenAuthTests` / `DesignSystemTests` cases failed. Keeping the existing
+  page on its existing route two tasks longer costs one line that Task 9 removes by construction, and
+  it keeps the suite green at every commit — which is what lets the next task tell its own breakage
+  from inherited breakage.
 
 - [ ] **Step 1: Move the chat tests out of the way**
 
@@ -2348,7 +2357,7 @@ this task deletes, and their coverage moves to `ChatPageTests` in Task 9.
    `A_successful_answer_shows_the_generated_sql_and_the_rows`. They construct their own `TestContext`
    and need none of the fixture, so the constructor, the fields, `IDisposable`, and the private helpers
    all go with the deleted tests.
-3. Delete the five that render `Workspace`: `Selecting_the_Chat_tab_with_no_connection_selected_shows_the_prompt_not_the_transcript`,
+3. Delete the six that render `Workspace`: `Selecting_the_Chat_tab_with_no_connection_selected_shows_the_prompt_not_the_transcript`,
    `Whitespace_only_question_keeps_the_Ask_button_disabled`,
    `Two_sequential_questions_each_keep_their_own_question_paired_with_their_own_result`,
    `A_second_Ask_click_while_the_first_is_in_flight_is_ignored`,
@@ -2377,6 +2386,11 @@ page changes underneath it.
 - [ ] **Step 3: Rewrite `Workspace.razor`**
 
 ```razor
+@* Temporary, removed in Task 9: the root route stays here until Chat.razor claims it, so the suite is
+   green at every commit rather than only at the end of the phase. MapRazorComponents registers
+   endpoints only for discovered @page routes, so a root with no component 404s at routing — the
+   router's NotFound never runs, and every integration test that fetches "/" fails. *@
+@page "/"
 @page "/sql"
 @implements IDisposable
 @inject ScopedRunner Runner
@@ -2518,12 +2532,12 @@ asserts on the old row names. Replace the two assertions and the stale comment:
 - [ ] **Step 6: Run the suite**
 
 Run: `dotnet test SqlAgent.slnx --configuration Release`
-Expected: PASS. `WorkspaceTests` renders `Workspace` directly rather than through the router and never
-touched the tab strip, so all eleven of its tests stay green unchanged.
+Expected: PASS, the whole suite. `WorkspaceTests` renders `Workspace` directly rather than through the
+router and never touched the tab strip, so all eleven of its tests stay green unchanged, and the
+temporary `@page "/"` keeps every integration test that fetches the root passing.
 
-The app now 404s at `/` — `Routes.razor` renders its "Not found." fallback. That is expected and lasts
-until Task 9. Do not add a placeholder page for it: a route that exists to be replaced two tasks later
-is a thing to remember to delete.
+If you are tempted to drop that root route to "finish the move" — don't. Task 9 removes it in the same
+step that adds `Chat.razor`, which is the only moment at which something else answers `/`.
 
 - [ ] **Step 7: Commit**
 
@@ -3156,6 +3170,7 @@ COMMIT
 - Create: `src/SqlAgent.Host/Components/Pages/Chat.razor` + `.razor.css`
 - Modify: `src/SqlAgent.Host/Components/Shared/ChatOutcome.razor` + `.razor.css` (a `Restored` parameter)
 - Modify: `src/SqlAgent.Host/Components/Shared/Chat/Composer.razor` (expose `FocusAsync`)
+- Modify: `src/SqlAgent.Host/Components/Pages/Workspace.razor` (delete its temporary `@page "/"`)
 - Test: `tests/SqlAgent.Tests/ChatPageTests.cs`, `tests/SqlAgent.Tests/ChatOutcomeTests.cs` (one new fact)
 
 **Interfaces:**
@@ -3628,7 +3643,13 @@ Create `src/SqlAgent.Host/Components/Shared/Chat/MessageList.razor.css`:
 .transcript { display: flex; flex-direction: column; gap: var(--space-5); }
 ```
 
-- [ ] **Step 6: Write the page**
+- [ ] **Step 6: Write the page, and take the root route off `Workspace`**
+
+Two components cannot both claim `/`: Blazor's router throws `AmbiguousMatchException` at navigation
+time, not at build time, so the failure would land at runtime on the very first request. Delete the
+temporary `@page "/"` line and its comment from `src/SqlAgent.Host/Components/Pages/Workspace.razor`
+in the same commit that adds the page below. Task 7 left that line in place deliberately, so the suite
+stayed green while the root had no other tenant; this is the moment it acquires one.
 
 Create `src/SqlAgent.Host/Components/Pages/Chat.razor`:
 
