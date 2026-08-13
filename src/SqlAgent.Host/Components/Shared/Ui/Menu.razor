@@ -1,3 +1,6 @@
+@implements IDisposable
+@inject ShortcutService Shortcuts
+
 @* tabindex is what makes @onkeydown fire on a div at all, and -1 keeps the wrapper out of the tab
    order so Escape works without adding a phantom tab stop before every menu. *@
 <div class="menu-root" @onkeydown="OnKeyDown" tabindex="-1">
@@ -42,7 +45,15 @@
         _ => "place-bottom",
     };
 
-    private void Toggle() => _open = !_open;
+    private void Toggle()
+    {
+        _open = !_open;
+        // Subscribed only while open: a sidebar of twenty rows would otherwise hold twenty live handlers
+        // for the life of the circuit and run all of them on every Escape. Same discipline as the
+        // drawer's conditional keydown handler.
+        if (_open) Shortcuts.EscapePressed += OnGlobalEscape;
+        else Shortcuts.EscapePressed -= OnGlobalEscape;
+    }
 
     public void Close()
     {
@@ -50,6 +61,7 @@
         // handlers, which Blazor re-renders automatically once the handler returns. MenuItem calls this
         // method on a sibling component instance (via the cascaded Owner), and mutating a field on a
         // component that isn't itself handling the event does not queue that component for re-render.
+        if (_open) Shortcuts.EscapePressed -= OnGlobalEscape;
         _open = false;
         StateHasChanged();
     }
@@ -58,4 +70,11 @@
     {
         if (e.Key == "Escape") Close();
     }
+
+    /// <summary>The document-level Escape. The local handler above still exists and still works
+    /// everywhere it fires; this is what covers Safari, where a click leaves no focused element for the
+    /// keypress to bubble from.</summary>
+    private void OnGlobalEscape() => InvokeAsync(Close);
+
+    public void Dispose() => Shortcuts.EscapePressed -= OnGlobalEscape;
 }

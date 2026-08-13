@@ -1,7 +1,9 @@
 using Bunit;
 using Microsoft.AspNetCore.Components;
+using Microsoft.Extensions.DependencyInjection;
 using SqlAgent.Core;
 using SqlAgent.Host.Components.Shared.Chat;
+using SqlAgent.Host.Web;
 using SqlAgent.Storage;
 
 namespace SqlAgent.Tests;
@@ -11,6 +13,7 @@ public class ComposerTests
     private static Bunit.TestContext NewContext()
     {
         var ctx = new Bunit.TestContext();
+        ctx.Services.AddScoped<ShortcutService>();
         // Composer binds its Enter handling in JS, the same shape SqlEditor uses for Ctrl+Enter. bUnit's
         // strict JSInterop needs both calls planned; the `_ => true` matcher accepts any arguments
         // because one of them is an ElementReference the test cannot predict.

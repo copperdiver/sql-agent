@@ -23,6 +23,7 @@ public class ProjectSectionTests : IDisposable
         _ctx.Services.AddScoped<ScopedRunner>();
         _ctx.Services.AddScoped<AppState>();
         _ctx.Services.AddScoped<DialogService>();
+        _ctx.Services.AddScoped<ShortcutService>();
         _ctx.JSInterop.Mode = JSRuntimeMode.Loose;
 
         using var scope = _ctx.Services.CreateScope();

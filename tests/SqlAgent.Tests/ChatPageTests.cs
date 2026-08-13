@@ -56,6 +56,7 @@ public class ChatPageTests : IDisposable
         _ctx.Services.AddScoped<ScopedRunner>();
         _ctx.Services.AddScoped<AppState>();
         _ctx.Services.AddScoped<DialogService>();
+        _ctx.Services.AddScoped<ShortcutService>();
 
         using var scope = _ctx.Services.CreateScope();
         scope.ServiceProvider.GetRequiredService<SqlAgentDbContext>().Database.EnsureCreated();

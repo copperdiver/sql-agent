@@ -34,6 +34,7 @@ public class HistorySectionTests : IDisposable
         _ctx.Services.AddSingleton<ISecretStore, InMemorySecretStore>();
         _ctx.Services.AddSingleton<IDatabaseProviderRegistry>(new DatabaseProviderRegistry([]));
         _ctx.Services.AddScoped<DatabaseConnectionService>();
+        _ctx.Services.AddScoped<ShortcutService>();
         _ctx.JSInterop.Mode = JSRuntimeMode.Loose;
 
         using var scope = _ctx.Services.CreateScope();

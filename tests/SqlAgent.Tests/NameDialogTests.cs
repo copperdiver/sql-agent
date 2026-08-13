@@ -1,6 +1,8 @@
 using Bunit;
 using Microsoft.AspNetCore.Components;
+using Microsoft.Extensions.DependencyInjection;
 using SqlAgent.Host.Components.Shared.Chat;
+using SqlAgent.Host.Web;
 
 namespace SqlAgent.Tests;
 
@@ -12,6 +14,7 @@ public class NameDialogTests
         // Renaming starts from what the thing is called, so the common edit — fixing one word — does not
         // begin by retyping the whole name.
         using var ctx = new Bunit.TestContext();
+        ctx.Services.AddScoped<ShortcutService>();
 
         var dialog = ctx.RenderComponent<NameDialog>(p => p
             .Add(d => d.Title, "Rename chat")
@@ -25,6 +28,7 @@ public class NameDialogTests
     public void Saving_reports_the_edited_name()
     {
         using var ctx = new Bunit.TestContext();
+        ctx.Services.AddScoped<ShortcutService>();
         var saved = "";
 
         var dialog = ctx.RenderComponent<NameDialog>(p => p
@@ -43,6 +47,7 @@ public class NameDialogTests
         // The services substitute a placeholder for a blank name, but a dialog that accepts one and then
         // shows something the user did not type reads as a bug rather than as a default.
         using var ctx = new Bunit.TestContext();
+        ctx.Services.AddScoped<ShortcutService>();
 
         var dialog = ctx.RenderComponent<NameDialog>(p => p
             .Add(d => d.Title, "New project")
@@ -61,6 +66,7 @@ public class NameDialogTests
     public void Cancelling_reports_nothing()
     {
         using var ctx = new Bunit.TestContext();
+        ctx.Services.AddScoped<ShortcutService>();
         var saves = 0;
         var cancels = 0;
 
@@ -81,6 +87,7 @@ public class NameDialogTests
     {
         // "Save" is right for a rename and wrong for a creation. One dialog, two verbs.
         using var ctx = new Bunit.TestContext();
+        ctx.Services.AddScoped<ShortcutService>();
 
         var dialog = ctx.RenderComponent<NameDialog>(p => p
             .Add(d => d.Title, "New project")

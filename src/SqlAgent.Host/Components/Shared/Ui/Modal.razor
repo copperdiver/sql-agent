@@ -1,3 +1,6 @@
+@implements IDisposable
+@inject ShortcutService Shortcuts
+
 <div class="modal-root" @onkeydown="OnKeyDown" tabindex="-1">
     <div class="modal-scrim" @onclick="Close"></div>
     @* No stopPropagation needed: the scrim and the panel are siblings under .modal-root, not nested,
@@ -28,7 +31,13 @@
     [Parameter] public RenderFragment? Footer { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
 
+    protected override void OnInitialized() => Shortcuts.EscapePressed += OnGlobalEscape;
+
     private Task Close() => OnClose.InvokeAsync();
 
     private Task OnKeyDown(KeyboardEventArgs e) => e.Key == "Escape" ? Close() : Task.CompletedTask;
+
+    private void OnGlobalEscape() => InvokeAsync(Close);
+
+    public void Dispose() => Shortcuts.EscapePressed -= OnGlobalEscape;
 }
