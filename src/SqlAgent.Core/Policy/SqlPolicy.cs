@@ -286,23 +286,56 @@ public record PolicyDecision(
 }
 
 /// <summary>
+/// What a connection's policy allows against one object. Ordered from most to least restrictive so a
+/// caller resolving an ambiguous (unqualified) name can take the minimum and stay fail-closed.
+/// </summary>
+public enum ObjectAccess
+{
+    /// <summary>Not visible: absent from the schema handed to the model, and refused if named anyway.</summary>
+    Hidden = 0,
+
+    /// <summary>Visible and readable; refused as the target of a write.</summary>
+    ReadOnly = 1,
+
+    /// <summary>Visible, readable, writable. Also what an object with no policy row gets.</summary>
+    Full = 2,
+}
+
+/// <summary>
+/// One object's effective policy: its access level, and whether it is a view. Both travel together
+/// because a caller resolving a name has to do exactly one lookup, and doing it twice is how the
+/// fail-closed matching rule for unqualified names ends up implemented two slightly different ways.
+/// </summary>
+public record ObjectPolicy(ObjectAccess Access, bool IsView)
+{
+    /// <summary>An object with no policy row: fully accessible, and not a view until something says so.</summary>
+    public static ObjectPolicy Default { get; } = new(ObjectAccess.Full, false);
+}
+
+/// <summary>
 /// Applies connection policy to parsed SQL (CD-50 T5): rejects multi-statement batches, unsupported
-/// statements, mutating statements on read-only connections, and any reference to a hidden table —
-/// all before execution. Decoupled from storage: visibility is supplied as a predicate.
+/// statements, mutating statements on read-only connections, references to hidden objects, writes to
+/// views, and writes to read-only objects — all before execution. Decoupled from storage: policy is
+/// supplied as one resolver.
 /// </summary>
 public static class SqlPolicyValidator
 {
-    /// <param name="isVisible">
-    /// Returns false for a table the policy hides. Tables with no policy row should return true
-    /// (the model defaults to visible). Only real tables reach this predicate: CTE aliases are resolved
-    /// out scope-aware during parsing, while the real base tables inside a CTE body are still passed in,
-    /// so a hidden table cannot be masked by wrapping it in a CTE or alias.
+    /// <param name="resolve">
+    /// Returns the effective policy for one referenced object. An object with no policy row must resolve
+    /// to <see cref="ObjectPolicy.Default"/> — absence means full access, which is the rule every layer
+    /// in this codebase applies. Only real objects reach this resolver: CTE aliases are resolved out
+    /// scope-aware during parsing, while the real base tables inside a CTE body are still passed in, so a
+    /// hidden object cannot be masked by wrapping it in a CTE or alias.
+    ///
+    /// The caller owns the fail-closed rule for an unqualified name — take the most restrictive
+    /// <see cref="ObjectAccess"/> among same-named objects across schemas, and report a view if any match
+    /// is one.
     /// </param>
     public static PolicyDecision Validate(
         string sql,
         DatabaseProviderType provider,
         bool isReadOnly,
-        Func<SqlTableReference, bool> isVisible)
+        Func<SqlTableReference, ObjectPolicy> resolve)
     {
         if (string.IsNullOrWhiteSpace(sql))
             return PolicyDecision.Deny("policy_denied_empty", "No executable SQL statement was provided.", []);
@@ -343,11 +376,32 @@ public static class SqlPolicyValidator
                 $"Connection is read-only; '{stmt.StatementType}' would modify data.",
                 stmt.Tables, stmt.Normalized);
 
-        var hidden = stmt.Tables.Where(t => !isVisible(t)).ToList();
+        // Visibility first, and over every reference rather than only the written ones. A hidden object's
+        // name must not leak, and refusing it for any more specific reason would concede that it exists.
+        var hidden = stmt.Tables.Where(t => resolve(t).Access == ObjectAccess.Hidden).ToList();
         if (hidden.Count > 0)
             return PolicyDecision.Deny(
                 "policy_denied_hidden_table",
                 $"References table(s) not visible to this connection: {string.Join(", ", hidden)}.",
+                stmt.Tables, stmt.Normalized);
+
+        // Views before levels. A view can only be Not visible or Read-only, so checking the level first
+        // would make this branch unreachable and would tell the user to raise a level that the object is
+        // not allowed to have.
+        var writtenViews = stmt.WrittenTables.Where(t => resolve(t).IsView).ToList();
+        if (writtenViews.Count > 0)
+            return PolicyDecision.Deny(
+                "policy_denied_view_write",
+                $"'{stmt.StatementType}' writes to view(s): {string.Join(", ", writtenViews)}.",
+                stmt.Tables, stmt.Normalized);
+
+        var readOnlyTargets = stmt.WrittenTables
+            .Where(t => resolve(t).Access == ObjectAccess.ReadOnly)
+            .ToList();
+        if (readOnlyTargets.Count > 0)
+            return PolicyDecision.Deny(
+                "policy_denied_readonly_object",
+                $"'{stmt.StatementType}' writes to read-only object(s): {string.Join(", ", readOnlyTargets)}.",
                 stmt.Tables, stmt.Normalized);
 
         return PolicyDecision.Allow(stmt.Tables, stmt.Normalized);

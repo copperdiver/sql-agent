@@ -27,8 +27,8 @@ public class QueryExecutionService(
             // No connection row exists, so there is nothing to audit against — return the error directly.
             return QueryExecutionResult.Failure(sql, "connection_not_found", "No such database connection.");
 
-        var isVisible = await BuildVisibilityAsync(connectionId, ct);
-        var decision = SqlPolicyValidator.Validate(sql, info.ProviderType, info.IsReadOnly, isVisible);
+        var resolve = await BuildPolicyResolverAsync(connectionId, ct);
+        var decision = SqlPolicyValidator.Validate(sql, info.ProviderType, info.IsReadOnly, resolve);
 
         if (!decision.Allowed)
         {
@@ -83,21 +83,28 @@ public class QueryExecutionService(
     }
 
     /// <summary>
-    /// A table is hidden if a TablePolicy marks it invisible. Matching is fail-closed for unqualified SQL:
-    /// a bare table name is hidden if any schema's same-named table is hidden; a schema-qualified name must
-    /// match the policy's schema too. (Tables with no policy row default to visible — same as the schema
-    /// description path.)
+    /// An object is hidden if a TablePolicy marks it invisible. Matching is fail-closed for unqualified
+    /// SQL: a bare name is hidden if any schema's same-named object is hidden; a schema-qualified name
+    /// must match the policy's schema too. Objects with no policy row default to full access — the same
+    /// rule the schema description path applies.
+    ///
+    /// Levels and views are not read here yet; Task 10 widens this. Until then every visible object
+    /// resolves to Full and nothing resolves as a view, which is exactly the behaviour that shipped
+    /// before per-object access existed.
     /// </summary>
-    private async Task<Func<SqlTableReference, bool>> BuildVisibilityAsync(Guid connectionId, CancellationToken ct)
+    private async Task<Func<SqlTableReference, ObjectPolicy>> BuildPolicyResolverAsync(
+        Guid connectionId, CancellationToken ct)
     {
         var hidden = await db.TablePolicies
             .Where(p => p.DatabaseConnectionId == connectionId && !p.IsVisible)
             .Select(p => new { p.SchemaName, p.TableName })
             .ToListAsync(ct);
 
-        return t => !hidden.Any(h =>
+        return t => hidden.Any(h =>
             string.Equals(h.TableName, t.Name, StringComparison.OrdinalIgnoreCase) &&
-            (t.Schema is null || string.Equals(h.SchemaName, t.Schema, StringComparison.OrdinalIgnoreCase)));
+            (t.Schema is null || string.Equals(h.SchemaName, t.Schema, StringComparison.OrdinalIgnoreCase)))
+                ? new ObjectPolicy(ObjectAccess.Hidden, false)
+                : ObjectPolicy.Default;
     }
 
     private async Task AuditAsync(
