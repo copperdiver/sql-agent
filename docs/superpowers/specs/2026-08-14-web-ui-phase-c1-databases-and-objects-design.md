@@ -325,6 +325,23 @@ New codes: `policy_denied_view_write`, `policy_denied_readonly_object`,
 `connection_test_timeout`. The existing `connection_test_failed` becomes the
 `Unknown` case.
 
+**Accepted limitation: the view-write guard is only as fresh as the cache.**
+`SchemaCache` has no expiry, and nothing invalidates it when the database's own
+structure changes — the only invalidators are policy edits. So a view created
+after the cache warmed is absent from `ViewList`, resolves to full access with
+`IsView` false, and a write to it executes. That is the failure this phase exists
+to close, deferred rather than prevented.
+
+It is accepted rather than fixed because the staleness is not new: a table
+created after the cache warmed is equally invisible to the model, and has been
+since `SchemaCache` was introduced. What this phase adds is a security decision
+resting on it. Both available remedies — an age bound on `GeneratedAt`, or an
+explicit refresh action — are behaviour this spec never designed, and the age
+bound changes the cache's contract for every consumer. Bounding the window
+belongs with whichever phase gives the config page a refresh control; until then
+it is recorded here and carried on the manual checklist rather than left
+invisible.
+
 `schema_unavailable` is the fail-closed answer when the schema cannot be read at
 execution time. Identifying a view requires it, so a connection that can run a
 query but cannot read its own catalog is refused where it previously executed.

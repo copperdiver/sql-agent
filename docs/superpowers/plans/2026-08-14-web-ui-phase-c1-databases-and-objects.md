@@ -5302,6 +5302,13 @@ measurement. This is the measurement.
       `policy_denied_readonly_object`.
 - [ ] Write to a view from the SQL page: refused with `policy_denied_view_write`.
 - [ ] Hide a view, then confirm it is absent from the objects the agent is given.
+- [ ] **The staleness window, which no automated test can reach.** With a database
+      already configured and its schema cached, create a new view directly in the
+      database, then try to write to it from the SQL page. It will be **allowed** —
+      the guard reads a cache nothing invalidates on a DDL change. Confirm that
+      changing any object's access level (which does invalidate) makes the same
+      write refuse with `policy_denied_view_write`. This is a recorded, accepted
+      limitation, not a bug to file; the row exists so somebody has seen it happen.
 - [ ] Set a schema header to Not visible and confirm every object under it goes hidden — views included.
 - [ ] Start the host against a store from before this release: it migrates, a `.bak` appears beside it,
       the saved databases are all still listed, and the first schema read carries views.
