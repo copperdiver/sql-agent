@@ -2,8 +2,26 @@ using System.Text.Json.Serialization;
 
 namespace SqlAgent.Core;
 
-/// <summary>Provider-neutral description of a database's structure (CD-50 T4).</summary>
-public record DatabaseSchema(IReadOnlyList<SchemaTable> Tables);
+/// <summary>
+/// Provider-neutral description of a database's structure (CD-50 T4). <see cref="Views"/> is a defaulted
+/// trailing parameter so no existing call site breaks and JSON written by a build that predated views
+/// deserializes with none — read it through <see cref="ViewList"/> rather than guarding for null at every
+/// use.
+/// </summary>
+public record DatabaseSchema(
+    IReadOnlyList<SchemaTable> Tables,
+    IReadOnlyList<SchemaView>? Views = null)
+{
+    [JsonIgnore]
+    public IReadOnlyList<SchemaView> ViewList => Views ?? [];
+}
+
+/// <summary>
+/// One view, with its columns. No primary key, foreign keys, or indexes: a view has none, and the column
+/// list is what query generation actually needs. The view's defining SQL is deliberately absent — it is
+/// unbounded text headed for a prompt, and including it needs a budget story this phase does not have.
+/// </summary>
+public record SchemaView(string Schema, string Name, IReadOnlyList<SchemaColumn> Columns);
 
 /// <summary>One base table, with its columns, primary-key column order, outgoing foreign keys, and indexes.</summary>
 public record SchemaTable(
@@ -68,7 +86,11 @@ public static class SchemaModel
         IEnumerable<(string Schema, string Table, string Column, string RefSchema, string RefTable, string RefColumn)> foreignKeys,
         // Index rows are (schema, table, index, column, ordinal, unique). Providers that don't expose index
         // metadata pass nothing — the table simply carries no indexes. Rows must be ORDER BY index, ordinal.
-        IEnumerable<(string Schema, string Table, string Index, string Column, bool Unique)>? indexes = null)
+        IEnumerable<(string Schema, string Table, string Index, string Column, bool Unique)>? indexes = null,
+        // View column rows, same shape as the table column rows above and ordered the same way. Trailing
+        // and defaulted so a provider that does not extract views passes nothing.
+        IEnumerable<(string Schema, string View, string Column, string DataType, bool Nullable,
+            int? MaxLength, int? Precision, int? Scale)>? views = null)
     {
         var pkByTable = primaryKeys
             .GroupBy(p => (p.Schema, p.Table))
@@ -99,12 +121,28 @@ public static class SchemaModel
                 ixByTable.GetValueOrDefault(g.Key, [])))
             .ToList();
 
-        return new DatabaseSchema(tables);
+        // Null rather than an empty list when no rows were supplied: Build's own contract is that a
+        // provider which does not extract views produces a schema indistinguishable from one written
+        // before views existed, so a cached-JSON round trip cannot tell the two apart.
+        var viewList = views is null
+            ? null
+            : views
+                .GroupBy(v => (v.Schema, v.View))
+                .Select(g => new SchemaView(
+                    g.Key.Schema,
+                    g.Key.View,
+                    g.Select(c => new SchemaColumn(c.Column, c.DataType, c.Nullable, c.MaxLength, c.Precision, c.Scale)).ToList()))
+                .ToList();
+
+        return new DatabaseSchema(tables, viewList);
     }
 
     /// <summary>
-    /// Drops tables the policy says are invisible (CD-50 visibility). Foreign keys that point at a
+    /// Drops objects the policy says are invisible (CD-50 visibility). Foreign keys that point at a
     /// now-hidden table are also dropped, so a hidden table's name never leaks through a relationship.
+    /// Views go through the same predicate as tables — the predicate takes (schema, name) and cannot tell
+    /// the two apart, which is the point: one rule, so a view is never the object that quietly stays
+    /// visible after its table twin was hidden.
     /// </summary>
     public static DatabaseSchema Filter(DatabaseSchema schema, Func<string, string, bool> isVisible)
     {
@@ -120,6 +158,8 @@ public static class SchemaModel
             })
             .ToList();
 
-        return new DatabaseSchema(filtered);
+        var views = schema.ViewList.Where(v => isVisible(v.Schema, v.Name)).ToList();
+
+        return new DatabaseSchema(filtered, views);
     }
 }
