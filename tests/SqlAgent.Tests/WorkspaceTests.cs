@@ -111,6 +111,17 @@ public class WorkspaceTests : IDisposable
         // value-equality check, but that check only fires if something re-points AppState at the fresh
         // row in the first place — ReloadConnectionsAsync's second step. SchemaRailTests pinned this
         // end-to-end on the rail before Task 15 deleted it; nothing has pinned it since.
+        //
+        // The markup assertions below are not the ones doing the work: ReloadConnectionsAsync reassigns
+        // _connections unconditionally as its first line, before the re-pointing step ever runs, so the
+        // <select>'s option list refreshes to "reporting" regardless of whether re-pointing happens at
+        // all -- that half is already covered by The_picker_re_reads_when_the_connection_set_changes.
+        // And TextContent on a <select> concatenates every option's text regardless of which one carries
+        // the selected attribute, so it cannot tell "the picker still points at warehouse" apart from
+        // "the picker points at reporting". Asserting on State.Connection!.Name is what actually
+        // distinguishes both regressions this test exists to catch: drop ReloadConnectionsAsync's
+        // re-pointing step, or revert AppState.Select to id-only equality, and Connection keeps holding
+        // the stale "warehouse" record either way.
         var id = await SeedConnectionAsync("warehouse");
         var page = _ctx.RenderComponent<Workspace>();
         page.Find("[data-testid=sql-connection]").Change(id.ToString());
@@ -123,8 +134,12 @@ public class WorkspaceTests : IDisposable
                 id, new DatabaseConnectionInput("reporting", DatabaseProviderType.Postgres, true));
         }
         var state = _ctx.Services.GetRequiredService<AppState>();
+        var changedCount = 0;
+        state.Changed += () => changedCount++;
         await page.InvokeAsync(state.NotifyConnectionsChanged);
 
+        Assert.Equal("reporting", state.Connection!.Name);
+        Assert.Equal(1, changedCount);
         Assert.Contains("reporting", page.Find("[data-testid=sql-connection]").TextContent);
         Assert.DoesNotContain("warehouse", page.Find("[data-testid=sql-connection]").TextContent);
     }
