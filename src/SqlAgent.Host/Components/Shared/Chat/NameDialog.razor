@@ -1,7 +1,7 @@
 @* Presentational: it collects a name and reports it. The write happens in whichever component owns the
    service scope — a dialog that saves as a side effect of being rendered is much harder to reason about
    from the caller, and this one is shared by three callers with three different writes. *@
-<Modal Title="@Title" OnClose="OnCancel" InitialFocus="() => _valueInput">
+<Modal Title="@Title" OnClose="OnCancel" InitialFocus="() => _valueInput" FocusSignal="_focusSignal">
     <ChildContent>
         <label for="name-dialog-value">@Label</label>
         @* OnValueChanged is a method rather than an inline lambda: a lambda with a string literal inside
@@ -45,9 +45,20 @@
 
     private string _value = "";
     private ElementReference _valueInput;
+    private int _focusSignal;
+    private string? _lastError;
 
     // OnInitialized, not a field initializer: parameters are not set yet when fields initialize.
     protected override void OnInitialized() => _value = InitialValue;
+
+    // On an arriving error only, not on one clearing: an error clears as the dialog closes or as the
+    // caller re-opens it fresh, and both already focus through firstRender.
+    protected override void OnParametersSet()
+    {
+        if (Error == _lastError) return;
+        _lastError = Error;
+        if (!string.IsNullOrWhiteSpace(Error)) _focusSignal++;
+    }
 
     private void OnValueChanged(ChangeEventArgs e) => _value = e.Value?.ToString() ?? string.Empty;
 }

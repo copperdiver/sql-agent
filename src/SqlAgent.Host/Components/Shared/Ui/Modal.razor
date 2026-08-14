@@ -65,13 +65,44 @@
     /// Escape to start from regardless of what this parameter focuses.</summary>
     [Parameter] public Func<ElementReference>? InitialFocus { get; set; }
 
+    /// <summary>Changes value when the caller wants focus moved to <see cref="InitialFocus"/> again, on a
+    /// render that is not the first. A dialog re-shown with a validation error is the case:
+    /// DialogService swaps the render fragment, Blazor sees the same component type at the same position
+    /// and reuses the instance, so firstRender is false and the focus move above never runs -- leaving the
+    /// user to click back into the field to correct the name they just typed.
+    ///
+    /// An opaque object rather than a bool or a counter type: the two failed prior fixes for this class of
+    /// bug (see this parameter's own history above) each reached for the type that was convenient at the
+    /// call site rather than the type the job needed, and a bool can only ask "is a request pending", which
+    /// cannot tell two consecutive identical errors apart from one request repeated forever. A caller
+    /// signals with whatever it already has -- NameDialog uses a counter it owns, another caller could use
+    /// the error string itself -- and comparison is Equals, so a boxed int works and so does a string.
+    ///
+    /// Recorded before the await, not after: if FocusAsync throws, the signal must already read as
+    /// "handled" so a subsequent render (say, an unrelated keystroke bubbling up to a parent) does not
+    /// retry the same failed move forever. Recording it after the await would leave a signal that never
+    /// clears whenever the very call that clears it is what fails.
+    ///
+    /// This stays the only FocusAsync call a dialog makes. The alternative -- letting NameDialog focus its
+    /// own field from its own OnAfterRenderAsync -- is exactly what SearchDialog used to do, and the two
+    /// calls raced with this component's winning silently. Adding a second trigger for the existing call
+    /// (this parameter) rather than a second call site keeps that invariant intact.</summary>
+    [Parameter] public object? FocusSignal { get; set; }
+
     private ElementReference _closeButton;
+    private object? _lastFocusSignal;
 
     protected override void OnInitialized() => Shortcuts.EscapePressed += OnGlobalEscape;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender) return;
+        var signalChanged = !Equals(FocusSignal, _lastFocusSignal);
+        if (!firstRender && !signalChanged) return;
+
+        // Recorded before the await, not after: a failed focus must not leave the dialog trying again on
+        // every subsequent render.
+        _lastFocusSignal = FocusSignal;
+
         try
         {
             await (InitialFocus?.Invoke() ?? _closeButton).FocusAsync();
@@ -86,7 +117,7 @@
             // document-level Escape shortcut still dismiss the dialog -- so there is nothing to recover
             // and nothing worth surfacing to the user.
             Logger.Log(ex is JSException ? LogLevel.Warning : LogLevel.Debug, ex,
-                "Focusing the dialog on open failed; typing will require a manual click into it.");
+                "Focusing the dialog failed; typing will require a manual click into it.");
         }
     }
 

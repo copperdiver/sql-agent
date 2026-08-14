@@ -1,11 +1,48 @@
 using System.Text.RegularExpressions;
 using Bunit;
+using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Rendering;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.JSInterop;
 using SqlAgent.Host.Components.Shared.Ui;
+using SqlAgent.Host.Web;
 
 namespace SqlAgent.Tests;
 
 public class UiPrimitiveTests
 {
+    [Fact]
+    public void A_modal_focuses_once_on_open_and_again_only_when_its_signal_changes()
+    {
+        // bUnit cannot observe document.activeElement, so what is asserted here is the decision to
+        // focus — how many times the dialog asks for its target. Whether the browser honours it is a
+        // manual-checklist row, and always will be.
+        using var ctx = new Bunit.TestContext();
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
+        ctx.Services.AddScoped<ShortcutService>();
+
+        var asked = 0;
+        ElementReference captured = default;
+        var modal = ctx.RenderComponent<Modal>(p => p
+            .Add(m => m.Title, "t")
+            .Add(m => m.FocusSignal, 0)
+            .Add(m => m.ChildContent, (RenderFragment)(b =>
+            {
+                b.OpenElement(0, "input");
+                b.AddElementReferenceCapture(1, r => captured = r);
+                b.CloseElement();
+            }))
+            .Add(m => m.InitialFocus, () => { asked++; return captured; }));
+
+        Assert.Equal(1, asked);
+
+        modal.SetParametersAndRender(p => p.Add(m => m.FocusSignal, 0));
+        Assert.Equal(1, asked);
+
+        modal.SetParametersAndRender(p => p.Add(m => m.FocusSignal, 1));
+        Assert.Equal(2, asked);
+    }
+
     [Fact]
     public void An_icon_renders_an_svg_with_the_requested_size()
     {

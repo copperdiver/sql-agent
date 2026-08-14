@@ -3,12 +3,50 @@ using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.JSInterop;
 using SqlAgent.Host.Components.Shared.Chat;
+using SqlAgent.Host.Components.Shared.Ui;
 using SqlAgent.Host.Web;
 
 namespace SqlAgent.Tests;
 
 public class NameDialogTests
 {
+    [Fact]
+    public void An_arriving_error_asks_the_dialog_to_focus_the_field_again()
+    {
+        // The defect this closes: the caller re-shows the dialog with an error, Blazor reuses the
+        // instance, firstRender is false, and focus stays wherever the failed Save left it.
+        using var ctx = new Bunit.TestContext();
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
+        ctx.Services.AddScoped<ShortcutService>();
+
+        var dialog = ctx.RenderComponent<NameDialog>(p => p.Add(d => d.Title, "New project"));
+        var before = dialog.FindComponent<Modal>().Instance.FocusSignal;
+
+        dialog.SetParametersAndRender(p => p.Add(d => d.Error, "That name is already taken."));
+
+        Assert.NotEqual(before, dialog.FindComponent<Modal>().Instance.FocusSignal);
+        Assert.Contains("already taken", dialog.Markup);
+    }
+
+    [Fact]
+    public void An_unchanged_error_does_not_keep_asking()
+    {
+        // A re-render for any other reason — a keystroke elsewhere, a parent's state change — must not
+        // yank focus back into the field while the user is somewhere else in the dialog.
+        using var ctx = new Bunit.TestContext();
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
+        ctx.Services.AddScoped<ShortcutService>();
+
+        var dialog = ctx.RenderComponent<NameDialog>(p => p
+            .Add(d => d.Title, "New project")
+            .Add(d => d.Error, "That name is already taken."));
+        var after = dialog.FindComponent<Modal>().Instance.FocusSignal;
+
+        dialog.SetParametersAndRender(p => p.Add(d => d.Error, "That name is already taken."));
+
+        Assert.Equal(after, dialog.FindComponent<Modal>().Instance.FocusSignal);
+    }
+
     [Fact]
     public void It_opens_with_the_current_name_already_in_the_box()
     {
