@@ -190,9 +190,15 @@ public class ShellTests : IDisposable
     {
         // Phase A's parity test insisted the rail stay until the config page existed. It exists now, so
         // this is the assertion that replaces that one -- not a deletion.
+        //
+        // Asserting on "Filter tables" instead of the rail's own markup was this test's defect: that
+        // string lived inside SchemaRail's `@if (State.Connection is { } active)` block, and this fixture
+        // seeds no connection and never selects one, so a restored rail would render only its <select> and
+        // label and this assertion would stay green. <aside class="rail"> was SchemaRail's root element,
+        // rendered on every render regardless of selection -- assert on that instead.
         var sidebar = _ctx.RenderComponent<Sidebar>();
 
-        Assert.DoesNotContain("Filter tables", sidebar.Markup);
+        Assert.DoesNotContain("class=\"rail\"", sidebar.Markup);
         Assert.Contains("Databases", sidebar.Markup);
     }
 

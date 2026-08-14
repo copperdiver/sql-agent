@@ -2,6 +2,7 @@
 @implements IDisposable
 @inject ScopedRunner Runner
 @inject AppState State
+@inject ILogger<Workspace> Logger
 
 @* The tab strip is gone. Conversations live on ChatPage.razor (/), and this page is what it always was
    underneath: a plain SQL editor over the same validated execution path. It is not a temporary parking
@@ -25,6 +26,14 @@
         }
     </select>
 </div>
+
+@if (_error is not null)
+{
+    @* No code: this is "the app broke", not a deliberate refusal, so it must not look like one. Only
+       ConnectionsChanged's refresh can set this -- see OnConnectionsChanged below for why the initial
+       load on mount is deliberately left to escape into WorkArea's ErrorBoundary instead. *@
+    <OutcomeMessage Message="@_error" />
+}
 
 @if (State.ConnectionId is null)
 {
@@ -51,6 +60,7 @@ else
     private QueryExecutionResult? _result;
     private CancellationTokenSource? _cts;
     private IReadOnlyList<DatabaseConnectionInfo> _connections = [];
+    private string? _error;
 
     protected override async Task OnInitializedAsync()
     {
@@ -87,7 +97,21 @@ else
 
     private void OnConnectionsChanged() => InvokeAsync(async () =>
     {
-        await ReloadConnectionsAsync();
+        // Unlike OnInitializedAsync's own call to ReloadConnectionsAsync (left to escape into WorkArea's
+        // ErrorBoundary, which offers Retry and clears on the next navigation -- a reasonable way to fail
+        // on first load), an exception from this UI-event dispatch has no render in progress to be caught
+        // by: it would take the whole circuit down instead. The rail wrapped its own read in a try/catch
+        // for the same reason; DatabaseSection.ReloadAsync follows the identical shape today.
+        try
+        {
+            await ReloadConnectionsAsync();
+            _error = null;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to refresh the connection list on /sql.");
+            _error = "The list of databases could not be refreshed. The details are in the server log.";
+        }
         StateHasChanged();
     });
 

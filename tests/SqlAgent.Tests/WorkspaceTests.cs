@@ -93,6 +93,63 @@ public class WorkspaceTests : IDisposable
         // (CodeMirror mounts into the div via JS interop).
         Assert.DoesNotContain("Select a database", page.Markup);
         Assert.Single(page.FindComponents<SqlEditor>());
+
+        // The blank option ("— select —", value="") is Guid.TryParse-unparseable by design — that is how
+        // OnConnectionChanged tells "a row" apart from "nothing", the same branch the rail's own
+        // Selecting_no_connection_clears_the_schema_tree pinned before Task 15 deleted it.
+        page.Find("[data-testid=sql-connection]").Change("");
+
+        Assert.Contains("Select a database", page.Markup);
+        Assert.Empty(page.FindComponents<SqlEditor>());
+    }
+
+    [Fact]
+    public async Task Editing_the_selected_connection_updates_what_the_picker_shows_about_it()
+    {
+        // AppState.cs:47-51 records that comparing selection by id alone once shipped exactly this bug:
+        // "editing the selected connection updated nothing anywhere in the UI". The fix is Select's
+        // value-equality check, but that check only fires if something re-points AppState at the fresh
+        // row in the first place — ReloadConnectionsAsync's second step. SchemaRailTests pinned this
+        // end-to-end on the rail before Task 15 deleted it; nothing has pinned it since.
+        var id = await SeedConnectionAsync("warehouse");
+        var page = _ctx.RenderComponent<Workspace>();
+        page.Find("[data-testid=sql-connection]").Change(id.ToString());
+        Assert.Contains("warehouse", page.Find("[data-testid=sql-connection]").TextContent);
+
+        using (var scope = _ctx.Services.CreateScope())
+        {
+            var connections = scope.ServiceProvider.GetRequiredService<DatabaseConnectionService>();
+            await connections.UpdateAsync(
+                id, new DatabaseConnectionInput("reporting", DatabaseProviderType.Postgres, true));
+        }
+        var state = _ctx.Services.GetRequiredService<AppState>();
+        await page.InvokeAsync(state.NotifyConnectionsChanged);
+
+        Assert.Contains("reporting", page.Find("[data-testid=sql-connection]").TextContent);
+        Assert.DoesNotContain("warehouse", page.Find("[data-testid=sql-connection]").TextContent);
+    }
+
+    [Fact]
+    public async Task Deleting_the_selected_connection_falls_back_to_the_prompt()
+    {
+        // ConnectionPanel.DeleteAsync never calls State.Select(null) itself — the clearing this test
+        // pins happens only because ReloadConnectionsAsync resolves the deleted id to nothing on its
+        // next read. DatabasePageTests stops at the confirmation dialog and never reaches this half.
+        var id = await SeedConnectionAsync("warehouse");
+        var page = _ctx.RenderComponent<Workspace>();
+        page.Find("[data-testid=sql-connection]").Change(id.ToString());
+        Assert.DoesNotContain("Select a database", page.Markup);
+
+        using (var scope = _ctx.Services.CreateScope())
+        {
+            var connections = scope.ServiceProvider.GetRequiredService<DatabaseConnectionService>();
+            await connections.DeleteAsync(id);
+        }
+        var state = _ctx.Services.GetRequiredService<AppState>();
+        await page.InvokeAsync(state.NotifyConnectionsChanged);
+
+        Assert.Contains("Select a database to start querying.", page.Markup);
+        Assert.Empty(page.FindComponents<SqlEditor>());
     }
 
     [Fact]
@@ -116,13 +173,20 @@ public class WorkspaceTests : IDisposable
         // to AppState.Changed and ConnectionsChanged for the rest of the circuit, and every later
         // selection or database edit fires a callback into a component tree bUnit (and the real renderer)
         // have already torn down.
-        var page = _ctx.RenderComponent<Workspace>();
+        //
+        // _ctx.DisposeComponents(), not page.Instance.Dispose(): Workspace.Dispose is a plain public
+        // method, so calling it directly would still pass even if @implements IDisposable were ever
+        // dropped from the component -- exactly the mistake that would reopen this leak. DisposeComponents
+        // disposes the whole rendered tree the way the real Blazor renderer does when a component leaves
+        // it, which only reaches Dispose() through the IDisposable interface. WorkAreaBoundaryTests uses
+        // the same pattern for the same reason.
+        _ctx.RenderComponent<Workspace>();
         var state = _ctx.Services.GetRequiredService<AppState>();
 
         Assert.Equal(1, SubscriberCountOf(state, "Changed"));
         Assert.Equal(1, SubscriberCountOf(state, "ConnectionsChanged"));
 
-        page.Instance.Dispose();
+        _ctx.DisposeComponents();
 
         Assert.Equal(0, SubscriberCountOf(state, "Changed"));
         Assert.Equal(0, SubscriberCountOf(state, "ConnectionsChanged"));

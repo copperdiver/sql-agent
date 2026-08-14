@@ -172,6 +172,45 @@ public class DatabasePageTests : IDisposable
     }
 
     [Fact]
+    public async Task A_missing_secret_reports_that_rather_than_a_connection_failure()
+    {
+        // ConnectionTester.TestSavedAsync returns null, not a failed outcome, when the row exists but its
+        // stored secret does not -- distinct from an unreachable/rejecting server, which is a real
+        // ConnectionTestOutcome. The row is left intact and only the secret is removed, so this exercises
+        // exactly that branch rather than the connection-not-found one.
+        var id = await SeedAsync();
+        using (var scope = _ctx.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SqlAgentDbContext>();
+            var entity = await db.DatabaseConnections.FindAsync(id);
+            var secrets = scope.ServiceProvider.GetRequiredService<ISecretStore>();
+            await secrets.DeleteAsync(entity!.ConnectionStringSecretRef);
+        }
+
+        var page = Render(id);
+
+        Assert.Contains("connection_secret_missing", page.Markup);
+        Assert.Empty(page.FindAll("[data-testid=objects-panel-slot]"));
+    }
+
+    [Fact]
+    public async Task Saving_with_a_blank_connection_string_keeps_the_stored_secret()
+    {
+        // Both ends are guarded separately elsewhere -- the field starts blank
+        // (The_connection_string_field_is_blank_when_editing) and ConnectionPanel.SaveAsync treats blank
+        // as "keep what is stored" -- but nothing drives an actual edit-save through the page and reads
+        // the secret back afterward to confirm the join holds.
+        var id = await SeedAsync();
+        var page = Render(id);
+
+        await page.Find("[data-testid=connection-save]").ClickAsync(new MouseEventArgs());
+
+        using var scope = _ctx.Services.CreateScope();
+        var connections = scope.ServiceProvider.GetRequiredService<DatabaseConnectionService>();
+        Assert.Equal("cs", await connections.ResolveConnectionStringAsync(id));
+    }
+
+    [Fact]
     public void Saving_a_new_database_without_a_connection_string_is_refused_with_a_code()
     {
         var page = Render();
