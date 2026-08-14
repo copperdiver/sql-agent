@@ -2,9 +2,11 @@
 
 - **Status:** approved, ready for implementation planning
 - **Date:** 2026-08-12
-- **Scope:** phases A, B1, B2, C–E (see [Phasing and priority](#phasing-and-priority)).
+- **Scope:** phases A, B1, B2, C1, C2, D, E (see [Phasing and priority](#phasing-and-priority)).
   Phase B was split in two during B1's design; B1 has its own spec,
   [2026-08-12 phase B1](2026-08-12-web-ui-phase-b1-chat-persistence-design.md).
+  Phase C was split the same way before C1's design, for the same reason — see
+  [Phase C](#phase-c--databases-and-access-control).
 - **Visual reference:** <https://aichat.demos.tailgrids.com/>, captured in
   `docs/superpowers/reference/tg-*.png`
 
@@ -464,7 +466,19 @@ B2:
 
 ## Phase C — Databases and access control
 
-Priority **P1**. Depends on A and B1.
+Priority **P1**. Depends on A and B1. Split in two before C1's design, on the
+seam this section already implies: **C1** ships the Databases section, the config
+page's first two panels, view extraction, and per-object access; **C2** ships the
+third panel, DDL classification and permissions, and confirm-before-run. Each has
+its own spec —
+[2026-08-14 phase C1](2026-08-14-web-ui-phase-c1-databases-and-objects-design.md)
+— and where one departs from this section, the later spec governs. C1 already
+does, in two places: it does not add `TablePolicy.ObjectKind`, and it classifies
+connection-test failures rather than only suppressing their text.
+
+Acceptance below divides with the work: the view, access-level, and cache rows are
+C1's; the `AllowedDdl`, `ddl_confirmation_required`, and `EXEC`/`GRANT` rows are
+C2's.
 
 ### Sidebar section
 
