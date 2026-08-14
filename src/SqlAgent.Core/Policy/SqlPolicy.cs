@@ -29,10 +29,20 @@ public record SqlTableReference(string? Schema, string Name)
     public override string ToString() => Schema is null ? Name : $"{Schema}.{Name}";
 }
 
-/// <summary>One parsed statement: its kind, the parser's concrete type name, its canonical re-rendered
-/// (normalized) SQL, and every table it touches.</summary>
+/// <summary>
+/// One parsed statement: its kind, the parser's concrete type name, its canonical re-rendered
+/// (normalized) SQL, every table it touches, and the subset of those it writes to.
+/// <paramref name="WrittenTables"/> is always a subset of <paramref name="Tables"/>, so a visibility
+/// check over <paramref name="Tables"/> still sees write targets exactly as it did before this existed.
+/// For a <see cref="SqlStatementKind.Write"/> statement it is never empty — see
+/// <see cref="SqlAnalyzer"/> for why an unidentifiable target falls back to everything.
+/// </summary>
 public record ParsedStatement(
-    SqlStatementKind Kind, string StatementType, string Normalized, IReadOnlyList<SqlTableReference> Tables);
+    SqlStatementKind Kind,
+    string StatementType,
+    string Normalized,
+    IReadOnlyList<SqlTableReference> Tables,
+    IReadOnlyList<SqlTableReference> WrittenTables);
 
 /// <summary>
 /// Dialect-aware SQL parsing (ADR-0002, CD-50 T5). Turns raw SQL into <see cref="ParsedStatement"/>s
@@ -70,7 +80,17 @@ public static class SqlAnalyzer
             _ => SqlStatementKind.Other,
         };
 
-        return new ParsedStatement(kind, statement.GetType().Name, statement.ToSql(), collector.References);
+        // Fail closed. The collector finds a write target by walking the AST property that holds it, and
+        // an upgrade of SqlParserCS that renames or restructures that property would leave the set empty
+        // — which the per-object check would read as "this statement writes to nothing" and wave through.
+        // Falling back to every referenced table makes the same upgrade over-strict instead: a write
+        // touching a Read-only object is refused, which is loud, recoverable, and the right direction.
+        var written = collector.WrittenReferences;
+        if (kind == SqlStatementKind.Write && written.Count == 0)
+            written = collector.References;
+
+        return new ParsedStatement(
+            kind, statement.GetType().Name, statement.ToSql(), collector.References, written);
     }
 
     /// <summary>
@@ -87,17 +107,20 @@ public static class SqlAnalyzer
     private sealed class TableCollector
     {
         private readonly List<SqlTableReference> _refs = [];
+        private readonly List<SqlTableReference> _written = [];
         private readonly HashSet<(string?, string)> _seen = [];
+        private readonly HashSet<(string?, string)> _seenWritten = [];
         private readonly HashSet<object> _visited = new(ReferenceEqualityComparer.Instance);
 
         public IReadOnlyList<SqlTableReference> References => _refs;
+        public IReadOnlyList<SqlTableReference> WrittenReferences => _written;
 
-        public void Walk(object? node, ImmutableHashSet<string> scope)
+        public void Walk(object? node, ImmutableHashSet<string> scope, bool writeTarget = false)
         {
             if (node is null or string) return;
             if (node is IEnumerable sequence)
             {
-                foreach (var item in sequence) Walk(item, scope);
+                foreach (var item in sequence) Walk(item, scope, writeTarget);
                 return;
             }
             if (node.GetType().Namespace?.StartsWith("SqlParser.Ast", StringComparison.Ordinal) != true) return;
@@ -105,10 +128,11 @@ public static class SqlAnalyzer
 
             // Real table references: FROM/JOIN targets, plus UPDATE/DELETE targets (also TableFactor.Table).
             if (node is TableFactor.Table table)
-                AddUnlessCte(table.Name, scope);
-            // INSERT target is a bare ObjectName, not a TableFactor, so pick it up explicitly.
+                AddUnlessCte(table.Name, scope, writeTarget);
+            // INSERT target is a bare ObjectName, not a TableFactor, so pick it up explicitly — and it is
+            // unambiguously the write target, whatever flag the walk arrived with.
             else if (node is Statement.Insert insert)
-                AddUnlessCte(insert.InsertOperation.Name, scope);
+                AddUnlessCte(insert.InsertOperation.Name, scope, writeTarget: true);
 
             // A WITH clause needs per-part scoping, so handle a Query's CTEs explicitly rather than letting
             // the generic property walk apply one flat scope to both the bodies and the CTE definitions.
@@ -118,8 +142,48 @@ public static class SqlAnalyzer
                 return;
             }
 
+            // UPDATE and DELETE name their target as an ordinary TableFactor, indistinguishable from the
+            // read sources beside it in a FROM or USING clause. The only thing that separates them is
+            // which property of the statement they hang off, so that property is walked first with the
+            // flag set; _visited then keeps the generic walk below from revisiting it as a read source.
+            // Walking the whole subtree with the flag on is deliberate: a joined relation under an UPDATE
+            // target is not valid in either supported dialect, and if one ever appears, counting it as
+            // written is the fail-closed answer.
+            foreach (var target in WriteTargets(node))
+                Walk(target, scope, writeTarget: true);
+
             foreach (var value in ChildNodes(node))
-                Walk(value, scope);
+                Walk(value, scope, writeTarget);
+        }
+
+        /// <summary>
+        /// The property (or properties) holding a statement's write target, by name. Reflection rather
+        /// than a type test because SqlParserCS offers no marker for "this is the thing being modified",
+        /// and the shape differs between an UPDATE and a DELETE: <c>Statement.Update.Table</c> holds it
+        /// directly, but a DELETE's target sits two levels down, at <c>DeleteOperation.From</c> — this
+        /// case is keyed on <see cref="DeleteOperation"/> rather than <see cref="Statement.Delete"/> so it
+        /// fires when the generic walk below reaches that nested node on its own. A name that stops
+        /// matching after a package upgrade yields nothing here, which <see cref="SqlAnalyzer.Describe"/>
+        /// turns into the fail-closed fallback rather than into silent permission.
+        /// </summary>
+        private static IEnumerable<object?> WriteTargets(object node)
+        {
+            var names = node switch
+            {
+                Statement.Update => new[] { "Table" },
+                DeleteOperation => new[] { "From" },
+                _ => [],
+            };
+
+            foreach (var name in names)
+            {
+                var prop = node.GetType().GetProperty(name, BindingFlags.Public | BindingFlags.Instance);
+                if (prop is null || prop.GetIndexParameters().Length > 0) continue;
+                object? value;
+                try { value = prop.GetValue(node); }
+                catch { continue; }
+                if (value is not null) yield return value;
+            }
         }
 
         private void WalkQueryWithCtes(Query query, With with, ImmutableHashSet<string> outerScope)
@@ -161,7 +225,7 @@ public static class SqlAnalyzer
             }
         }
 
-        private void AddUnlessCte(ObjectName name, ImmutableHashSet<string> scope)
+        private void AddUnlessCte(ObjectName name, ImmutableHashSet<string> scope, bool writeTarget)
         {
             // Identifier values are already unquoted ([dbo].[T] -> dbo, T). Last part is the table, the
             // part before it (if any) is the schema; deeper qualifiers (db.schema.table) are ignored.
@@ -170,11 +234,15 @@ public static class SqlAnalyzer
             var tableName = parts[^1];
             var schema = parts.Count >= 2 ? parts[^2] : null;
 
-            // Unqualified name matching an in-scope CTE is an alias, not a table — skip it.
+            // Unqualified name matching an in-scope CTE is an alias, not a table — skip it. This applies
+            // to the write side too: INSERT INTO a CTE name is not a write to an object.
             if (schema is null && scope.Contains(tableName)) return;
 
+            var reference = new SqlTableReference(schema, tableName);
             if (_seen.Add((schema, tableName)))
-                _refs.Add(new SqlTableReference(schema, tableName));
+                _refs.Add(reference);
+            if (writeTarget && _seenWritten.Add((schema, tableName)))
+                _written.Add(reference);
         }
     }
 }
