@@ -16,8 +16,8 @@ namespace SqlAgent.Tests;
 /// <summary>
 /// Integration coverage for the SQL tab: these exercise the real <see cref="QueryExecutionService"/>
 /// (policy validation, timeout/cancellation handling, audit) over an in-memory SQLite store, the same
-/// way <c>ConnectionsPageTests</c> and <c>SchemaRailTests</c> do — the brief's ResultGridTests only
-/// covers the two leaf components in isolation, not the tab that wires them to the execution path.
+/// way <c>DatabasePageTests</c> does for its own page — the brief's ResultGridTests only covers the two
+/// leaf components in isolation, not the page that wires them to the execution path.
 /// </summary>
 public class WorkspaceTests : IDisposable
 {
@@ -56,6 +56,95 @@ public class WorkspaceTests : IDisposable
         _ctx.JSInterop.SetupVoid("sqlAgentEditor.destroy", _ => true);
     }
 
+    // --- the picker moved here from the rail (Task 15) ---------------------------------------------
+    //
+    // SchemaRail owned the only connection picker through Phase C1; Task 15 retires it, and
+    // AppState.Connection's readers drop from two (the rail, this page) to one. These three replace
+    // SchemaRailTests' picker-refresh coverage on the surface the picker now lives on.
+
+    [Fact]
+    public async Task The_sql_page_picks_its_own_connection()
+    {
+        // The rail owned this picker and the rail is gone. AppState.Connection now has exactly one reader
+        // and one writer, both on this page, which is why the control belongs here.
+        await SeedConnectionAsync("warehouse");
+
+        var page = _ctx.RenderComponent<Workspace>();
+
+        Assert.Single(page.FindAll("[data-testid=sql-connection]"));
+        Assert.Contains("warehouse", page.Find("[data-testid=sql-connection]").TextContent);
+    }
+
+    [Fact]
+    public async Task Choosing_a_connection_reveals_the_editor()
+    {
+        var id = await SeedConnectionAsync("warehouse");
+        var page = _ctx.RenderComponent<Workspace>();
+
+        Assert.Contains("Select a database", page.Markup);
+
+        page.Find("[data-testid=sql-connection]").Change(id.ToString());
+
+        // Ruling M: AngleSharp (bUnit's DOM) does not reliably support the :contains() pseudo-selector,
+        // so this asserts on the rendered markup and on the editor component directly rather than trying
+        // to select a <p> by its text. FindComponents<SqlEditor>(), not a CSS class, matches the pattern
+        // No_connection_selected_shows_a_prompt_and_no_editor already uses below — SqlEditor.razor's own
+        // root element is <div class="editor">, not ".sql-editor", and it renders no <textarea> at all
+        // (CodeMirror mounts into the div via JS interop).
+        Assert.DoesNotContain("Select a database", page.Markup);
+        Assert.Single(page.FindComponents<SqlEditor>());
+    }
+
+    [Fact]
+    public async Task The_picker_re_reads_when_the_connection_set_changes()
+    {
+        var page = _ctx.RenderComponent<Workspace>();
+        Assert.Empty(page.FindAll("[data-testid=sql-connection] option[value]:not([value=''])"));
+
+        await SeedConnectionAsync("warehouse");
+        var state = _ctx.Services.GetRequiredService<AppState>();
+        await page.InvokeAsync(state.NotifyConnectionsChanged);
+
+        Assert.Single(page.FindAll("[data-testid=sql-connection] option[value]:not([value=''])"));
+    }
+
+    [Fact]
+    public void Disposing_the_page_unsubscribes_from_both_AppState_events()
+    {
+        // SchemaRailTests pinned this same class of leak for the rail before Task 15 deleted it: without
+        // both unsubscribes in Dispose, a Workspace instance from an earlier /sql visit stays subscribed
+        // to AppState.Changed and ConnectionsChanged for the rest of the circuit, and every later
+        // selection or database edit fires a callback into a component tree bUnit (and the real renderer)
+        // have already torn down.
+        var page = _ctx.RenderComponent<Workspace>();
+        var state = _ctx.Services.GetRequiredService<AppState>();
+
+        Assert.Equal(1, SubscriberCountOf(state, "Changed"));
+        Assert.Equal(1, SubscriberCountOf(state, "ConnectionsChanged"));
+
+        page.Instance.Dispose();
+
+        Assert.Equal(0, SubscriberCountOf(state, "Changed"));
+        Assert.Equal(0, SubscriberCountOf(state, "ConnectionsChanged"));
+    }
+
+    private static int SubscriberCountOf(AppState state, string eventName)
+    {
+        var field = typeof(AppState).GetField(eventName,
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var handler = (Delegate?)field!.GetValue(state);
+        return handler?.GetInvocationList().Length ?? 0;
+    }
+
+    private async Task<Guid> SeedConnectionAsync(
+        string name, DatabaseProviderType type = DatabaseProviderType.Postgres)
+    {
+        using var scope = _ctx.Services.CreateScope();
+        var connections = scope.ServiceProvider.GetRequiredService<DatabaseConnectionService>();
+        var created = await connections.CreateAsync(new DatabaseConnectionInput(name, type, true), "cs");
+        return created.Id;
+    }
+
     // --- gaps the brief's ResultGridTests leaves uncovered -----------------------------------------
 
     [Fact]
@@ -64,23 +153,25 @@ public class WorkspaceTests : IDisposable
         // AppState.Connection is never set in this test: the "empty selection" branch.
         var page = _ctx.RenderComponent<Workspace>();
 
-        Assert.Contains("Select a connection to start querying.", page.Markup);
+        Assert.Contains("Select a database to start querying.", page.Markup);
         Assert.Empty(page.FindComponents<SqlEditor>());
     }
 
     [Fact]
     public async Task Selecting_a_connection_after_the_workspace_is_already_rendered_updates_it_without_further_interaction()
     {
-        // SchemaRail and Workspace are siblings under MainLayout, not parent and child, so a
-        // connection picked from the rail's dropdown re-renders only the rail's own subtree unless
-        // Workspace itself listens for AppState.Changed. Every other test in this file calls
-        // SelectConnectionAsync BEFORE rendering Workspace, so Workspace always observes the
-        // connection on its own first render regardless of whether it subscribes — that blind spot
-        // is exactly why this went unnoticed. Here the order is deliberately reversed, and nothing
-        // else happens afterwards (no button click, no tab switch) that could force a render some
-        // other way.
+        // AppState.Select can be called directly against the scoped service, bypassing Workspace's own
+        // dropdown entirely -- this is exactly what this test does, and it is not a contrived scenario:
+        // Task 10 shipped a real bug where Workspace read AppState.Connection once on mount and never
+        // re-rendered when the selection moved by any other path (then, the rail's dropdown; today,
+        // ReloadConnectionsAsync re-pointing the selection after a ConnectionsChanged notification).
+        // Every other test in this file calls SeedConnectionAsync/SelectConnectionAsync BEFORE rendering
+        // Workspace, so Workspace always observes the connection on its own first render regardless of
+        // whether it subscribes to Changed -- that blind spot is exactly why the bug went unnoticed the
+        // first time. Here the order is deliberately reversed, and nothing else happens afterwards (no
+        // button click, no picker change) that could force a render some other way.
         var page = _ctx.RenderComponent<Workspace>();
-        Assert.Contains("Select a connection to start querying.", page.Markup);
+        Assert.Contains("Select a database to start querying.", page.Markup);
 
         using var scope = _ctx.Services.CreateScope();
         var connections = scope.ServiceProvider.GetRequiredService<DatabaseConnectionService>();
@@ -88,7 +179,7 @@ public class WorkspaceTests : IDisposable
             new DatabaseConnectionInput("c", DatabaseProviderType.Postgres, true), "cs");
         _ctx.Services.GetRequiredService<AppState>().Select(created);
 
-        Assert.DoesNotContain("Select a connection to start querying.", page.Markup);
+        Assert.DoesNotContain("Select a database to start querying.", page.Markup);
     }
 
     [Fact]
@@ -325,7 +416,8 @@ public class WorkspaceTests : IDisposable
     }
 
     // WaitForConditionAsync (the bUnit WaitForStateAsync stand-in referenced above) now lives in
-    // AsyncTestHelpers so SchemaRailTests can share it instead of carrying its own copy.
+    // AsyncTestHelpers so other test files (ChatPageTests among them) can share it instead of each
+    // carrying its own copy.
 
     private static AngleSharp.Dom.IElement FindButton(IRenderedComponent<Workspace> page, string text) =>
         page.FindAll("button").First(b => b.TextContent.Trim() == text);

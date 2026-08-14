@@ -30,14 +30,16 @@
 
    The handler is attached only while the drawer is open, and that condition is load-bearing rather than
    tidiness. Attaching it unconditionally makes every keystroke anywhere inside this <aside> a server
-   round trip: SchemaRail's filter input lives in here and deliberately binds on @onchange rather than
-   @oninput precisely to avoid per-keystroke traffic, and a keydown handler on an ancestor reintroduces
-   exactly that traffic through bubbling — plus a re-render of the whole Sidebar subtree, the rail's table
-   list included, because ComponentBase.HandleEventAsync calls StateHasChanged() after every callback
-   whether or not the callback changed anything. Guarding inside OnKeyDown cannot prevent that; only not
-   rendering the attribute can. See DrawerKeyHandler below for why it is an empty EventCallback rather
-   than the obvious null. On a wide viewport, where _drawerOpen can never be true, typing in the filter is
-   therefore as free as it was before Escape-to-close existed. *@
+   round trip, because a keydown handler on an ancestor receives them all through bubbling — plus a
+   re-render of the whole Sidebar subtree, since ComponentBase.HandleEventAsync calls StateHasChanged()
+   after every callback whether or not the callback changed anything. Guarding inside OnKeyDown cannot
+   prevent that; only not rendering the attribute can.
+
+   Phase C1 removed the sidebar's last text input along with SchemaRail, so nothing in here types today.
+   That is a fact about the current contents, not a reason to drop the condition: the next section added
+   here with a filter box would silently reintroduce the cost, and it would be invisible until someone
+   profiled it. See DrawerKeyHandler below for why it is an empty EventCallback rather than the obvious
+   null. *@
 <aside class="sidebar custom-scroll @(_collapsed ? "collapsed" : "") @(_drawerOpen ? "drawer-open" : "")"
        tabindex="-1" @ref="_aside" @onkeydown="DrawerKeyHandler">
     <SidebarHeader Collapsed="_collapsed"
@@ -50,10 +52,6 @@
         <DatabaseSection />
         <ProjectSection />
         <HistorySection />
-
-        @* Phase C1 replaces the rail with the section above and the config page. Task 15 deletes it; until
-           then it is still the only place a connection can be picked. *@
-        <SchemaRail />
     </div>
 
     <div class="sidebar-foot">
@@ -234,10 +232,10 @@
 
     // The spec calls for the drawer to close on scrim click OR Escape. This method only runs while the
     // drawer is open -- the markup above attaches it conditionally, which is what actually keeps a
-    // keystroke in SchemaRail's filter from costing a round trip on a wide viewport; a _drawerOpen check
+    // keystroke anywhere in this <aside> from costing a round trip on a wide viewport; a _drawerOpen check
     // in here would not, since the round trip and the re-render both happen before and after the callback
     // regardless of what it does. The key check is still needed: every other key that reaches the open
-    // drawer (typing in the filter with the drawer open on a phone) must fall through untouched.
+    // drawer must fall through untouched.
     private void OnKeyDown(KeyboardEventArgs e)
     {
         if (e.Key == "Escape") CloseDrawer();

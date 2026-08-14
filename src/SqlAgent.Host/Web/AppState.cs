@@ -13,9 +13,11 @@ public enum ConnectionStatus
 
 /// <summary>
 /// Which connection the workspace is pointed at. Scoped to the circuit, so it is per browser tab.
-/// The rail and the SQL page read it, so it lives here rather than in a parent component's
-/// parameters. The chat page does not read it at all — it attaches databases independently,
-/// through the composer's attachment menu.
+/// The SQL page owns both the picker and the state it sets, and it lives here rather than as a
+/// field on that page because Select's value-equality check (below) is what makes an edit made on
+/// the config page, a sibling route in the same circuit, visible on the SQL page without a
+/// round trip through props. The chat page does not read it at all — it attaches databases
+/// independently, through the composer's attachment menu.
 /// </summary>
 public sealed class AppState
 {
@@ -28,10 +30,10 @@ public sealed class AppState
 
     /// <summary>
     /// Raised when the set of saved connections changes: a create, an edit, or a delete on the
-    /// Connections page. <see cref="Changed"/> is not a substitute — it only fires when the
-    /// <em>selection</em> moves, so a connection created while some other one is selected (or none)
-    /// would never reach the rail's picker, which reads its list once on mount and then lives in
-    /// MainLayout for the rest of the circuit.
+    /// /database config page. <see cref="Changed"/> is not a substitute — it only fires when the
+    /// <em>selection</em> moves, so a connection created or deleted while the SQL page is mounted
+    /// would never reach its picker, which reads its list once on mount and does not otherwise
+    /// re-read it for the rest of that page's lifetime.
     /// </summary>
     public event Action? ConnectionsChanged;
 

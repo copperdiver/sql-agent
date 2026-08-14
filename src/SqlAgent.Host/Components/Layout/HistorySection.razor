@@ -27,8 +27,9 @@
     {
         // The chat page is a sibling route under MainLayout, not an ancestor, and MainLayout is not
         // recreated across navigation — so nothing re-runs this method when a chat is created, renamed
-        // or deleted. The subscription is what keeps the list true; SchemaRail carries the same one for
-        // the same reason, and ChatRow's writes are what raise the event now.
+        // or deleted. The subscription is what keeps the list true; DatabaseSection carries the same one
+        // for the same reason (there, ConnectionsChanged), and ChatRow's writes are what raise the event
+        // now.
         State.ChatsChanged += OnChatsChanged;
         await ReloadAsync();
     }

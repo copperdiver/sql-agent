@@ -10,7 +10,7 @@
     protected override void OnInitialized() => Dialogs.Changed += OnChanged;
 
     // InvokeAsync because Show/Close are called from another component's handler, which may already be
-    // on the renderer's synchronization context but is not guaranteed to be — the same shape SchemaRail
+    // on the renderer's synchronization context but is not guaranteed to be — the same shape DatabaseSection
     // and Workspace use for their AppState subscriptions.
     private void OnChanged() => InvokeAsync(StateHasChanged);
 

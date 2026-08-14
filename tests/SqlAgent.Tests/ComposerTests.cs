@@ -81,7 +81,7 @@ public class ComposerTests
         menu.Find(".menu-trigger").Click();
 
         Assert.Contains("No databases", menu.Markup);
-        Assert.Equal("/connections", menu.Find(".empty a").GetAttribute("href"));
+        Assert.Equal("/database", menu.Find(".empty a").GetAttribute("href"));
     }
 
     [Fact]

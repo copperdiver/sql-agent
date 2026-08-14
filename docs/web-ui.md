@@ -157,20 +157,21 @@ nobody spends time rediscovering them:
 
 ## The screens
 
-- **Connections** (`/connections`) — create, edit, test, and delete database connections.
-  Editing a connection never shows the stored connection string back; the field starts blank,
+- **Databases** (`/database`, `/database/{id}`) — create, edit, test, and delete a database
+  connection. Editing one never shows the stored connection string back; the field starts blank,
   and leaving it blank on save keeps the existing secret. Provider type and read-only mode are
-  set here too.
+  set here too. Opening a saved database also tests it and, on success, shows every live table
+  and view with a three-level access control (hidden / read-only / full) — a view offers only
+  hidden/read-only, since a view cannot be writable. A filter box narrows the list by name, and
+  a level applies immediately, with no separate save step.
 - **Chat** (`/`, `/chat/{id}`) — ask a question in plain English; the generated SQL and its
   result (or an error) appear in the transcript, with a button to open the generated SQL on the
   SQL page for editing. See "Chats, and what is kept" below for what persists across a reload
   and what deliberately does not.
 - **SQL** (`/sql`) — a CodeMirror editor with SQL syntax highlighting, a result grid, CSV/JSON
-  export, and Cancel for an in-flight query.
-
-  The sidebar's schema rail, shared by both pages, lists every table for the selected connection
-  with a visibility checkbox — unchecking one hides it from both the schema the SQL policy
-  allows and the context given to the chat model. A filter box narrows the list by name.
+  export, and Cancel for an in-flight query. The page has its own database picker at the top —
+  the sidebar's Databases section links to the config page rather than selecting, so there is
+  exactly one control on screen that decides which connection a query runs against.
 - **Settings** (`/settings`) — three panels: appearance (the same theme control as the user menu),
   language-model status (whether `ILlmSqlGateway.IsConfigured` is true, with a badge), and
   environment (version, bind URL, port, store path, account — read from `HostInfo`).

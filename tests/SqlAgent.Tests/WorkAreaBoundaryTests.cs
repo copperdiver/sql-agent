@@ -89,7 +89,8 @@ public class WorkAreaBoundaryTests
 
         // If WorkArea.Dispose() did not unsubscribe from NavigationManager.LocationChanged, this would
         // still be 1 and the component would keep itself alive for the rest of the circuit — the same
-        // class of leak the SchemaRail/AppState.Changed test pins, applied to NavigationManager here.
+        // class of leak WorkspaceTests.Disposing_the_page_unsubscribes_from_both_AppState_events pins for
+        // AppState, applied to NavigationManager here.
         Assert.Equal(0, LocationChangedSubscriberCount(nav));
     }
 

@@ -25,11 +25,6 @@ public enum SetAccessOutcome
     ViewCannotBeWritable,
 }
 
-/// <summary>One live table with its effective visibility for a connection.</summary>
-/// <remarks>Superseded by <see cref="DatabaseObjectPolicy"/>. It survives only because SchemaRail still
-/// reads it, and both go away together when the rail does.</remarks>
-public record TableVisibility(string Schema, string Table, bool IsVisible);
-
 /// <summary>
 /// Read/write side of per-object access (CD-50, extended in Phase C1). <see cref="SchemaService"/> only
 /// ever exposes the already-filtered schema, so the config page needs this to see <em>every</em> live
@@ -107,25 +102,6 @@ public class TablePolicyService(
         await InvalidateAsync(connectionId, ct);
         return SetAccessOutcome.Applied;
     }
-
-    /// <summary>Lists every live table with its effective visibility.</summary>
-    /// <remarks>Superseded by <see cref="ListObjectsAsync"/>; alive only for SchemaRail, and removed with
-    /// it. Do not build anything new on this.</remarks>
-    public async Task<IReadOnlyList<TableVisibility>?> ListAsync(
-        Guid connectionId, CancellationToken ct = default)
-        => (await ListObjectsAsync(connectionId, ct))
-            ?.Where(o => o.Kind == DatabaseObjectKind.Table)
-            .Select(o => new TableVisibility(o.Schema, o.Name, o.Access != ObjectAccess.Hidden))
-            .ToList();
-
-    /// <summary>Upserts one table's visibility flag.</summary>
-    /// <remarks>Superseded by <see cref="SetAccessAsync"/>; alive only for SchemaRail, and removed with
-    /// it. Toggling on yields Full access, which is what the rail's checkbox has always meant.</remarks>
-    public async Task<bool> SetVisibilityAsync(
-        Guid connectionId, string schema, string table, bool isVisible, CancellationToken ct = default)
-        => await SetAccessAsync(
-            connectionId, schema, table, DatabaseObjectKind.Table,
-            isVisible ? ObjectAccess.Full : ObjectAccess.Hidden, ct) == SetAccessOutcome.Applied;
 
     private async Task<DatabaseSchema?> ExtractAsync(Guid connectionId, CancellationToken ct)
     {

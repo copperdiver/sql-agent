@@ -5,7 +5,7 @@
     <ChildContent>
         <label for="name-dialog-value">@Label</label>
         @* OnValueChanged is a method rather than an inline lambda: a lambda with a string literal inside
-           a Razor attribute needs escaped quotes, which the parser handles badly — SchemaRail's filter
+           a Razor attribute needs escaped quotes, which the parser handles badly — ObjectsPanel's filter
            input carries the same note for the same reason. InitialFocus above is what moves focus into
            this box on open -- Modal's own doc comment covers why plain autofocus cannot do that job. *@
         <input id="name-dialog-value" value="@_value" @onchange="OnValueChanged" @ref="_valueInput" />
