@@ -162,10 +162,10 @@
 
     private async Task TestAsync(Guid id)
     {
-        ConnectionTestResult? result;
+        ConnectionTestOutcome? result;
         try
         {
-            result = await Runner.RunAsync<ConnectionTester, ConnectionTestResult?>(t => t.TestSavedAsync(id));
+            result = await Runner.RunAsync<ConnectionTester, ConnectionTestOutcome?>(t => t.TestSavedAsync(id));
         }
         catch (Exception ex)
         {
@@ -173,15 +173,12 @@
             Fail("The connection could not be tested. The details are in the server log.");
             return;
         }
-        // A rejecting-but-reachable server is a normal outcome here, not an error to throw. The
-        // provider's own Error text is a deliberately returned domain result, not exception text, so
-        // showing it is intended (see the Task 5 ruling in the ledger).
         if (result is null)
             Refuse("connection_secret_missing", "Connection or its secret is missing.");
         else if (result.Success)
             Succeed($"Connection OK ({result.ServerVersion}, {result.ElapsedMs} ms)");
         else
-            Refuse("connection_test_failed", $"Connection failed: {result.Error}");
+            Refuse(ConnectionFailureText.Code(result.Failure), ConnectionFailureText.Message(result.Failure));
     }
 
     private void Clear() { _status = null; _statusCode = null; }

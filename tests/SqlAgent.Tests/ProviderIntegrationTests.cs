@@ -20,7 +20,7 @@ public class ProviderIntegrationTests
 
         var provider = new PostgresProvider();
         var connection = await provider.TestConnectionAsync(connectionString);
-        Assert.True(connection.Success, connection.Error);
+        Assert.True(connection.Success, connection.Failure.ToString());
 
         var result = await provider.ExecuteQueryAsync(
             connectionString,
@@ -130,7 +130,7 @@ public class ProviderIntegrationTests
 
         var provider = new SqlServerProvider();
         var connection = await provider.TestConnectionAsync(connectionString);
-        Assert.True(connection.Success, connection.Error);
+        Assert.True(connection.Success, connection.Failure.ToString());
 
         var result = await provider.ExecuteQueryAsync(
             connectionString,

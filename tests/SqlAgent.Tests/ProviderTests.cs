@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using SqlAgent.Core;
 using SqlAgent.Providers.Postgres;
 using SqlAgent.Providers.SqlServer;
@@ -75,7 +76,7 @@ public class ConnectionTesterTests
     {
         var (svc, conn) = NewService();
         var pg = new FakeProvider(DatabaseProviderType.Postgres, ConnectionTestResult.Ok("16.0", 5));
-        var tester = new ConnectionTester(svc, new DatabaseProviderRegistry([pg]));
+        var tester = new ConnectionTester(svc, new DatabaseProviderRegistry([pg]), NullLogger<ConnectionTester>.Instance);
 
         var result = await tester.TestDraftAsync(DatabaseProviderType.Postgres, "Host=draft");
 
@@ -91,8 +92,10 @@ public class ConnectionTesterTests
         var created = await svc.CreateAsync(
             new DatabaseConnectionInput("c", DatabaseProviderType.SqlServer, false), "Server=saved;Password=p");
         var ss = new FakeProvider(DatabaseProviderType.SqlServer, ConnectionTestResult.Ok("16", 3));
-        var pg = new FakeProvider(DatabaseProviderType.Postgres, ConnectionTestResult.Fail("wrong provider", 0));
-        var tester = new ConnectionTester(svc, new DatabaseProviderRegistry([ss, pg]));
+        var pg = new FakeProvider(
+            DatabaseProviderType.Postgres,
+            ConnectionTestResult.Fail(ConnectionFailure.Unknown, "wrong provider", 0));
+        var tester = new ConnectionTester(svc, new DatabaseProviderRegistry([ss, pg]), NullLogger<ConnectionTester>.Instance);
 
         var result = await tester.TestSavedAsync(created.Id);
 
@@ -109,7 +112,7 @@ public class ConnectionTesterTests
         var (svc, conn) = NewService();
         var tester = new ConnectionTester(svc, new DatabaseProviderRegistry([
             new FakeProvider(DatabaseProviderType.SqlServer, ConnectionTestResult.Ok(null, 0))
-        ]));
+        ]), NullLogger<ConnectionTester>.Instance);
 
         Assert.Null(await tester.TestSavedAsync(Guid.NewGuid()));
         conn.Dispose();
@@ -130,7 +133,7 @@ public class ProviderConnectionFailureTests
             "Host=127.0.0.1;Port=1;Username=u;Password=p;Database=d;Timeout=2;Command Timeout=2");
 
         Assert.False(result.Success);
-        Assert.False(string.IsNullOrEmpty(result.Error));
+        Assert.False(string.IsNullOrEmpty(result.Diagnostic));
     }
 
     [Fact]
@@ -140,6 +143,6 @@ public class ProviderConnectionFailureTests
             "Server=127.0.0.1,1;Database=d;User Id=u;Password=p;Connect Timeout=2;Encrypt=false;TrustServerCertificate=true");
 
         Assert.False(result.Success);
-        Assert.False(string.IsNullOrEmpty(result.Error));
+        Assert.False(string.IsNullOrEmpty(result.Diagnostic));
     }
 }

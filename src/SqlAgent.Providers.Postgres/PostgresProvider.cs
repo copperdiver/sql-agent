@@ -20,7 +20,13 @@ public class PostgresProvider : IDatabaseProvider
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return ConnectionTestResult.Fail(ex.Message, sw.ElapsedMilliseconds);
+            // Everything the classifier needs, pulled out here so the mapping itself stays testable.
+            var sqlState = ex is NpgsqlException { SqlState: { } state } ? state : null;
+            var socket = ex.GetBaseException() is System.Net.Sockets.SocketException;
+            var timeout = ex.GetBaseException() is TimeoutException;
+
+            return ConnectionTestResult.Fail(
+                PostgresFailure.Classify(sqlState, socket, timeout), ex.Message, sw.ElapsedMilliseconds);
         }
     }
 

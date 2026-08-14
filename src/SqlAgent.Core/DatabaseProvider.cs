@@ -7,12 +7,47 @@ public enum DatabaseProviderType
     Postgres = 2,
 }
 
-/// <summary>Outcome of a connection test. Never throws back to the caller for a reachable-but-rejecting server.</summary>
-public record ConnectionTestResult(bool Success, string? Error = null, string? ServerVersion = null, long ElapsedMs = 0)
+/// <summary>
+/// Why a connection test failed, in terms the UI has words for. A closed set on purpose: the driver's own
+/// sentence can name the host, the database, the user, and — depending on the driver and the failure —
+/// echo connection-string keywords back, so it is not something to render.
+/// </summary>
+public enum ConnectionFailure
 {
-    public static ConnectionTestResult Ok(string? serverVersion, long elapsedMs) => new(true, null, serverVersion, elapsedMs);
-    public static ConnectionTestResult Fail(string error, long elapsedMs) => new(false, error, null, elapsedMs);
+    None = 0,
+    AuthenticationFailed,
+    DatabaseNotFound,
+    HostUnreachable,
+    Timeout,
+    Unknown,
 }
+
+/// <summary>
+/// Outcome of a connection test at the provider level. Never throws back to the caller for a
+/// reachable-but-rejecting server. <see cref="Diagnostic"/> is the driver's own text and is for the log
+/// only — <see cref="ConnectionTestOutcome"/> is what leaves Storage, and it has no field to carry it.
+/// </summary>
+public record ConnectionTestResult(
+    bool Success,
+    ConnectionFailure Failure,
+    string? Diagnostic,
+    string? ServerVersion = null,
+    long ElapsedMs = 0)
+{
+    public static ConnectionTestResult Ok(string? serverVersion, long elapsedMs)
+        => new(true, ConnectionFailure.None, null, serverVersion, elapsedMs);
+
+    public static ConnectionTestResult Fail(ConnectionFailure failure, string diagnostic, long elapsedMs)
+        => new(false, failure, diagnostic, null, elapsedMs);
+}
+
+/// <summary>
+/// What a connection test looks like above Storage. Deliberately a different type from
+/// <see cref="ConnectionTestResult"/> rather than the same one with a rule attached: the driver text is
+/// absent because there is nowhere to put it, which is a guarantee a comment cannot make.
+/// </summary>
+public record ConnectionTestOutcome(
+    bool Success, ConnectionFailure Failure, string? ServerVersion, long ElapsedMs);
 
 /// <summary>
 /// Per-dialect database driver: connection testing (CD-57) and schema extraction (CD-58 T4).

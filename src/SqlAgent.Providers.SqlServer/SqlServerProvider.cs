@@ -20,7 +20,12 @@ public class SqlServerProvider : IDatabaseProvider
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return ConnectionTestResult.Fail(ex.Message, sw.ElapsedMilliseconds);
+            var number = ex is SqlException sql ? sql.Number : (int?)null;
+            var socket = ex.GetBaseException() is System.Net.Sockets.SocketException;
+            var timeout = ex.GetBaseException() is TimeoutException;
+
+            return ConnectionTestResult.Fail(
+                SqlServerFailure.Classify(number, socket, timeout), ex.Message, sw.ElapsedMilliseconds);
         }
     }
 

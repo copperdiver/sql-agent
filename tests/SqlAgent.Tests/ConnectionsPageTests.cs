@@ -191,12 +191,13 @@ public class ConnectionsPageTests : IDisposable
     public void Testing_a_reachable_but_rejecting_server_shows_the_failure_reason()
     {
         SeedAsync("prod-analytics", isReadOnly: true).GetAwaiter().GetResult();
-        _providerStub.Result = () => ConnectionTestResult.Fail("password authentication failed", 8);
+        _providerStub.Result = () => ConnectionTestResult.Fail(
+            ConnectionFailure.AuthenticationFailed, "password authentication failed", 8);
 
         var page = _ctx.RenderComponent<Connections>();
         FindButton(page, "Test").Click();
 
-        Assert.Contains("Connection failed: password authentication failed", page.Markup);
+        Assert.Contains("The server rejected the credentials in the connection string.", page.Markup);
     }
 
     [Fact]
