@@ -147,6 +147,42 @@ public class QueryExecutionServiceTests
     }
 
     [Fact]
+    public async Task A_write_through_an_alias_declared_by_a_derived_table_is_denied_by_the_real_objects_level()
+    {
+        // The derived-table spelling of the same hole. SQL Server applies this to `orders` through the
+        // updatable derived table, so `orders` is what the level has to be checked against — the alias
+        // `d` has no policy row and would have been waved through on a writable connection.
+        var (db, conn) = NewStore();
+        var provider = new ExecFakeProvider(DatabaseProviderType.SqlServer, schema: OrdersAndSummary());
+        var (svc, connId) = await SetupAsync(db, provider, isReadOnly: false);
+        await SetLevelAsync(db, connId, "orders", visible: true, write: false);
+
+        var r = await svc.ExecuteSqlAsync(connId, "UPDATE d SET total = 0 FROM (SELECT * FROM orders) d");
+
+        Assert.False(r.Success);
+        Assert.Equal("policy_denied_readonly_object", r.ErrorCode);
+        Assert.False(provider.WasCalled);
+        conn.Dispose();
+    }
+
+    [Fact]
+    public async Task A_write_to_a_view_through_a_derived_table_is_still_denied_as_a_view_write()
+    {
+        // The view half of the derived-table hole. A view has no policy row either, so nothing but the
+        // schema can refuse it — and the schema is only consulted for names that reach WrittenTables.
+        var (db, conn) = NewStore();
+        var provider = new ExecFakeProvider(DatabaseProviderType.SqlServer, schema: OrdersAndSummary());
+        var (svc, connId) = await SetupAsync(db, provider, isReadOnly: false);
+
+        var r = await svc.ExecuteSqlAsync(connId, "UPDATE d SET total = 0 FROM (SELECT * FROM order_summary) d");
+
+        Assert.False(r.Success);
+        Assert.Equal("policy_denied_view_write", r.ErrorCode);
+        Assert.False(provider.WasCalled);
+        conn.Dispose();
+    }
+
+    [Fact]
     public async Task Reading_a_read_only_object_inside_a_write_still_executes()
     {
         var (db, conn) = NewStore();

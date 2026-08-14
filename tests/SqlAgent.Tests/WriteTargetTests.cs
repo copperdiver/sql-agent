@@ -74,6 +74,45 @@ public class WriteTargetTests
         Assert.Equal(["orders"], Names(stmt.Tables));
     }
 
+    [Theory]
+    [InlineData(DatabaseProviderType.Postgres, "UPDATE d SET total = 0 FROM (SELECT * FROM orders) d")]
+    [InlineData(DatabaseProviderType.SqlServer, "UPDATE d SET total = 0 FROM (SELECT * FROM orders) d")]
+    [InlineData(DatabaseProviderType.Postgres, "UPDATE d SET total = 0 FROM (SELECT * FROM orders) AS d")]
+    [InlineData(DatabaseProviderType.SqlServer, "UPDATE d SET total = 0 FROM (SELECT * FROM orders) AS d")]
+    [InlineData(DatabaseProviderType.Postgres,
+        "UPDATE t SET total = 0 FROM (SELECT total, ROW_NUMBER() OVER (ORDER BY id) rn FROM orders) t WHERE t.rn = 1")]
+    [InlineData(DatabaseProviderType.SqlServer,
+        "UPDATE t SET total = 0 FROM (SELECT total, ROW_NUMBER() OVER (ORDER BY id) rn FROM orders) t WHERE t.rn = 1")]
+    public void Update_through_an_alias_declared_by_a_derived_table_writes_the_table_inside_it(
+        DatabaseProviderType provider, string sql)
+    {
+        // A derived table is a legal UPDATE target in T-SQL, and SQL Server pushes the update down to the
+        // base table through it — the ROW_NUMBER form is the textbook "update the top row" idiom. The
+        // alias is declared on TableFactor.Derived rather than on a TableFactor.Table, so matching only
+        // the latter left the alias itself recorded as the target: a name no object has, hence full
+        // access, not a view, and both write denials passing on a statement that rewrites `orders`.
+        var stmt = Parse(sql, provider);
+
+        Assert.Equal(["orders"], Names(stmt.WrittenTables));
+        Assert.DoesNotContain(Names(stmt.Tables), n => n is "d" or "t");
+    }
+
+    [Theory]
+    [InlineData(DatabaseProviderType.Postgres)]
+    [InlineData(DatabaseProviderType.SqlServer)]
+    public void Update_through_an_alias_inside_a_parenthesised_join_writes_only_that_relation(
+        DatabaseProviderType provider)
+    {
+        // Same hole, reached through the other unmatched factor: a parenthesised join is a
+        // TableFactor.NestedJoin, and the relations that declare the aliases hang underneath it rather
+        // than at the top of the clause. Resolving through it also keeps the precision the write/read
+        // split exists for — `lookup` is joined, not written.
+        var stmt = Parse("UPDATE o SET total = 0 FROM (orders o JOIN lookup l ON l.id = o.id)", provider);
+
+        Assert.Equal(["orders"], Names(stmt.WrittenTables));
+        Assert.Equal(["lookup", "orders"], Names(stmt.Tables));
+    }
+
     [Fact]
     public void Update_with_a_subquery_does_not_treat_the_subquery_source_as_written()
     {

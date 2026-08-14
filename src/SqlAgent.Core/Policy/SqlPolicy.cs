@@ -187,8 +187,17 @@ public static class SqlAnalyzer
         /// <see cref="Statement.Delete"/> so it fires when the generic walk reaches that nested node on
         /// its own. A name that stops matching after a package upgrade yields nothing here, which
         /// <see cref="SqlAnalyzer.Describe"/> turns into the fail-closed fallback rather than into silent
-        /// permission; a *shape* that stops matching falls back to the whole clause, which over-marks
-        /// rather than under-marks.
+        /// permission.
+        ///
+        /// The two arms handle an unrecognised *shape* differently, and only the DELETE one over-marks. A
+        /// DELETE whose named target resolves to no relation falls back to the whole clause, so every table
+        /// in it counts as written. An UPDATE has no such fallback: an alias that resolves to nothing
+        /// leaves <c>Update.Table</c> recorded as written, which is right when that name is the real table
+        /// (<c>UPDATE orders SET ...</c>, the overwhelming majority) and wrong — permissively wrong — if a
+        /// future dialect ever lets an UPDATE target an alias bound by something
+        /// <see cref="ResolveUpdateAlias"/> does not search. That is why it searches by declared alias
+        /// across every relation the clause names, parenthesised groups included, instead of by relation
+        /// type: the set of shapes it can miss is what this arm has instead of a safety net.
         /// </summary>
         private IEnumerable<object?> WriteTargets(object node)
         {
@@ -287,10 +296,25 @@ public static class SqlAnalyzer
         /// table. Resolve it instead: when the target is a bare, unaliased, single-part name matching an
         /// alias declared among the FROM clause's own relations, that relation is what is written.
         ///
-        /// Only the FROM clause's top-level relations and its joined ones are searched — an alias declared
-        /// inside a derived table is not in scope for the UPDATE target — and only an exact alias match
-        /// resolves. Anything else returns null and the caller records <c>Update.Table</c> as before, so an
-        /// unfamiliar shape costs precision, never enforcement.
+        /// The whole of the FROM clause's own relation list is searched: every comma-separated entry, every
+        /// relation joined onto one, and — because parentheses around a join are grouping rather than a
+        /// relation — everything inside a parenthesised join. What matches is whichever relation declares
+        /// that alias, and what is returned is the relation *node*, which the caller walks write-flagged:
+        ///
+        /// <list type="bullet">
+        /// <item>a plain table (<c>FROM orders o</c>) marks that table written and nothing else;</item>
+        /// <item>a derived table (<c>FROM (SELECT * FROM orders) d</c> — a documented T-SQL update target,
+        /// which SQL Server applies to the base table underneath) marks every table inside the subquery
+        /// written: coarser than the engine when that subquery joins, and coarse in the safe direction;</item>
+        /// <item>a relation inside a parenthesised join (<c>FROM (orders o JOIN lookup l ON ...)</c>) marks
+        /// only that relation, leaving the ones joined beside it reads.</item>
+        /// </list>
+        ///
+        /// A target that is not a bare, unaliased, single-part name is not an alias at all and returns null
+        /// immediately — that is <c>UPDATE orders SET ...</c>, whose target already is the real table.
+        /// Past that, a name matching no alias in the clause also returns null and the caller records
+        /// <c>Update.Table</c> unchanged, which is the same name the engine would resolve against the
+        /// catalog when the clause offers it nothing to bind to.
         /// </summary>
         private object? ResolveUpdateAlias(object updateTarget, object? from)
         {
@@ -302,32 +326,54 @@ public static class SqlAnalyzer
 
             foreach (var relation in ClauseRelations(from))
             {
-                if (relation is not TableFactor.Table { Alias: { } declared } real) continue;
-                if (!string.Equals(declared.Name.Value, alias, StringComparison.OrdinalIgnoreCase)) continue;
+                if (DeclaredAlias(relation) is not { } declared) continue;
+                if (!string.Equals(declared, alias, StringComparison.OrdinalIgnoreCase)) continue;
 
                 // The alias names no object, so it must not reach the reference list either. Marking it
                 // visited is how it is dropped: the generic walk skips anything already seen.
                 _visited.Add(named);
-                return real;
+                return relation;
             }
 
             return null;
         }
 
         /// <summary>
-        /// The relations a FROM-style clause names directly: each comma-separated entry and everything
-        /// joined onto it. Nothing nested inside a derived table or a subquery — those are read sources in
-        /// their own right and are reached by the ordinary walk.
+        /// The name a FROM-clause relation is addressable by inside its own clause — the alias it declares,
+        /// or null when it declares none. Every <see cref="TableFactor"/> that can carry one exposes it as a
+        /// <see cref="TableAlias"/> property named <c>Alias</c>: a plain table, a derived table and a
+        /// parenthesised join alike. It is read by name rather than by listing the variants because a
+        /// variant this file has not heard of would otherwise resolve to nothing and leave the bare alias
+        /// standing as the write target — the one failure direction that grants access instead of
+        /// withholding it.
+        /// </summary>
+        private static string? DeclaredAlias(TableFactor factor)
+            => (Property(factor, "Alias") as TableAlias)?.Name.Value;
+
+        /// <summary>
+        /// The relations a FROM-style clause names directly: each comma-separated entry, everything joined
+        /// onto it, and the contents of any parenthesised join, which is where that group's own relations
+        /// declare their aliases. Nothing inside a derived table or a subquery — those are read sources in
+        /// their own right, reached by the ordinary walk, and their aliases are not in scope outside them.
         /// </summary>
         private static IEnumerable<TableFactor> ClauseRelations(object clause)
         {
             foreach (var entry in ClauseEntries(clause))
             {
-                if (entry.Relation is { } relation) yield return relation;
+                foreach (var relation in Flatten(entry.Relation)) yield return relation;
                 if (entry.Joins is null) continue;
                 foreach (var join in entry.Joins)
-                    if (join.Relation is { } joined) yield return joined;
+                    foreach (var joined in Flatten(join.Relation)) yield return joined;
             }
+        }
+
+        /// <summary>A relation, plus the relations of the parenthesised join it may itself be.</summary>
+        private static IEnumerable<TableFactor> Flatten(TableFactor? relation)
+        {
+            if (relation is null) yield break;
+            yield return relation;
+            if (relation is TableFactor.NestedJoin nested)
+                foreach (var inner in ClauseRelations(nested.TableWithJoins)) yield return inner;
         }
 
         /// <summary>The comma-separated entries of a FROM-style clause, whatever wrapper holds them.</summary>
