@@ -247,9 +247,15 @@ public static class SqlAnalyzer
             var tableName = parts[^1];
             var schema = parts.Count >= 2 ? parts[^2] : null;
 
-            // Unqualified name matching an in-scope CTE is an alias, not a table — skip it. This applies
-            // to the write side too: INSERT INTO a CTE name is not a write to an object.
-            if (schema is null && scope.Contains(tableName)) return;
+            // Unqualified name matching an in-scope CTE is an alias, not a table — skip it, but only on
+            // the read side. Neither supported engine lets you write into a WITH alias: an INSERT/UPDATE/
+            // DELETE target resolves against the catalog, not the WITH list, so a write target whose name
+            // happens to shadow a CTE cannot actually be the CTE — it names the real base table of the
+            // same name. Dropping it here, the way a read source is dropped, would silently take that
+            // table out of both Tables and WrittenTables and let the write skip the read-only gate and the
+            // per-object policy entirely. So a write target always reaches both lists under its real name,
+            // whatever it happens to be shadowing.
+            if (!writeTarget && schema is null && scope.Contains(tableName)) return;
 
             var reference = new SqlTableReference(schema, tableName);
             if (_seen.Add((schema, tableName)))

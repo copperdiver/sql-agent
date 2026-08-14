@@ -50,6 +50,19 @@ public class SqlPolicyValidatorTests
     }
 
     [Fact]
+    public void ReadOnly_denies_a_write_wrapped_in_a_cte_shadowing_its_own_target()
+    {
+        // WITH orders AS (...) INSERT INTO orders ... names a CTE the same as its own write target. An
+        // INSERT target resolves against the catalog, not the WITH list, so this still writes the real
+        // orders table — the CTE short-circuit that drops a shadowed read source must not swallow the
+        // write target too, or this would pass the read-only gate as a no-op read of nothing.
+        var d = Validate("WITH orders AS (SELECT 1) INSERT INTO orders SELECT 1", isReadOnly: true);
+
+        Assert.False(d.Allowed);
+        Assert.Equal("policy_denied_readonly", d.DenyCode);
+    }
+
+    [Fact]
     public void ReadOnly_allows_select()
     {
         var d = Validate("SELECT id FROM orders", isReadOnly: true);

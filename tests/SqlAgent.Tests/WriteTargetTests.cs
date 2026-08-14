@@ -106,6 +106,19 @@ public class WriteTargetTests
     }
 
     [Fact]
+    public void A_write_target_shadowed_by_a_cte_of_the_same_name_is_still_the_real_table()
+    {
+        // WITH orders AS (...) INSERT INTO orders ... looks like a self-referencing CTE, but neither
+        // engine lets you write into a WITH alias: the INSERT target resolves against the catalog, so
+        // this writes the real "orders" table. The CTE short-circuit that drops a shadowed read source
+        // must not also drop this — it is the one reference the write actually touches.
+        var stmt = Parse("WITH orders AS (SELECT 1) INSERT INTO orders SELECT 1");
+
+        Assert.Equal(["orders"], Names(stmt.WrittenTables));
+        Assert.Equal(SqlStatementKind.Write, stmt.Kind);
+    }
+
+    [Fact]
     public void A_cte_wrapped_insert_classifies_as_write_not_read()
     {
         // WITH cte AS (...) INSERT INTO t SELECT ... parses as a top-level Statement.Select — the INSERT
