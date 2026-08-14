@@ -94,6 +94,7 @@ public class SchemaViewTests
     {
         var filtered = SchemaModel.Filter(SchemaModel.Build([Col("dbo", "Orders", "Id")], [], []), (_, _) => true);
 
+        Assert.NotNull(filtered.Views);
         Assert.Empty(filtered.ViewList);
     }
 }
