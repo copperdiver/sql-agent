@@ -51,6 +51,7 @@ The model itself remains unwired and stays unwired.
 | Materialized views | Unchanged from the parent spec. |
 | Virtualization in the Objects panel | Schema groups are collapsed by default and a name filter is always present, which bounds what renders without a component that has its own scroll-position bugs. If a real database makes the panel unusable, that is a measured finding, not a guess made here. |
 | Removing `TablePolicy.CanRead` | The level table never produces `CanRead = false`, so the column stops varying (see [Entities](#entities)). Removing it is a migration bought for nothing; it is recorded as a candidate instead. |
+| A per-engine glyph, which phase A deferred to "the phase that builds the database list" | The icon set is a hand-drawn dictionary of geometric paths, and an engine mark recognizable as SQL Server or Postgres is that vendor's trademark. Drawing something close enough to read as one is worse than not drawing it. The row uses the shared `database` glyph and names the engine in a `Badge`, which is also what the config page's DBMS select says. |
 | Background connection polling | The status dot reflects tests performed in this session, as the parent spec says. A poller against arbitrary remote servers is a feature nobody asked for. |
 | Persisting which schema groups are expanded | Same reasoning B2 applied to expanded projects: another `localStorage` key for a state one click restores. |
 | The remaining B1 and B2 carried items | Listed in the B2 plan and still carried. Only the three named below are in scope. |
@@ -261,7 +262,7 @@ New:
 
 | Component | Job |
 |---|---|
-| `DatabaseSection.razor` | Sidebar section: label, add button, collapsible list of databases with provider glyph, name, and status dot. |
+| `DatabaseSection.razor` | Sidebar section: label, add button, collapsible list of databases, each row carrying the engine, the name, and a status dot. |
 | `DatabasePage.razor` | `/database/{id?}` — the two panels. |
 | `ConnectionPanel.razor` | Name, DBMS, connection string, read-only toggle, Test, Save, Delete. |
 | `ObjectsPanel.razor` | Schema groups, name filter, per-object level. |
@@ -319,9 +320,19 @@ Unchanged in shape from every other surface: a deliberate refusal renders throug
 no code and sends the detail to the server log.
 
 New codes: `policy_denied_view_write`, `policy_denied_readonly_object`,
-`connection_test_auth_failed`, `connection_test_database_not_found`,
-`connection_test_host_unreachable`, `connection_test_timeout`. The existing
-`connection_test_failed` becomes the `Unknown` case.
+`schema_unavailable`, `connection_test_auth_failed`,
+`connection_test_database_not_found`, `connection_test_host_unreachable`,
+`connection_test_timeout`. The existing `connection_test_failed` becomes the
+`Unknown` case.
+
+`schema_unavailable` is the fail-closed answer when the schema cannot be read at
+execution time. Identifying a view requires it, so a connection that can run a
+query but cannot read its own catalog is refused where it previously executed.
+That is a real behaviour change and it is accepted deliberately: such a
+connection is already unusable for `describe_schema` and the entire
+natural-language path, and the alternative is a write to a view passing
+unnoticed — the failure this phase exists to close. As everywhere else, the
+provider's own text goes to the log and a fixed sentence goes to the caller.
 
 An unreachable database while the Objects panel is loading is an ordinary event
 for a tool that points at arbitrary servers: the panel says its list could not be
@@ -345,14 +356,16 @@ Store-backed:
 - `TablePolicyService` across both dimensions, including the view/`Full` refusal,
   the schema-header batch, and `SchemaCache` invalidation on every write path.
 - `QueryExecutionService` denying a write to a Read-only object and a write to a
-  view, and allowing a write to a Full-access object on a writable connection.
+  view, allowing a write to a Full-access object on a writable connection,
+  refusing with `schema_unavailable` when the schema cannot be read, and reading
+  the schema once rather than per query.
 - Migration: a store carrying `TablePolicy` rows and a populated `SchemaCache`
   migrates without error, the policy rows survive untouched, and the cache comes
   out empty — followed by a read that repopulates it with views present.
 
 bUnit:
 
-- `DatabaseSection` renders a row per connection with glyph, name, and dot state.
+- `DatabaseSection` renders a row per connection with engine, name, and dot state.
 - The Objects panel is absent before a successful test and present after one.
 - A level change calls the service; a schema header sets every object beneath it;
   a view offers two levels and not three.
