@@ -13,8 +13,7 @@
 @if (_connected && Id is { } id)
 {
     <div data-testid="objects-panel-slot">
-        @* Task 14 replaces this with <ObjectsPanel ConnectionId="id" />. The slot exists now so the
-           "appears only after a successful test" rule is under test before the panel is built. *@
+        <ObjectsPanel ConnectionId="id" />
     </div>
 }
 
