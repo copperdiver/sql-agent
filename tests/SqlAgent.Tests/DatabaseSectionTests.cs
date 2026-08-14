@@ -114,6 +114,14 @@ public class DatabaseSectionTests : IDisposable
 
         Assert.Contains("failed", section.Find(".database-dot .sr-only").TextContent,
             StringComparison.OrdinalIgnoreCase);
+
+        // aria-hidden on an ancestor prunes every descendant from the accessibility tree regardless of
+        // the descendant's own visibility or clip state -- so the assertion above alone cannot tell a
+        // genuinely announced label apart from one that sits in the DOM, matched by this selector, but is
+        // invisible to a screen reader because .database-dot itself carries aria-hidden="true". The label
+        // is a direct child of .database-dot, so the dot is the only ancestor between it and the row link
+        // that could carry the attribute.
+        Assert.Null(section.Find(".database-dot").GetAttribute("aria-hidden"));
     }
 
     [Fact]
