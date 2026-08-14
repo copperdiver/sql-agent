@@ -161,6 +161,21 @@ public class WriteTargetTests
         Assert.Equal("orders", target.Name);
     }
 
+    [Theory]
+    [InlineData(DatabaseProviderType.Postgres)]
+    [InlineData(DatabaseProviderType.SqlServer)]
+    public void Select_into_writes_to_the_table_it_creates(DatabaseProviderType provider)
+    {
+        // A Select node all the way down, so the statement-type switch calls it a Read; the write set is
+        // what corrects it. Left uncollected, this copied any readable table into a new one on a
+        // connection marked read-only.
+        var stmt = Parse("SELECT * INTO backup FROM orders", provider);
+
+        Assert.Equal(SqlStatementKind.Write, stmt.Kind);
+        Assert.Equal(["backup"], Names(stmt.WrittenTables));
+        Assert.Equal(["backup", "orders"], Names(stmt.Tables));
+    }
+
     [Fact]
     public void A_cte_alias_is_not_a_write_target()
     {

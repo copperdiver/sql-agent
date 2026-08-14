@@ -82,8 +82,9 @@ public static class SqlAnalyzer
 
         // A write can hide behind a syntactically read-shaped wrapper. `WITH cte AS (...) INSERT INTO t
         // SELECT ...` parses as a top-level Statement.Select — the INSERT lives nested inside the query
-        // body (Query.Body is a SetExpression.Insert wrapping a real Statement.Insert) — so the switch
-        // above alone would call it a Read and let it skip the read-only connection gate entirely. Rather
+        // body (Query.Body is a SetExpression.Insert wrapping a real Statement.Insert) — and so does
+        // `SELECT ... INTO t`, which is a Select node all the way down and writes anyway. The switch
+        // above alone would call either a Read and let it skip the read-only connection gate. Rather
         // than enumerate every SqlParserCS wrapper shape that could carry a nested write (a list a future
         // parser version would silently outdate), trust the collector's write set instead: if it found a
         // target while walking this statement, something in it writes, whatever the outer node looked
@@ -146,6 +147,11 @@ public static class SqlAnalyzer
             // unambiguously the write target, whatever flag the walk arrived with.
             else if (node is Statement.Insert insert)
                 AddUnlessCte(insert.InsertOperation.Name, scope, writeTarget: true);
+            // `SELECT ... INTO t` creates t and fills it. Both dialects parse it as a Statement.Select
+            // whose target hangs off Select.Into — neither a TableFactor nor an Insert — so without this
+            // branch it reported Kind = Read with an empty write set and ran on a read-only connection.
+            else if (node is SelectInto into)
+                AddUnlessCte(into.Name, scope, writeTarget: true);
 
             // A WITH clause needs per-part scoping, so handle a Query's CTEs explicitly rather than letting
             // the generic property walk apply one flat scope to both the bodies and the CTE definitions.

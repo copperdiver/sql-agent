@@ -364,6 +364,26 @@ public class QueryExecutionServiceTests
         conn.Dispose();
     }
 
+    [Theory]
+    [InlineData(DatabaseProviderType.Postgres)]
+    [InlineData(DatabaseProviderType.SqlServer)]
+    public async Task Select_into_on_a_readonly_connection_is_denied_before_execution(DatabaseProviderType type)
+    {
+        // The statement reads as a SELECT and creates a table, so the read-only flag has to catch it on
+        // the strength of the write set alone. It executed before the write set knew about SELECT INTO.
+        var (db, conn) = NewStore();
+        var provider = new ExecFakeProvider(type);
+        var (svc, connId) = await SetupAsync(db, provider, isReadOnly: true);
+
+        var r = await svc.ExecuteSqlAsync(connId, "SELECT * INTO backup FROM orders");
+
+        Assert.False(r.Success);
+        Assert.Equal("policy_denied_readonly", r.ErrorCode);
+        Assert.False(provider.WasCalled);
+
+        conn.Dispose();
+    }
+
     [Fact]
     public async Task Unknown_connection_returns_error_without_audit()
     {
