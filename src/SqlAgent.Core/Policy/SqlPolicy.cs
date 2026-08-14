@@ -340,12 +340,20 @@ public static class SqlAnalyzer
 
         /// <summary>
         /// The name a FROM-clause relation is addressable by inside its own clause — the alias it declares,
-        /// or null when it declares none. Every <see cref="TableFactor"/> that can carry one exposes it as a
-        /// <see cref="TableAlias"/> property named <c>Alias</c>: a plain table, a derived table and a
-        /// parenthesised join alike. It is read by name rather than by listing the variants because a
-        /// variant this file has not heard of would otherwise resolve to nothing and leave the bare alias
-        /// standing as the write target — the one failure direction that grants access instead of
-        /// withholding it.
+        /// or null when it declares none. The three relation kinds an UPDATE can be aliased onto here — a
+        /// plain table, a derived table, a parenthesised join — all expose it as a <see cref="TableAlias"/>
+        /// property named <c>Alias</c>, so it is read by name rather than by listing those variants: one
+        /// more variant shaped like them resolves without this needing to have heard of it, and that
+        /// matters because an alias resolving to nothing leaves the bare alias standing as the write
+        /// target, which is the failure direction that grants access rather than withholding it.
+        ///
+        /// That is a convenience, not a guarantee, and two variants are already outside it:
+        /// <c>TableFactor.Pivot</c> and <c>TableFactor.Unpivot</c> carry two alias slots, and the parser
+        /// fills <c>PivotAlias</c> while leaving <c>Alias</c> null (verified on both dialects), so their
+        /// aliases do not resolve and an UPDATE named after one would record the bare alias. That is
+        /// tolerable only because neither engine treats pivot output as an updatable target — it is not a
+        /// claim that every variant is covered. Any variant that becomes an updatable UPDATE target needs
+        /// checking against this, not assuming.
         /// </summary>
         private static string? DeclaredAlias(TableFactor factor)
             => (Property(factor, "Alias") as TableAlias)?.Name.Value;
@@ -372,8 +380,8 @@ public static class SqlAnalyzer
         {
             if (relation is null) yield break;
             yield return relation;
-            if (relation is TableFactor.NestedJoin nested)
-                foreach (var inner in ClauseRelations(nested.TableWithJoins)) yield return inner;
+            if (relation is TableFactor.NestedJoin { TableWithJoins: { } inner })
+                foreach (var nested in ClauseRelations(inner)) yield return nested;
         }
 
         /// <summary>The comma-separated entries of a FROM-style clause, whatever wrapper holds them.</summary>
