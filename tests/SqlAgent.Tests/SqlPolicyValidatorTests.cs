@@ -36,6 +36,20 @@ public class SqlPolicyValidatorTests
     }
 
     [Fact]
+    public void ReadOnly_denies_a_write_wrapped_in_a_cte()
+    {
+        // WITH cte AS (...) INSERT ... parses as a top-level Statement.Select, so without the write-set
+        // upgrade to Kind this would slip past the read-only gate as an ordinary read. This is the layer
+        // that proves the gate is actually closed, not just that WrittenTables is populated correctly.
+        var d = Validate(
+            "WITH recent AS (SELECT id FROM orders) INSERT INTO archive SELECT id FROM recent",
+            isReadOnly: true);
+
+        Assert.False(d.Allowed);
+        Assert.Equal("policy_denied_readonly", d.DenyCode);
+    }
+
+    [Fact]
     public void ReadOnly_allows_select()
     {
         var d = Validate("SELECT id FROM orders", isReadOnly: true);

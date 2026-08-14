@@ -80,6 +80,19 @@ public static class SqlAnalyzer
             _ => SqlStatementKind.Other,
         };
 
+        // A write can hide behind a syntactically read-shaped wrapper. `WITH cte AS (...) INSERT INTO t
+        // SELECT ...` parses as a top-level Statement.Select — the INSERT lives nested inside the query
+        // body (Query.Body is a SetExpression.Insert wrapping a real Statement.Insert) — so the switch
+        // above alone would call it a Read and let it skip the read-only connection gate entirely. Rather
+        // than enumerate every SqlParserCS wrapper shape that could carry a nested write (a list a future
+        // parser version would silently outdate), trust the collector's write set instead: if it found a
+        // target while walking this statement, something in it writes, whatever the outer node looked
+        // like. This can only push a statement from Read to Write, never the other way, so it cannot turn
+        // a real write into something that reads as safe. Other is left alone — it is already denied
+        // unconditionally regardless of Kind, so upgrading it would change nothing but the label.
+        if (kind == SqlStatementKind.Read && collector.WrittenReferences.Count > 0)
+            kind = SqlStatementKind.Write;
+
         // Fail closed. The collector finds a write target by walking the AST property that holds it, and
         // an upgrade of SqlParserCS that renames or restructures that property would leave the set empty
         // — which the per-object check would read as "this statement writes to nothing" and wave through.

@@ -106,6 +106,28 @@ public class WriteTargetTests
     }
 
     [Fact]
+    public void A_cte_wrapped_insert_classifies_as_write_not_read()
+    {
+        // WITH cte AS (...) INSERT INTO t SELECT ... parses as a top-level Statement.Select — the INSERT
+        // lives nested inside the query body — so the syntactic-node switch alone would call this a Read
+        // and let it skip the read-only connection gate entirely. The write set must override that.
+        var stmt = Parse("WITH recent AS (SELECT id FROM orders) INSERT INTO archive SELECT id FROM recent");
+
+        Assert.Equal(SqlStatementKind.Write, stmt.Kind);
+    }
+
+    [Fact]
+    public void A_plain_select_stays_read_with_no_write_set()
+    {
+        // The upgrade is one-directional: finding a write nested somewhere pushes Read to Write, but the
+        // ordinary case (nothing written) must not be disturbed by the same code path.
+        var stmt = Parse("WITH recent AS (SELECT id FROM orders) SELECT id FROM recent");
+
+        Assert.Equal(SqlStatementKind.Read, stmt.Kind);
+        Assert.Empty(stmt.WrittenTables);
+    }
+
+    [Fact]
     public void A_write_whose_target_cannot_be_identified_treats_every_reference_as_written()
     {
         // The fail-closed fallback, asserted through the invariant rather than by breaking the parser:
