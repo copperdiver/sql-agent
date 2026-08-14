@@ -56,6 +56,24 @@ public class WriteTargetTests
         Assert.Contains("staging_orders", Names(stmt.Tables));
     }
 
+    [Theory]
+    [InlineData(DatabaseProviderType.Postgres, "UPDATE o SET total = 0 FROM orders o")]
+    [InlineData(DatabaseProviderType.SqlServer, "UPDATE o SET total = 0 FROM orders o")]
+    [InlineData(DatabaseProviderType.Postgres, "UPDATE o SET total = 0 FROM orders AS o WHERE o.id = 1")]
+    [InlineData(DatabaseProviderType.SqlServer, "UPDATE o SET total = 0 FROM orders AS o WHERE o.id = 1")]
+    public void Update_through_an_alias_declared_in_from_writes_to_the_real_table(
+        DatabaseProviderType provider, string sql)
+    {
+        // T-SQL's canonical update-with-join idiom, which both dialects parse: Update.Table holds the
+        // *alias*, and the real table is only in Update.From. Recording the alias would hand the policy a
+        // name no object has — so it resolves to full access, is not a view, and both the read-only-object
+        // and the view-write denials pass on a statement the engine executes against `orders`.
+        var stmt = Parse(sql, provider);
+
+        Assert.Equal(["orders"], Names(stmt.WrittenTables));
+        Assert.Equal(["orders"], Names(stmt.Tables));
+    }
+
     [Fact]
     public void Update_with_a_subquery_does_not_treat_the_subquery_source_as_written()
     {

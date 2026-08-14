@@ -128,6 +128,25 @@ public class QueryExecutionServiceTests
     }
 
     [Fact]
+    public async Task A_write_through_an_alias_declared_in_from_is_denied_by_the_real_objects_level()
+    {
+        // The end-to-end shape of the alias hole: the engine would apply this to `orders`, so the policy
+        // has to check `orders` and not the alias standing in front of it. An alias has no policy row, so
+        // before the collector resolved it this reached the provider on a writable connection.
+        var (db, conn) = NewStore();
+        var provider = new ExecFakeProvider(DatabaseProviderType.Postgres, schema: OrdersAndSummary());
+        var (svc, connId) = await SetupAsync(db, provider, isReadOnly: false);
+        await SetLevelAsync(db, connId, "orders", visible: true, write: false);
+
+        var r = await svc.ExecuteSqlAsync(connId, "UPDATE o SET total = 0 FROM orders o");
+
+        Assert.False(r.Success);
+        Assert.Equal("policy_denied_readonly_object", r.ErrorCode);
+        Assert.False(provider.WasCalled);
+        conn.Dispose();
+    }
+
+    [Fact]
     public async Task Reading_a_read_only_object_inside_a_write_still_executes()
     {
         var (db, conn) = NewStore();

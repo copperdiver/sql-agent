@@ -159,9 +159,6 @@ public static class SqlAnalyzer
             // read sources beside it in a FROM or USING clause. The only thing that separates them is
             // which property of the statement they hang off, so that property is walked first with the
             // flag set; _visited then keeps the generic walk below from revisiting it as a read source.
-            // Walking the whole subtree with the flag on is deliberate: a joined relation under an UPDATE
-            // target is not valid in either supported dialect, and if one ever appears, counting it as
-            // written is the fail-closed answer.
             foreach (var target in WriteTargets(node))
                 Walk(target, scope, writeTarget: true);
 
@@ -170,33 +167,101 @@ public static class SqlAnalyzer
         }
 
         /// <summary>
-        /// The property (or properties) holding a statement's write target, by name. Reflection rather
-        /// than a type test because SqlParserCS offers no marker for "this is the thing being modified",
-        /// and the shape differs between an UPDATE and a DELETE: <c>Statement.Update.Table</c> holds it
-        /// directly, but a DELETE's target sits two levels down, at <c>DeleteOperation.From</c> — this
-        /// case is keyed on <see cref="DeleteOperation"/> rather than <see cref="Statement.Delete"/> so it
-        /// fires when the generic walk below reaches that nested node on its own. A name that stops
-        /// matching after a package upgrade yields nothing here, which <see cref="SqlAnalyzer.Describe"/>
-        /// turns into the fail-closed fallback rather than into silent permission.
+        /// The node (or nodes) a statement writes to, walked with the write flag set. The property holding
+        /// it is found by name rather than by a type test, because SqlParserCS offers no marker for "this
+        /// is the thing being modified", and the shape differs between an UPDATE and a DELETE:
+        /// <c>Statement.Update.Table</c> holds it directly, but a DELETE's target sits two levels down, at
+        /// <c>DeleteOperation.From</c> — this case is keyed on <see cref="DeleteOperation"/> rather than
+        /// <see cref="Statement.Delete"/> so it fires when the generic walk reaches that nested node on
+        /// its own. A name that stops matching after a package upgrade yields nothing here, which
+        /// <see cref="SqlAnalyzer.Describe"/> turns into the fail-closed fallback rather than into silent
+        /// permission; a *shape* that stops matching falls back to the whole clause, which over-marks
+        /// rather than under-marks.
         /// </summary>
-        private static IEnumerable<object?> WriteTargets(object node)
+        private IEnumerable<object?> WriteTargets(object node)
         {
-            var names = node switch
+            switch (node)
             {
-                Statement.Update => new[] { "Table" },
-                DeleteOperation => new[] { "From" },
+                case Statement.Update:
+                {
+                    var table = Property(node, "Table");
+                    if (table is null) yield break;
+                    yield return ResolveUpdateAlias(table, Property(node, "From")) ?? table;
+                    yield break;
+                }
+
+                case DeleteOperation:
+                {
+                    var from = Property(node, "From");
+                    if (from is not null) yield return from;
+                    yield break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// T-SQL's canonical update-with-join idiom — <c>UPDATE o SET ... FROM orders o</c>, which both
+        /// supported dialects parse — puts the *alias* in <c>Update.Table</c> and the real table only in
+        /// <c>Update.From</c>. Recording the alias hands the policy a name no object has, so it resolves
+        /// to full access and is not a view, and the write reaches an engine that applies it to the real
+        /// table. Resolve it instead: when the target is a bare, unaliased, single-part name matching an
+        /// alias declared among the FROM clause's own relations, that relation is what is written.
+        ///
+        /// Only the FROM clause's top-level relations and its joined ones are searched — an alias declared
+        /// inside a derived table is not in scope for the UPDATE target — and only an exact alias match
+        /// resolves. Anything else returns null and the caller records <c>Update.Table</c> as before, so an
+        /// unfamiliar shape costs precision, never enforcement.
+        /// </summary>
+        private object? ResolveUpdateAlias(object updateTarget, object? from)
+        {
+            if (from is null) return null;
+            if (updateTarget is not TableWithJoins { Relation: TableFactor.Table { Alias: null } named })
+                return null;
+            if (named.Name.Values.Count != 1) return null;
+            var alias = named.Name.Values[0].Value;
+
+            foreach (var relation in ClauseRelations(from))
+            {
+                if (relation is not TableFactor.Table { Alias: { } declared } real) continue;
+                if (!string.Equals(declared.Name.Value, alias, StringComparison.OrdinalIgnoreCase)) continue;
+
+                // The alias names no object, so it must not reach the reference list either. Marking it
+                // visited is how it is dropped: the generic walk skips anything already seen.
+                _visited.Add(named);
+                return real;
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// The relations a FROM-style clause names directly: each comma-separated entry and everything
+        /// joined onto it. Nothing nested inside a derived table or a subquery — those are read sources in
+        /// their own right and are reached by the ordinary walk.
+        /// </summary>
+        private static IEnumerable<TableFactor> ClauseRelations(object clause)
+        {
+            IEnumerable<TableWithJoins> entries = clause switch
+            {
+                TableWithJoins one => [one],
+                IEnumerable<TableWithJoins> many => many,
                 _ => [],
             };
 
-            foreach (var name in names)
+            foreach (var entry in entries)
             {
-                var prop = node.GetType().GetProperty(name, BindingFlags.Public | BindingFlags.Instance);
-                if (prop is null || prop.GetIndexParameters().Length > 0) continue;
-                object? value;
-                try { value = prop.GetValue(node); }
-                catch { continue; }
-                if (value is not null) yield return value;
+                yield return entry.Relation;
+                if (entry.Joins is null) continue;
+                foreach (var join in entry.Joins) yield return join.Relation;
             }
+        }
+
+        private static object? Property(object node, string name)
+        {
+            var prop = node.GetType().GetProperty(name, BindingFlags.Public | BindingFlags.Instance);
+            if (prop is null || prop.GetIndexParameters().Length > 0) return null;
+            try { return prop.GetValue(node); }
+            catch { return null; }
         }
 
         private void WalkQueryWithCtes(Query query, With with, ImmutableHashSet<string> outerScope)
