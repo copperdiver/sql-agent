@@ -41,23 +41,26 @@ public class SqlServerProvider : IDatabaseProvider
             WHERE t.TABLE_TYPE =
             """;
 
+        // The mapper reads columns by ordinal, so it must change in step with columnSelect.
+        // Hoisting it to a single variable ensures the base-table and view queries use identical
+        // projection logic.
+        var mapColumn = (SqlDataReader r) => (r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3),
+            string.Equals(r.GetString(4), "YES", StringComparison.OrdinalIgnoreCase),
+            NullableInt(r, 5), NullableInt(r, 6), NullableInt(r, 7));
+
         var columns = await Query(conn, ct,
             $"""
             {columnSelect} 'BASE TABLE'
             ORDER BY c.TABLE_SCHEMA, c.TABLE_NAME, c.ORDINAL_POSITION
             """,
-            r => (r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3),
-                  string.Equals(r.GetString(4), "YES", StringComparison.OrdinalIgnoreCase),
-                  NullableInt(r, 5), NullableInt(r, 6), NullableInt(r, 7)));
+            mapColumn);
 
         var views = await Query(conn, ct,
             $"""
             {columnSelect} 'VIEW'
             ORDER BY c.TABLE_SCHEMA, c.TABLE_NAME, c.ORDINAL_POSITION
             """,
-            r => (r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3),
-                  string.Equals(r.GetString(4), "YES", StringComparison.OrdinalIgnoreCase),
-                  NullableInt(r, 5), NullableInt(r, 6), NullableInt(r, 7)));
+            mapColumn);
 
         var pks = await Query(conn, ct,
             """

@@ -47,23 +47,26 @@ public class PostgresProvider : IDatabaseProvider
             WHERE t.table_type =
             """;
 
+        // The mapper reads columns by ordinal, so it must change in step with columnSelect.
+        // Hoisting it to a single variable ensures the base-table and view queries use identical
+        // projection logic.
+        var mapColumn = (NpgsqlDataReader r) => (r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3),
+            string.Equals(r.GetString(4), "YES", StringComparison.OrdinalIgnoreCase),
+            NullableInt(r, 5), NullableInt(r, 6), NullableInt(r, 7));
+
         var columns = await Query(conn, ct,
             $"""
             {columnSelect} 'BASE TABLE' AND {userSchemas}
             ORDER BY c.table_schema, c.table_name, c.ordinal_position
             """,
-            r => (r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3),
-                  string.Equals(r.GetString(4), "YES", StringComparison.OrdinalIgnoreCase),
-                  NullableInt(r, 5), NullableInt(r, 6), NullableInt(r, 7)));
+            mapColumn);
 
         var views = await Query(conn, ct,
             $"""
             {columnSelect} 'VIEW' AND {userSchemas}
             ORDER BY c.table_schema, c.table_name, c.ordinal_position
             """,
-            r => (r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3),
-                  string.Equals(r.GetString(4), "YES", StringComparison.OrdinalIgnoreCase),
-                  NullableInt(r, 5), NullableInt(r, 6), NullableInt(r, 7)));
+            mapColumn);
 
         var pks = await Query(conn, ct,
             """
