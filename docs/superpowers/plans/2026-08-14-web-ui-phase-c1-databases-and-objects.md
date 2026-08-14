@@ -5270,6 +5270,23 @@ three focus claims phase B2 wrote from the framework's documented behaviour were
 - [ ] Tab through the objects panel. Every segmented control is reachable, and the selected segment is
       visible as selected without relying on colour alone.
 
+**Config-page state across repeat navigation** — bUnit's `SetParametersAndRender` never re-invokes
+`OnParametersSetAsync` when the parameter value is unchanged (proven with a call counter during
+Task 13), so a test of this guard's same-id branch would exercise no implementation at all — real
+Blazor invokes the lifecycle method on every parameter set regardless, so the gap is the tooling's,
+not the code's.
+
+- [ ] Open a database's config page, edit the name field, then navigate to the *same* database again
+      from the sidebar. The form must not discard what you typed. No automated test can reach this —
+      bUnit does not re-invoke the lifecycle method when the route parameter is unchanged, so a test
+      of it would exercise neither the guard nor its absence.
+- [ ] **With the Objects panel open on a database, trigger any re-render that sets parameters again**
+      (navigate to the same database from the sidebar, or let a parent re-render the page).
+      `DatabasePage.OnParametersSet` clears `_connected` unconditionally, so the panel may vanish and
+      need another Test press even though nothing about the connection changed. Confirm whether it does.
+      Same tooling gap as the row above: bUnit will not re-invoke the lifecycle method for an unchanged
+      parameter, so only a browser can say whether this fires in practice.
+
 **The status dot** — held in the circuit, so a reload is a real part of the behaviour.
 
 - [ ] A database never tested this session shows a neutral dot.
@@ -5302,9 +5319,24 @@ measurement. This is the measurement.
       `policy_denied_readonly_object`.
 - [ ] Write to a view from the SQL page: refused with `policy_denied_view_write`.
 - [ ] Hide a view, then confirm it is absent from the objects the agent is given.
+- [ ] **The staleness window, which no automated test can reach.** With a database
+      already configured and its schema cached, create a new view directly in the
+      database, then try to write to it from the SQL page. It will be **allowed** —
+      the guard reads a cache nothing invalidates on a DDL change. Confirm that
+      changing any object's access level (which does invalidate) makes the same
+      write refuse with `policy_denied_view_write`. This is a recorded, accepted
+      limitation, not a bug to file; the row exists so somebody has seen it happen.
 - [ ] Set a schema header to Not visible and confirm every object under it goes hidden — views included.
 - [ ] Start the host against a store from before this release: it migrates, a `.bak` appears beside it,
       the saved databases are all still listed, and the first schema read carries views.
+- [ ] **On that same pre-release store, open the Objects panel and find an object you had hidden and
+      later un-hidden under the old schema rail.** It reads **Read-only**, not Full access, and a write
+      to it is refused with `policy_denied_readonly_object`. That is expected: the rail wrote `IsVisible`
+      alone and left `CanWrite` at its `false` default, which the new panel reads as Read-only. Confirm
+      one click on Full access restores it. No automated test replaces this, because it needs a store
+      whose rows were written by the *previous* release — and no migration fixes it, because a legacy
+      row and a deliberate Read-only choice are byte-identical, so unlocking the first would silently
+      unlock the second. Documented in `docs/web-ui.md` under Access levels.
 
 ---
 

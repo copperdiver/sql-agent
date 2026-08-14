@@ -4,6 +4,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SqlAgent.Host.Components.Layout;
+using SqlAgent.Host.Components.Shared.Ui;
 using SqlAgent.Host.Web;
 using SqlAgent.Storage;
 
@@ -102,6 +103,37 @@ public class ProjectSectionTests : IDisposable
         Assert.NotNull(dialogs.Current);
         Assert.Contains("already", _ctx.Render(dialogs.Current!).Markup, StringComparison.OrdinalIgnoreCase);
         Assert.Single(await ListProjectsAsync());
+    }
+
+    [Fact]
+    public async Task Two_consecutive_identical_name_taken_errors_still_ask_the_dialog_to_focus_again()
+    {
+        // "A project called "quarterly" already exists." is byte-identical on both attempts here -- the
+        // user retyping the exact name that was just rejected. A signal keyed off that text would not
+        // change on the second failure, leaving focus wherever the failed Save left it: the same defect
+        // Task 16 closed, one retry later. Rendered through DialogHost -- not the ad-hoc
+        // _ctx.Render(dialogs.Current!) snapshot the other tests in this file use -- because DialogHost is
+        // the one component that actually preserves NameDialog's instance across Dialogs.Show calls the
+        // way MainLayout does; a fresh snapshot render would spin up a new instance each time and hide
+        // exactly the bug this test exists to catch.
+        await SeedProjectAsync("quarterly");
+        var dialogs = _ctx.Services.GetRequiredService<DialogService>();
+        var section = _ctx.RenderComponent<ProjectSection>();
+        var host = _ctx.RenderComponent<DialogHost>();
+
+        section.Find("[data-testid=project-add]").Click();
+        host.Find("input").Change("quarterly");
+        await host.Find("[data-testid=name-save]").ClickAsync(new MouseEventArgs());
+        Assert.NotNull(dialogs.Current);
+        var afterFirst = host.FindComponent<Modal>().Instance.FocusSignal;
+
+        // Value in the box already reads "quarterly" from the failed attempt above -- retyping it is
+        // exactly what a user correcting nothing, and clicking Save again, does.
+        await host.Find("[data-testid=name-save]").ClickAsync(new MouseEventArgs());
+        Assert.NotNull(dialogs.Current);
+        var afterSecond = host.FindComponent<Modal>().Instance.FocusSignal;
+
+        Assert.NotEqual(afterFirst, afterSecond);
     }
 
     [Fact]

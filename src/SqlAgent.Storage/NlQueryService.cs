@@ -116,15 +116,20 @@ public class NlQueryService(
     }
 
     /// <summary>
-    /// Compact DDL text for the LLM, built only from the already-filtered schema (hidden tables are gone
-    /// before this point). One line per table with columns/types/nullability, a PK line, and FK lines.
-    /// Types carry their declared size (<c>varchar(20)</c>, <c>decimal(10,2)</c>) via
+    /// Compact DDL text for the LLM, built only from the already-filtered schema (hidden tables and views
+    /// are gone before this point). One line per object with columns/types/nullability, plus a PK line and
+    /// FK lines for tables. Types carry their declared size (<c>varchar(20)</c>, <c>decimal(10,2)</c>) via
     /// <see cref="SchemaColumn.TypeText"/> — without it the model cannot size literals or predicates.
+    ///
+    /// Views are listed last and marked, rather than folded in among the tables. A view is queryable and
+    /// never writable — a write to one is refused outright — so a model handed one as an ordinary table
+    /// would keep generating statements that can only come back as a denial. The marker is per line, not a
+    /// section heading, because a line has to carry its own meaning once the prompt is assembled.
     /// ponytail: deliberately simple; caching and context-budget-aware compaction are CD-75's job.
     /// </summary>
     private static string FormatSchema(DatabaseSchema schema)
     {
-        if (schema.Tables.Count == 0) return "(no tables are visible)";
+        if (schema.Tables.Count == 0 && schema.ViewList.Count == 0) return "(no tables are visible)";
 
         var sb = new StringBuilder();
         foreach (var t in schema.Tables)
@@ -137,6 +142,14 @@ public class NlQueryService(
                 sb.Append("  FK: ").Append(fk.Column).Append(" -> ")
                   .Append(fk.ReferencedSchema).Append('.').Append(fk.ReferencedTable).Append('.').AppendLine(fk.ReferencedColumn);
         }
+
+        foreach (var v in schema.ViewList)
+        {
+            var cols = string.Join(", ", v.Columns.Select(c => $"{c.Name} {c.TypeText}{(c.IsNullable ? "" : " NOT NULL")}"));
+            sb.Append(v.Schema).Append('.').Append(v.Name).Append('(').Append(cols).Append(')')
+              .AppendLine(" -- VIEW: read-only, writes to it are refused");
+        }
+
         return sb.ToString();
     }
 }

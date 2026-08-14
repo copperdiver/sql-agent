@@ -1,0 +1,130 @@
+@implements IDisposable
+@inject ScopedRunner Runner
+@inject AppState State
+@inject ILogger<DatabaseSection> Logger
+
+<div class="databases">
+    <div class="databases-head">
+        <button type="button" class="ghost databases-toggle" data-testid="databases-toggle"
+                aria-expanded="@_expanded" @onclick="() => _expanded = !_expanded">
+            @* Two elements under an @if rather than one with a computed Name: the glyph inventory test
+               reads this markup with a regex, and a name built inside an attribute expression is not
+               something it can read honestly. Same shape as ProjectSection's chevron. *@
+            @if (_expanded)
+            {
+                <Icon Name="chevron-down" Size="14" />
+            }
+            else
+            {
+                <Icon Name="chevron-right" Size="14" />
+            }
+            <span class="databases-label">Databases</span>
+        </button>
+        @* A plain anchor, not a NavLink: NavLink would mark it active for every /database/{id} route
+           under its default prefix match, so the add button would look selected while you edit an
+           existing database. *@
+        <a class="ghost databases-add" href="/database" data-testid="database-add" aria-label="Add database">
+            <Icon Name="plus" Size="16" />
+        </a>
+    </div>
+
+    @if (_error is not null)
+    {
+        @* No code: this is "the app broke", not a deliberate refusal, so it must not look like one. *@
+        <OutcomeMessage Message="@_error" />
+    }
+
+    @if (_expanded)
+    {
+        @foreach (var c in _connections)
+        {
+            <div class="database-row" @key="c.Id">
+                <NavLink class="database-open truncate" href="@($"/database/{c.Id}")">
+                    <Icon Name="database" Size="16" />
+                    <span class="truncate">@c.Name</span>
+                    <Badge Tone="BadgeTone.Neutral">@EngineLabel(c.ProviderType)</Badge>
+                    @* The sr-only label lives inside the dot rather than beside it: .sr-only is
+                       position:absolute and clipped to 1px, so it costs the dot no visible size, and
+                       nesting it here (rather than hanging aria-hidden on the dot itself) means there is
+                       nothing on this element for aria-hidden to need to suppress in the first place. *@
+                    <span class="database-dot @DotClass(c.Id)">
+                        <span class="sr-only">@DotLabel(c.Id)</span>
+                    </span>
+                </NavLink>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private IReadOnlyList<DatabaseConnectionInfo> _connections = [];
+    private bool _expanded = true;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Every page is a sibling of this section, not a child, and MainLayout is not recreated across
+        // navigation — so nothing re-runs this method when the config page saves or deletes something.
+        // HistorySection carries the same pair of subscriptions for the same reason.
+        State.ConnectionsChanged += OnConnectionsChanged;
+        State.ConnectionStatusChanged += OnStatusChanged;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        try
+        {
+            _connections = await Runner.RunAsync<DatabaseConnectionService, IReadOnlyList<DatabaseConnectionInfo>>(
+                s => s.ListAsync());
+            _error = null;
+        }
+        catch (Exception ex)
+        {
+            // A locked or missing SQLite file is a real possibility, and this section sits outside
+            // WorkArea's ErrorBoundary — letting it escape takes the circuit down. The exception text is
+            // never rendered: it can carry a file path.
+            Logger.LogError(ex, "Failed to list saved connections for the sidebar.");
+            _connections = [];
+            _error = "The saved databases could not be read. The details are in the server log.";
+        }
+    }
+
+    private static string EngineLabel(DatabaseProviderType type) => type switch
+    {
+        DatabaseProviderType.SqlServer => "SQL Server",
+        DatabaseProviderType.Postgres => "Postgres",
+        _ => type.ToString(),
+    };
+
+    private string DotClass(Guid id) => State.StatusOf(id) switch
+    {
+        ConnectionStatus.Ok => "ok",
+        ConnectionStatus.Failed => "failed",
+        _ => "untested",
+    };
+
+    // Rendered as text beside the dot rather than as a title on it: a colour is not a status to anyone
+    // using a screen reader, and a tooltip is not reachable from the keyboard.
+    private string DotLabel(Guid id) => State.StatusOf(id) switch
+    {
+        ConnectionStatus.Ok => "Last test in this session: connected",
+        ConnectionStatus.Failed => "Last test in this session: failed",
+        _ => "Not tested in this session",
+    };
+
+    private void OnConnectionsChanged() => InvokeAsync(async () =>
+    {
+        await ReloadAsync();
+        StateHasChanged();
+    });
+
+    // No re-read: nothing about the stored rows changed, only what this session knows about one of them.
+    private void OnStatusChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        State.ConnectionsChanged -= OnConnectionsChanged;
+        State.ConnectionStatusChanged -= OnStatusChanged;
+    }
+}

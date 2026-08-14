@@ -96,7 +96,8 @@ try a token.
 ## The shell
 
 The UI is a sidebar plus an inset main card. The sidebar carries the product mark, a collapse
-toggle, the nav rows, the schema rail, and the user card; the card holds the current page.
+toggle, the nav rows, the Databases, Projects and History sections, and the user card; the card
+holds the current page.
 
 - **Collapse** shrinks the sidebar to an icon rail. Below 1024px it leaves the layout entirely and
   becomes an overlay drawer opened from the hamburger at the top left.
@@ -157,23 +158,75 @@ nobody spends time rediscovering them:
 
 ## The screens
 
-- **Connections** (`/connections`) — create, edit, test, and delete database connections.
-  Editing a connection never shows the stored connection string back; the field starts blank,
+- **Databases** (`/database`, `/database/{id}`) — create, edit, test, and delete a database
+  connection. Editing one never shows the stored connection string back; the field starts blank,
   and leaving it blank on save keeps the existing secret. Provider type and read-only mode are
-  set here too.
+  set here too. Opening a saved database also tests it and, on success, shows every live table
+  and view with a three-level access control (hidden / read-only / full) — a view offers only
+  hidden/read-only, since a view cannot be writable. A filter box narrows the list by name, and
+  a level applies immediately, with no separate save step.
 - **Chat** (`/`, `/chat/{id}`) — ask a question in plain English; the generated SQL and its
   result (or an error) appear in the transcript, with a button to open the generated SQL on the
   SQL page for editing. See "Chats, and what is kept" below for what persists across a reload
   and what deliberately does not.
 - **SQL** (`/sql`) — a CodeMirror editor with SQL syntax highlighting, a result grid, CSV/JSON
-  export, and Cancel for an in-flight query.
-
-  The sidebar's schema rail, shared by both pages, lists every table for the selected connection
-  with a visibility checkbox — unchecking one hides it from both the schema the SQL policy
-  allows and the context given to the chat model. A filter box narrows the list by name.
+  export, and Cancel for an in-flight query. The page has its own database picker at the top —
+  the sidebar's Databases section links to the config page rather than selecting, so there is
+  exactly one control on screen that decides which connection a query runs against.
 - **Settings** (`/settings`) — three panels: appearance (the same theme control as the user menu),
   language-model status (whether `ILlmSqlGateway.IsConfigured` is true, with a badge), and
   environment (version, bind URL, port, store path, account — read from `HostInfo`).
+
+## Access levels
+
+Every table and view a connection can see has one of three access levels, set per object on that
+database's config page (`/database/{id}`, in the objects panel) and enforced on the execution path
+itself — `SqlPolicyValidator.Validate` checks it before a statement runs, not just before it renders:
+
+- **Not visible** (`ObjectAccess.Hidden`) — absent from the schema handed to the model and to
+  `describe_schema`. Naming it directly in SQL anyway is refused with `policy_denied_hidden_table`,
+  and that check runs before any more specific one, over every table referenced (not only written
+  ones) — a more specific refusal would concede the object exists.
+- **Read-only** (`ObjectAccess.ReadOnly`) — visible and queryable; refused as a write target with
+  `policy_denied_readonly_object`. A view can only be Not visible or Read-only, never Full — the
+  objects panel doesn't even offer a view the third segment, and `TablePolicyService.SetAccessAsync`
+  refuses a Full-access write for a view server-side too, in case a stale client tries anyway. A
+  view being written to is refused before its level is even consulted, with the more specific
+  `policy_denied_view_write` — the two codes can't both fire for the same statement.
+- **Full access** (`ObjectAccess.Full`) — visible, queryable, and (tables only) writable.
+
+**An object with no policy row is Full access — not Hidden, not Read-only.** This is the rule every
+layer applies (see the resolver contract on `SqlPolicyValidator.Validate` and
+`TablePolicyService.AccessOf`), and it is the one most likely to be misread, because the stored
+`TablePolicy` entity's own `CanWrite` column **defaults to `false`** — which reads as "a new table
+starts locked down." It means the opposite: a row in `TablePolicies` only exists once somebody has
+set a level for that object from the config page, and until then the object is fully open. An empty
+`TablePolicies` table for a connection is not "nothing configured yet, deny by default" — it is
+"every table and view on this connection is unrestricted." Setting a schema's header control applies
+a level to every object under it at once, clamping a view in the batch to Read-only rather than
+failing the whole call if one member can't take the level requested.
+
+**Upgrading from a store written before access levels existed.** The old schema rail could only hide
+and un-hide an object, and its toggle wrote `IsVisible` alone — leaving `CanWrite` at the entity's
+`false` default. Nothing read that column back then, so it did not matter. It does now: a row saying
+"visible, not writable" is exactly Read-only. So an object you hid under the old rail and later
+un-hid comes back as **Read-only**, not Full access, and a write to it is refused with
+`policy_denied_readonly_object` until you say otherwise. One click on that object's Full access
+segment in the Objects panel fixes it for good.
+
+There is deliberately no migration for this. A legacy row and a Read-only level a user chose on
+purpose in the new panel are the same two column values — the store cannot tell them apart — so any
+migration that "restored" the legacy rows would silently unlock objects somebody had chosen to
+protect. Refusing a write that should have been allowed is recoverable in one click; allowing a
+write that should have been refused is not.
+
+**`schema_unavailable`.** Telling a table from a view — which decides whether
+`policy_denied_view_write` applies to a given write — needs the live schema, so a connection that can
+run a query but cannot read its own catalog (a role granted `SELECT` but not the metadata views, for
+instance) is now refused with `schema_unavailable` rather than executed, even when the query itself
+would have been fine. Such a connection was already unusable for `describe_schema` and the whole
+natural-language path, so this closes a gap rather than opening one — the alternative is a write to
+what turns out to be a view slipping through because the policy check couldn't tell.
 
 ## Export
 
@@ -240,7 +293,7 @@ else: not SQL text, query results, table or column names, or connection details.
 opens, Escape closes.
 
 A message match shows the text around it, and opens the chat at the top — matches are not scrolled to.
-A project match opens that project in the sidebar; a database match goes to Connections.
+A project match opens that project in the sidebar; a database match opens that database's config page.
 
 Wildcards are searched for literally: `50%` finds a percent sign, and `a_b` does not match `axb`.
 
@@ -267,14 +320,14 @@ files under `wwwroot/js/`:
 | Check | Expected |
 |---|---|
 | Open the URL from `launch-url.txt` | Chat loads |
-| Navigate Chat → Connections → Chat via the sidebar nav | Both pages render and stay interactive; no full page reload |
-| Create a connection while Chat is open | It appears in the rail's picker without reloading the page |
+| Navigate Chat → a database's config page → Chat via the sidebar nav | Both pages render and stay interactive; no full page reload |
+| Create a database while Chat is open | It appears in the sidebar's Databases section without reloading the page |
 | Open `http://127.0.0.1:5099/` with no token in a private window | 401 |
-| Create a connection, then test it | Version and elapsed time reported |
-| Reopen the connection for editing | Connection-string field is empty |
-| Select the connection | Rail lists tables with checkboxes |
-| Uncheck a table, run `SELECT` against it | `policy_denied_hidden_table` |
-| Set read-only, run an `UPDATE` | `policy_denied_readonly` |
+| Create a database, then test it | Version and elapsed time reported |
+| Reopen the database for editing | Connection-string field is empty |
+| Open a database's config page | Objects panel lists tables and views grouped by schema, each with a Not visible / Read-only / Full access control |
+| Set a table to Not visible, run `SELECT` against it | `policy_denied_hidden_table` |
+| Set the connection to read-only, run an `UPDATE` | `policy_denied_readonly` |
 | Type SQL, press Ctrl+Enter | Query runs, syntax is highlighted |
 | Run a query returning more than 1000 rows | Truncation notice appears |
 | Export CSV, then JSON | Both files download and open cleanly |
@@ -311,16 +364,21 @@ files under `wwwroot/js/`:
 
 ## Approved scope that was consciously dropped
 
-Two items the design spec described are **not** in this build. Both were left out on purpose, not
-missed, and neither is scheduled:
+Two items the design spec described were left out of the build this note originally described.
+One remains dropped and unscheduled; the other was partially delivered later and the record below
+says by which phase, rather than being deleted now that it's stale:
 
-- **Schema detail in the rail.** The spec called for a schema → table → column tree showing each
-  column's declared type in full (`total numeric(10,2)`), PK/FK markers, and the table's indexes.
-  What shipped is a flat list of `schema.table` entries, each with the visibility checkbox and the
-  name filter. The rail's job here is configuration — deciding what the agent may see — and the
-  checkbox is what does that; column detail is a browsing feature that the SQL page already covers by
-  querying. `SchemaColumn.TypeText` and the key/index data are all still extracted and still reach
-  the LLM, so adding the detail later is a rendering change, not a data change.
+- **Schema detail in the rail** *(the rail this note describes is gone — see **Databases** above
+  for what replaced it)*. The spec called for a schema → table → column tree showing each column's
+  declared type in full (`total numeric(10,2)`), PK/FK markers, and the table's indexes. What
+  shipped at the time was a flat list of `schema.table` entries with a visibility checkbox and a
+  name filter — no grouping by schema at all. **Phase C1's objects panel** (`/database/{id}`, which
+  replaced the rail) delivered the schema grouping and marks each view with a badge, so the list is
+  a schema → table tree today rather than a flat one. Column-level detail is still missing, though:
+  no type, PK/FK marker, or index shows anywhere in the UI. `SchemaColumn.TypeText` and the key/index
+  data are extracted and still reach the LLM — they are just never rendered for a person to read —
+  so adding that detail later is still a rendering change, not a data change, and it is still not
+  scheduled.
 - **Copy SQL.** The spec listed copy-SQL alongside export CSV/JSON on the SQL page. There is no such
   button: the editor holds the text and the browser's own selection and clipboard already do the
   job, whereas a copy button needs clipboard interop and a permissions story of its own. The chat

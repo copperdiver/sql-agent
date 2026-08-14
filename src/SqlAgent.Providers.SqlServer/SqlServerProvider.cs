@@ -20,7 +20,12 @@ public class SqlServerProvider : IDatabaseProvider
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return ConnectionTestResult.Fail(ex.Message, sw.ElapsedMilliseconds);
+            var number = ex is SqlException sql ? sql.Number : (int?)null;
+            var socket = ex.GetBaseException() is System.Net.Sockets.SocketException;
+            var timeout = ex.GetBaseException() is TimeoutException;
+
+            return ConnectionTestResult.Fail(
+                SqlServerFailure.Classify(number, socket, timeout), ex.Message, sw.ElapsedMilliseconds);
         }
     }
 
@@ -29,19 +34,38 @@ public class SqlServerProvider : IDatabaseProvider
         await using var conn = new SqlConnection(connectionString);
         await conn.OpenAsync(ct);
 
-        var columns = await Query(conn, ct,
-            """
+        // One query shape, two object types. INFORMATION_SCHEMA.COLUMNS covers views as well as base
+        // tables, so the discriminator on TABLE_TYPE is the only thing that separates them — which is
+        // why this is a split rather than the filter it used to be.
+        const string columnSelect = """
             SELECT c.TABLE_SCHEMA, c.TABLE_NAME, c.COLUMN_NAME, c.DATA_TYPE, c.IS_NULLABLE,
                    c.CHARACTER_MAXIMUM_LENGTH, c.NUMERIC_PRECISION, c.NUMERIC_SCALE
             FROM INFORMATION_SCHEMA.COLUMNS c
             JOIN INFORMATION_SCHEMA.TABLES t
               ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME
-            WHERE t.TABLE_TYPE = 'BASE TABLE'
+            WHERE t.TABLE_TYPE =
+            """;
+
+        // The mapper reads columns by ordinal, so it must change in step with columnSelect.
+        // Hoisting it to a single variable ensures the base-table and view queries use identical
+        // projection logic.
+        var mapColumn = (SqlDataReader r) => (r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3),
+            string.Equals(r.GetString(4), "YES", StringComparison.OrdinalIgnoreCase),
+            NullableInt(r, 5), NullableInt(r, 6), NullableInt(r, 7));
+
+        var columns = await Query(conn, ct,
+            $"""
+            {columnSelect} 'BASE TABLE'
             ORDER BY c.TABLE_SCHEMA, c.TABLE_NAME, c.ORDINAL_POSITION
             """,
-            r => (r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3),
-                  string.Equals(r.GetString(4), "YES", StringComparison.OrdinalIgnoreCase),
-                  NullableInt(r, 5), NullableInt(r, 6), NullableInt(r, 7)));
+            mapColumn);
+
+        var views = await Query(conn, ct,
+            $"""
+            {columnSelect} 'VIEW'
+            ORDER BY c.TABLE_SCHEMA, c.TABLE_NAME, c.ORDINAL_POSITION
+            """,
+            mapColumn);
 
         var pks = await Query(conn, ct,
             """
@@ -86,7 +110,7 @@ public class SqlServerProvider : IDatabaseProvider
             """,
             r => (r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3), r.GetBoolean(4)));
 
-        return SchemaModel.Build(columns, pks, fks, indexes);
+        return SchemaModel.Build(columns, pks, fks, indexes, views);
     }
 
     public async Task<QueryResultSet> ExecuteQueryAsync(

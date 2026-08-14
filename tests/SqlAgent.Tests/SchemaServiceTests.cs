@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using SqlAgent.Core;
+using SqlAgent.Core.Policy;
 using SqlAgent.Storage;
 
 namespace SqlAgent.Tests;
@@ -175,7 +176,7 @@ public class SchemaServiceTests
         await schemas.GetOrRefreshAsync(created.Id); // cache both tables
         Assert.True(await db.SchemaCaches.AnyAsync(c => c.DatabaseConnectionId == created.Id));
 
-        await policies.SetVisibilityAsync(created.Id, "dbo", "Secret", isVisible: false);
+        await policies.SetAccessAsync(created.Id, "dbo", "Secret", DatabaseObjectKind.Table, ObjectAccess.Hidden);
         Assert.False(await db.SchemaCaches.AnyAsync(c => c.DatabaseConnectionId == created.Id)); // invalidated
 
         var after = await schemas.GetOrRefreshAsync(created.Id); // re-extract under new policy

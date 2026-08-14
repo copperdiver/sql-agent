@@ -67,8 +67,9 @@
 
     protected override async Task OnInitializedAsync()
     {
-        // Connections change from the Connections page, which is a sibling route in the same circuit —
-        // the same reason SchemaRail subscribes to this event rather than reading its list once.
+        // Connections change from the /database config page, which is a sibling route in the same
+        // circuit — the same reason DatabaseSection and Workspace subscribe to this event rather than
+        // reading their list once.
         State.ConnectionsChanged += OnConnectionsChanged;
         await ReloadConnectionsAsync();
     }

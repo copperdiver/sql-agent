@@ -62,8 +62,9 @@ public class NlQueryServiceTests
     {
         var connections = new DatabaseConnectionService(db, new InMemorySecretStore());
         var registry = new DatabaseProviderRegistry([provider]);
-        var svc = new NlQueryService(connections, new SchemaService(connections, registry, db),
-            new QueryExecutionService(connections, registry, db, NullLogger<QueryExecutionService>.Instance),
+        var schemas = new SchemaService(connections, registry, db);
+        var svc = new NlQueryService(connections, schemas,
+            new QueryExecutionService(connections, registry, db, schemas, NullLogger<QueryExecutionService>.Instance),
             gateway);
         return (svc, connections);
     }
@@ -220,6 +221,27 @@ public class NlQueryServiceTests
         // The schema text must be preceded by the target-dialect guidance so the model emits portable SQL.
         Assert.Contains("LIMIT", gateway.LastRequest!.SchemaContext);
         Assert.Contains("RETURNING", gateway.LastRequest.SchemaContext);
+        conn.Dispose();
+    }
+
+    [Fact]
+    public async Task Prompt_context_includes_views_marked_as_read_only()
+    {
+        var (db, conn) = NewStore();
+        var withView = new DatabaseSchema(
+            [new SchemaTable("public", "orders", [new SchemaColumn("id", "int", false)], ["id"], [], [])],
+            [new SchemaView("public", "order_summary", [new SchemaColumn("total", "numeric", true)])]);
+        var gateway = new FakeGateway(LlmSqlResponse.Clarify("?"));
+        var (svc, connections) = Build(db, new NlFakeProvider(withView), gateway);
+        var id = await AddConnectionAsync(connections);
+
+        await svc.AskAsync(id, "anything");
+
+        // A view the user made visible is queryable, so withholding it from the prompt hides half the
+        // schema from the model; handing it over unmarked invites an UPDATE that can only be refused.
+        var context = gateway.LastRequest!.SchemaContext;
+        Assert.Contains("public.order_summary(total numeric)", context);
+        Assert.Contains("VIEW", context);
         conn.Dispose();
     }
 

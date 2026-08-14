@@ -15,6 +15,7 @@ public class QueryExecutionService(
     DatabaseConnectionService connections,
     IDatabaseProviderRegistry providers,
     SqlAgentDbContext db,
+    SchemaService schemas,
     ILogger<QueryExecutionService> logger,
     QueryExecutionOptions? options = null)
 {
@@ -27,21 +28,32 @@ public class QueryExecutionService(
             // No connection row exists, so there is nothing to audit against — return the error directly.
             return QueryExecutionResult.Failure(sql, "connection_not_found", "No such database connection.");
 
-        var isVisible = await BuildVisibilityAsync(connectionId, ct);
-        var decision = SqlPolicyValidator.Validate(sql, info.ProviderType, info.IsReadOnly, isVisible);
+        // Resolved once, ahead of the resolver build below: a connection that can't execute at all (its
+        // secret is missing) must report connection_secret_missing, not get misdiagnosed as a schema
+        // problem by the schema read TryBuildPolicyResolverAsync is about to attempt with the same
+        // secret. The resolved string is reused for execution further down rather than resolved twice.
+        var connectionString = await connections.ResolveConnectionStringAsync(connectionId, ct);
+        if (connectionString is null)
+        {
+            const string msg = "Connection secret is missing.";
+            await AuditAsync(connectionId, sql, null, "error", msg, null, null);
+            return QueryExecutionResult.Failure(sql, "connection_secret_missing", msg);
+        }
+
+        var resolve = await TryBuildPolicyResolverAsync(connectionId, ct);
+        if (resolve is null)
+        {
+            const string msg = "The database schema could not be read, so this query could not be checked.";
+            await AuditAsync(connectionId, sql, null, "deny", msg, null, null);
+            return QueryExecutionResult.Failure(sql, "schema_unavailable", msg);
+        }
+
+        var decision = SqlPolicyValidator.Validate(sql, info.ProviderType, info.IsReadOnly, resolve);
 
         if (!decision.Allowed)
         {
             await AuditAsync(connectionId, sql, decision.NormalizedSql, "deny", decision.Reason, null, null);
             return QueryExecutionResult.Failure(sql, decision.DenyCode!, decision.Reason!);
-        }
-
-        var connectionString = await connections.ResolveConnectionStringAsync(connectionId, ct);
-        if (connectionString is null)
-        {
-            const string msg = "Connection secret is missing.";
-            await AuditAsync(connectionId, sql, decision.NormalizedSql, "error", msg, null, null);
-            return QueryExecutionResult.Failure(sql, "connection_secret_missing", msg);
         }
 
         var provider = providers.Get(info.ProviderType);
@@ -83,21 +95,79 @@ public class QueryExecutionService(
     }
 
     /// <summary>
-    /// A table is hidden if a TablePolicy marks it invisible. Matching is fail-closed for unqualified SQL:
-    /// a bare table name is hidden if any schema's same-named table is hidden; a schema-qualified name must
-    /// match the policy's schema too. (Tables with no policy row default to visible — same as the schema
-    /// description path.)
+    /// Builds the resolver the policy asks about every referenced object, or null when the schema could
+    /// not be read. Called only after ExecuteSqlAsync has already resolved the connection string
+    /// successfully, so the secret itself is known good here — a null result means the schema read
+    /// failed for some other reason (the provider's own catalog query, not the credential).
+    ///
+    /// Two sources. Levels come from this connection's TablePolicy rows; an object with no row is fully
+    /// accessible, which is the rule every layer here applies. Whether an object is a view comes from the
+    /// schema, not from a policy row — given that default, a view nobody has touched has no row to read,
+    /// so the policy table simply cannot answer the question. The cached copy is used when it exists, and
+    /// that it is already visibility-filtered costs nothing: a hidden object is refused by the visibility
+    /// branch before the view branch is reached.
+    ///
+    /// Matching is fail-closed for unqualified SQL. A bare name takes the most restrictive level among
+    /// same-named objects across every schema, and counts as a view if any of them is one; a
+    /// schema-qualified name must match the schema too. The consequence is worth knowing: a bare name
+    /// matching a table in one schema and a view in another is treated as a view, and a write to it is
+    /// refused. That is the same trade the hidden-object rule has always made.
+    ///
+    /// Returning null rather than throwing keeps ExecuteSqlAsync's contract for a genuine failure — it
+    /// answers with a result — and denying is the fail-closed answer: without the schema a view cannot be
+    /// told from a table, and allowing the query would let a write to a view through unchecked. A cancel
+    /// is the one thing that does propagate, because it is the caller's own signal rather than a verdict
+    /// about the connection; every caller of ExecuteSqlAsync already handles it that way, and the chat
+    /// path names this exact case (cancelled while the schema was being read) in its own catch.
     /// </summary>
-    private async Task<Func<SqlTableReference, bool>> BuildVisibilityAsync(Guid connectionId, CancellationToken ct)
+    private async Task<Func<SqlTableReference, ObjectPolicy>?> TryBuildPolicyResolverAsync(
+        Guid connectionId, CancellationToken ct)
     {
-        var hidden = await db.TablePolicies
-            .Where(p => p.DatabaseConnectionId == connectionId && !p.IsVisible)
-            .Select(p => new { p.SchemaName, p.TableName })
+        var rows = await db.TablePolicies
+            .Where(p => p.DatabaseConnectionId == connectionId)
+            .Select(p => new { p.SchemaName, p.TableName, p.IsVisible, p.CanWrite })
             .ToListAsync(ct);
 
-        return t => !hidden.Any(h =>
-            string.Equals(h.TableName, t.Name, StringComparison.OrdinalIgnoreCase) &&
-            (t.Schema is null || string.Equals(h.SchemaName, t.Schema, StringComparison.OrdinalIgnoreCase)));
+        IReadOnlyList<SchemaView> views;
+        try
+        {
+            var schema = await schemas.GetOrRefreshAsync(connectionId, ct);
+            if (schema is null) return null;
+            views = schema.ViewList;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // The provider's own text can echo a connection string, so it goes to the log and nowhere
+            // else — the caller gets the fixed sentence at the call site above.
+            //
+            // A cancel is excluded, on the argument already accepted for connection_secret_missing: the
+            // user pressing Cancel is not a schema failure, and swallowing it here would file an error in
+            // the server log and a schema_unavailable deny row in the audit for something the user did on
+            // purpose — telling a later reader the connection cannot read its own catalog when it can.
+            logger.LogError(ex, "The schema for connection {ConnectionId} could not be read.", connectionId);
+            return null;
+        }
+
+        return t =>
+        {
+            bool Matches(string schemaName, string objectName) =>
+                string.Equals(objectName, t.Name, StringComparison.OrdinalIgnoreCase) &&
+                (t.Schema is null || string.Equals(schemaName, t.Schema, StringComparison.OrdinalIgnoreCase));
+
+            var matched = rows.Where(r => Matches(r.SchemaName, r.TableName)).ToList();
+
+            // Most restrictive wins. No matching row at all means nobody has decided anything about this
+            // object, which is full access.
+            var access = matched.Count == 0
+                ? ObjectAccess.Full
+                : matched.Min(r => !r.IsVisible ? ObjectAccess.Hidden
+                    : r.CanWrite ? ObjectAccess.Full
+                    : ObjectAccess.ReadOnly);
+
+            var isView = views.Any(v => Matches(v.Schema, v.Name));
+
+            return new ObjectPolicy(access, isView);
+        };
     }
 
     private async Task AuditAsync(

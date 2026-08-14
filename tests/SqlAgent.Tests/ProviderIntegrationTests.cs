@@ -20,7 +20,7 @@ public class ProviderIntegrationTests
 
         var provider = new PostgresProvider();
         var connection = await provider.TestConnectionAsync(connectionString);
-        Assert.True(connection.Success, connection.Error);
+        Assert.True(connection.Success, connection.Failure.ToString());
 
         var result = await provider.ExecuteQueryAsync(
             connectionString,
@@ -54,6 +54,21 @@ public class ProviderIntegrationTests
             CONSTRAINT "fk order item" FOREIGN KEY ("Order Id", "Sku")
                 REFERENCES "CD-69 Sales"."Order Item" ("Order Id", "Sku")
         );
+        """;
+
+    private const string SqlServerViewFixtureDdl = """
+        IF OBJECT_ID('dbo.cd_c1_summary', 'V') IS NOT NULL DROP VIEW dbo.cd_c1_summary;
+        IF OBJECT_ID('dbo.cd_c1_order', 'U') IS NOT NULL DROP TABLE dbo.cd_c1_order;
+        CREATE TABLE dbo.cd_c1_order (id int NOT NULL PRIMARY KEY, sku varchar(20) NOT NULL, qty int NULL);
+        EXEC('CREATE VIEW dbo.cd_c1_summary AS SELECT id, sku FROM dbo.cd_c1_order');
+        """;
+
+    private const string PostgresViewFixtureDdl = """
+        DROP SCHEMA IF EXISTS "cd_c1" CASCADE;
+        CREATE SCHEMA "cd_c1";
+        CREATE TABLE "cd_c1"."order" (id integer PRIMARY KEY, sku varchar(20) NOT NULL, qty integer);
+        CREATE VIEW "cd_c1"."summary" AS SELECT id, sku FROM "cd_c1"."order";
+        CREATE MATERIALIZED VIEW "cd_c1"."rollup" AS SELECT count(*) AS n FROM "cd_c1"."order";
         """;
 
     [Fact]
@@ -115,7 +130,7 @@ public class ProviderIntegrationTests
 
         var provider = new SqlServerProvider();
         var connection = await provider.TestConnectionAsync(connectionString);
-        Assert.True(connection.Success, connection.Error);
+        Assert.True(connection.Success, connection.Failure.ToString());
 
         var result = await provider.ExecuteQueryAsync(
             connectionString,
@@ -188,6 +203,81 @@ public class ProviderIntegrationTests
                 IF OBJECT_ID('{schema}.OrderItem') IS NOT NULL DROP TABLE {schema}.OrderItem;
                 IF SCHEMA_ID('{schema}') IS NOT NULL EXEC('DROP SCHEMA {schema}');
                 """);
+        }
+    }
+
+    [Fact]
+    public async Task SqlServer_schema_extraction_separates_views_from_base_tables()
+    {
+        var connectionString = Environment.GetEnvironmentVariable(SqlServerConnectionStringEnv);
+        if (string.IsNullOrWhiteSpace(connectionString))
+            return;
+
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync();
+        try
+        {
+            await using (var ddl = new SqlCommand(SqlServerViewFixtureDdl, conn))
+                await ddl.ExecuteNonQueryAsync();
+
+            var schema = await new SqlServerProvider().GetSchemaAsync(connectionString);
+
+            // The view is a view, not a table. Before this phase the catalog query filtered on
+            // TABLE_TYPE = 'BASE TABLE', so it appeared as neither.
+            Assert.DoesNotContain(schema.Tables, t => t.Name == "cd_c1_summary");
+            var view = Assert.Single(schema.ViewList, v => v.Name == "cd_c1_summary");
+            Assert.Equal("dbo", view.Schema);
+            Assert.Equal(["id", "sku"], view.Columns.Select(c => c.Name));
+            // Column facets come from the same catalog the table columns come from, so sizing survives.
+            Assert.Equal("varchar(20)", view.Columns.Single(c => c.Name == "sku").TypeText);
+
+            // The base table is still a table and still complete.
+            var table = Assert.Single(schema.Tables, t => t.Name == "cd_c1_order");
+            Assert.Equal(["id"], table.PrimaryKey);
+        }
+        finally
+        {
+            await using var cleanup = new SqlCommand(
+                "IF OBJECT_ID('dbo.cd_c1_summary', 'V') IS NOT NULL DROP VIEW dbo.cd_c1_summary; " +
+                "IF OBJECT_ID('dbo.cd_c1_order', 'U') IS NOT NULL DROP TABLE dbo.cd_c1_order;", conn);
+            await cleanup.ExecuteNonQueryAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Postgres_schema_extraction_separates_views_and_ignores_materialized_ones()
+    {
+        var connectionString = Environment.GetEnvironmentVariable(PostgresConnectionStringEnv);
+        if (string.IsNullOrWhiteSpace(connectionString))
+            return;
+
+        await using var conn = new NpgsqlConnection(connectionString);
+        await conn.OpenAsync();
+        try
+        {
+            await using (var ddl = new NpgsqlCommand(PostgresViewFixtureDdl, conn))
+                await ddl.ExecuteNonQueryAsync();
+
+            var schema = await new PostgresProvider().GetSchemaAsync(connectionString);
+
+            Assert.DoesNotContain(schema.Tables, t => t.Name == "summary");
+            var view = Assert.Single(schema.ViewList, v => v.Name == "summary");
+            Assert.Equal("cd_c1", view.Schema);
+            Assert.Equal(["id", "sku"], view.Columns.Select(c => c.Name));
+            Assert.Equal("character varying(20)", view.Columns.Single(c => c.Name == "sku").TypeText);
+
+            // Materialized views are out of scope for this phase, and information_schema does not list
+            // them at all — this asserts the boundary rather than assuming it.
+            Assert.DoesNotContain(schema.ViewList, v => v.Name == "rollup");
+            Assert.DoesNotContain(schema.Tables, t => t.Name == "rollup");
+
+            var table = Assert.Single(schema.Tables, t => t.Name == "order");
+            Assert.Equal(["id"], table.PrimaryKey);
+        }
+        finally
+        {
+            await using var cleanup = new NpgsqlCommand("DROP SCHEMA IF EXISTS \"cd_c1\" CASCADE;", conn);
+            await cleanup.ExecuteNonQueryAsync();
         }
     }
 

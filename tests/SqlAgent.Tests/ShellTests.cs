@@ -23,8 +23,8 @@ public class ShellTests : IDisposable
 
     public ShellTests()
     {
-        // The sidebar hosts SchemaRail, which resolves the connection services, so the shell test needs
-        // the same registrations the rail's own tests use.
+        // The sidebar hosts DatabaseSection, which resolves the connection services, so the shell test
+        // needs the same registrations that section's own tests use.
         _conn.Open();
         RegisterSidebarServices(_ctx, _logs, "expanded");
 
@@ -41,7 +41,9 @@ public class ShellTests : IDisposable
         // Phase B1 replaced the Workspace row: conversations are the front door now, and the SQL editor
         // keeps its own row rather than a tab inside a page. Search arrives in B2 with its modal.
         Assert.Contains("New chat", sidebar.Markup);
-        Assert.Contains("Connections", sidebar.Markup);
+        // The row was "Connections" through Phase B; Task 13 gave /connections a replacement page at
+        // /database and moved the row's label and target with it.
+        Assert.Contains("Databases", sidebar.Markup);
     }
 
     [Fact]
@@ -184,13 +186,20 @@ public class ShellTests : IDisposable
     }
 
     [Fact]
-    public void The_schema_rail_still_lives_in_the_sidebar()
+    public void The_schema_rail_is_gone_and_the_databases_section_has_taken_its_place()
     {
-        // Phase A must not remove a working surface. The rail is the only visibility control until the
-        // config page lands in Phase C.
+        // Phase A's parity test insisted the rail stay until the config page existed. It exists now, so
+        // this is the assertion that replaces that one -- not a deletion.
+        //
+        // Asserting on "Filter tables" instead of the rail's own markup was this test's defect: that
+        // string lived inside SchemaRail's `@if (State.Connection is { } active)` block, and this fixture
+        // seeds no connection and never selects one, so a restored rail would render only its <select> and
+        // label and this assertion would stay green. <aside class="rail"> was SchemaRail's root element,
+        // rendered on every render regardless of selection -- assert on that instead.
         var sidebar = _ctx.RenderComponent<Sidebar>();
 
-        Assert.Contains("Connection", sidebar.Markup);
+        Assert.DoesNotContain("class=\"rail\"", sidebar.Markup);
+        Assert.Contains("Databases", sidebar.Markup);
     }
 
     // --- Task 5 review findings ---------------------------------------------------------------
@@ -232,10 +241,10 @@ public class ShellTests : IDisposable
         // _collapsed is viewport-independent state carried in from localStorage, but below 1024px the
         // sidebar becomes a fixed-width drawer, not a narrow rail -- and the collapse toggle that would
         // undo a collapsed state is itself display:none below 1024px. Without a min-width guard, a user
-        // who collapsed on desktop and later opens the drawer on a phone gets a drawer with no
-        // SchemaRail (the only connection/table picker until a later phase), no user card, and no way
-        // back in short of widening the window or clearing localStorage. bUnit runs no CSS engine, so
-        // this is pinned on the source text, the same way DesignSystemTests pins app.css structure.
+        // who collapsed on desktop and later opens the drawer on a phone gets a drawer with no Databases
+        // section, no user card, and no way back in short of widening the window or clearing localStorage.
+        // bUnit runs no CSS engine, so this is pinned on the source text, the same way DesignSystemTests
+        // pins app.css structure.
         var css = File.ReadAllText(RepoPaths.Find("src/SqlAgent.Host/Components/Layout/Sidebar.razor.css"));
 
         var wideBlock = ExtractBlock(css, "@media (min-width: 1024px)");
@@ -336,7 +345,7 @@ public class ShellTests : IDisposable
         Assert.Contains("drawer-open", sidebar.Find("aside").ClassName);
 
         var nav = _ctx.Services.GetRequiredService<FakeNavigationManager>();
-        nav.NavigateTo("connections");
+        nav.NavigateTo("database");
 
         Assert.DoesNotContain("drawer-open", sidebar.Find("aside").ClassName);
     }
@@ -380,18 +389,18 @@ public class ShellTests : IDisposable
     }
 
     [Fact]
-    public void A_closed_drawer_wires_no_keydown_handler_so_typing_in_the_rail_costs_nothing()
+    public void A_closed_drawer_wires_no_keydown_handler_so_typing_inside_it_costs_nothing()
     {
         // The Escape-to-close handler must not be attached while the drawer is closed, and that is a
-        // performance fact rather than a tidiness one. SchemaRail's filter input lives inside this
-        // <aside> and binds on @onchange rather than @oninput specifically so it does not send a round
-        // trip per keystroke. A keydown handler on an ancestor undoes that through bubbling -- and worse
-        // than the round trip alone, ComponentBase.HandleEventAsync calls StateHasChanged() after every
-        // callback whether or not the callback did anything, so each keystroke would also re-render the
-        // whole Sidebar subtree including the rail's table list. On a wide viewport _drawerOpen can never
-        // be true, so all of that would be pure waste. An early return inside the handler cannot avoid
-        // it: the round trip and the re-render happen either side of the callback regardless. The
-        // attribute itself has to be absent.
+        // performance fact rather than a tidiness one -- not just for whatever text input happens to live
+        // in this <aside> today (Sidebar.razor's own comment above the element covers why nothing does,
+        // right now). A keydown handler on an ancestor receives every keystroke inside it through
+        // bubbling, no matter what fires it -- and worse than the round trip alone,
+        // ComponentBase.HandleEventAsync calls StateHasChanged() after every callback whether or not the
+        // callback did anything, so each keystroke would also re-render the whole Sidebar subtree. On a
+        // wide viewport _drawerOpen can never be true, so all of that would be pure waste. An early
+        // return inside the handler cannot avoid it: the round trip and the re-render happen either side
+        // of the callback regardless. The attribute itself has to be absent.
         //
         // On the assertion. Two more obvious shapes were tried and rejected because they cannot fail:
         // bUnit does not throw for an unhandled keydown (it models bubbling, where "nobody handled it"
@@ -404,7 +413,7 @@ public class ShellTests : IDisposable
         var sidebar = _ctx.RenderComponent<Sidebar>();
 
         Assert.False(sidebar.Find("aside").HasAttribute("blazor:onkeydown"),
-            "A closed drawer must attach no keydown handler; every keystroke in SchemaRail's filter would otherwise cost a round trip and a full Sidebar re-render.");
+            "A closed drawer must attach no keydown handler; every keystroke anywhere inside this <aside> would otherwise cost a round trip and a full Sidebar re-render.");
 
         sidebar.Find("[data-testid=drawer-open]").Click();
 
@@ -557,9 +566,9 @@ public class ShellTests : IDisposable
     private int FocusInvocationCount() =>
         _ctx.JSInterop.Invocations.Count(i => i.Identifier.Contains("focus", StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>The registrations Sidebar needs to render at all: SchemaRail's connection services, plus
-    /// HostInfo and a theme read-back for the UserCard/ThemeToggle in its foot. Shared by the fixture's
-    /// own context and by the tests that need a second, differently-configured one.</summary>
+    /// <summary>The registrations Sidebar needs to render at all: DatabaseSection's connection services,
+    /// plus HostInfo and a theme read-back for the UserCard/ThemeToggle in its foot. Shared by the
+    /// fixture's own context and by the tests that need a second, differently-configured one.</summary>
     private void RegisterSidebarServices(Bunit.TestContext ctx, RecordingLoggerProvider logs, string sidebarState)
     {
         ctx.Services.AddDbContext<SqlAgentDbContext>(o => o.UseSqlite(_conn));

@@ -1,0 +1,22 @@
+@* The only destructive operation on the config page. The page it replaces deleted a connection on a
+   single click and never asked, which left it alone among this application's destructive operations. *@
+<Modal Title="Delete database" OnClose="OnCancel">
+    <ChildContent>
+        <p>Delete <strong>@Name</strong>?</p>
+        <p class="muted">
+            Its connection string and every access level you set for it are removed. Chats that used it
+            keep their transcript — the database name is recorded in each message.
+        </p>
+    </ChildContent>
+    <Footer>
+        <button type="button" data-testid="connection-delete-cancel" @onclick="OnCancel">Cancel</button>
+        <button type="button" class="danger" data-testid="connection-delete-confirm"
+                @onclick="OnConfirm">Delete</button>
+    </Footer>
+</Modal>
+
+@code {
+    [Parameter, EditorRequired] public string Name { get; set; } = "";
+    [Parameter] public EventCallback OnConfirm { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+}

@@ -1,0 +1,35 @@
+@* One directive, not two. An optional route parameter already matches the bare segment, so declaring
+   "/database" beside it registers two routes for the same URL and the router throws on an ambiguous
+   match rather than picking one. *@
+@page "/database/{Id:guid?}"
+@inject NavigationManager Nav
+
+@* Panels stack rather than sitting side by side: the objects list is long and the connection form is
+   short, and a two-column split would make the form's whitespace grow with the database's size. *@
+<h1>@(Id is null ? "New database" : "Database")</h1>
+
+<ConnectionPanel Id="Id" OnTested="OnTested" OnCreated="OnCreated" />
+
+@if (_connected && Id is { } id)
+{
+    <div data-testid="objects-panel-slot">
+        <ObjectsPanel ConnectionId="id" />
+    </div>
+}
+
+@code {
+    [Parameter] public Guid? Id { get; set; }
+
+    private bool _connected;
+
+    // Reset on every parameter change, not only on a failed test: navigating from a reachable database to
+    // an unreachable one must not leave the previous one's panel on screen while the new test is still in
+    // flight.
+    protected override void OnParametersSet() => _connected = false;
+
+    private void OnTested(bool success) => _connected = success;
+
+    // The route carries the identity, so a created database has to move to its own URL — otherwise Save
+    // followed by Test would test a draft that no longer exists anywhere but in this form.
+    private void OnCreated(Guid id) => Nav.NavigateTo($"/database/{id}");
+}

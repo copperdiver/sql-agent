@@ -1,0 +1,270 @@
+@inject ScopedRunner Runner
+@inject AppState State
+@inject DialogService Dialogs
+@inject NavigationManager Nav
+@inject ILogger<ConnectionPanel> Logger
+
+<section class="panel">
+    <h2>Connection</h2>
+
+    <div class="field">
+        <label for="connection-name">Name</label>
+        <input id="connection-name" data-testid="connection-name" value="@_name" @onchange="OnNameChanged" />
+    </div>
+
+    <div class="field">
+        <label for="connection-provider">DBMS</label>
+        <select id="connection-provider" data-testid="connection-provider" @onchange="OnProviderChanged">
+            @foreach (var p in Enum.GetValues<DatabaseProviderType>())
+            {
+                <option value="@p" selected="@(p == _provider)">@Label(p)</option>
+            }
+        </select>
+    </div>
+
+    <div class="field">
+        <label for="connection-string">Connection string</label>
+        @* Never populated from the server, on either path: the secret does not travel to the browser,
+           and blank on save means "keep the stored one". Both rules are carried over verbatim from the
+           page this replaces. *@
+        <input id="connection-string" data-testid="connection-string" type="password"
+               value="@_connectionString" @onchange="OnConnectionStringChanged"
+               placeholder="@(Id is null ? "" : "leave blank to keep the stored secret")" />
+    </div>
+
+    <div class="field field-inline">
+        <input id="connection-readonly" type="checkbox" data-testid="connection-readonly"
+               checked="@_isReadOnly" @onchange="OnReadOnlyChanged" />
+        <label for="connection-readonly">Read-only</label>
+    </div>
+
+    <div class="actions">
+        <button type="button" data-testid="connection-test" @onclick="TestAsync" disabled="@_busy">Test</button>
+        <button type="button" class="primary" data-testid="connection-save" @onclick="SaveAsync" disabled="@_busy">Save</button>
+        @if (Id is not null)
+        {
+            <button type="button" class="danger" data-testid="connection-delete" @onclick="ShowDelete">Delete</button>
+        }
+    </div>
+
+    @if (_status is not null)
+    {
+        <OutcomeMessage Code="@_statusCode" Message="@_status" />
+    }
+</section>
+
+@code {
+    [Parameter] public Guid? Id { get; set; }
+
+    /// <summary>Raised with true when a test succeeds and false when it does not, so the page can show or
+    /// hide the panels that need a reachable database.</summary>
+    [Parameter] public EventCallback<bool> OnTested { get; set; }
+
+    /// <summary>Raised after a create, so the page can move to the saved database's own route.</summary>
+    [Parameter] public EventCallback<Guid> OnCreated { get; set; }
+
+    private string _name = "";
+    private DatabaseProviderType _provider = DatabaseProviderType.Postgres;
+    private bool _isReadOnly = true;
+    private string _connectionString = "";
+    private bool _busy;
+    private string? _status;
+    private string? _statusCode;
+    private Guid? _loaded;
+    private bool _initialized;
+
+    private static string Label(DatabaseProviderType type) => type switch
+    {
+        DatabaseProviderType.SqlServer => "SQL Server",
+        DatabaseProviderType.Postgres => "Postgres",
+        _ => type.ToString(),
+    };
+
+    // OnParametersSetAsync, not OnInitializedAsync: navigating between two /database/{id} routes reuses
+    // this component instance, so initialization alone would leave the previous database's values in the
+    // form. Guarded on _loaded so an unrelated re-render does not discard what the user has typed.
+    //
+    // The guard is an explicit "have I run once" flag rather than inferring a first render from the form
+    // being empty: _name.Length > 0 reads as "the user has typed something", but a user who clears the
+    // name field back to empty would look identical to a component that has never loaded, and the guard
+    // would silently re-seed the form under them.
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_initialized && _loaded == Id) return;
+        _initialized = true;
+        _loaded = Id;
+        Clear();
+        _connectionString = "";
+
+        if (Id is not { } id)
+        {
+            _name = "";
+            _provider = DatabaseProviderType.Postgres;
+            _isReadOnly = true;
+            await OnTested.InvokeAsync(false);
+            return;
+        }
+
+        var info = await Runner.RunAsync<DatabaseConnectionService, DatabaseConnectionInfo?>(s => s.GetAsync(id));
+        if (info is null)
+        {
+            Refuse("connection_not_found", "That database is no longer configured.");
+            await OnTested.InvokeAsync(false);
+            return;
+        }
+
+        _name = info.Name;
+        _provider = info.ProviderType;
+        _isReadOnly = info.IsReadOnly;
+
+        // Opening a saved database tests it once, so the Objects panel is present on arrival. A test per
+        // visit is cheap; a button between the user and the thing they navigated to is not.
+        await TestAsync();
+    }
+
+    private void OnNameChanged(ChangeEventArgs e) => _name = e.Value?.ToString() ?? "";
+    private void OnConnectionStringChanged(ChangeEventArgs e) => _connectionString = e.Value?.ToString() ?? "";
+    private void OnReadOnlyChanged(ChangeEventArgs e) => _isReadOnly = (bool)(e.Value ?? false);
+
+    private void OnProviderChanged(ChangeEventArgs e)
+    {
+        if (Enum.TryParse<DatabaseProviderType>(e.Value?.ToString(), out var parsed))
+            _provider = parsed;
+    }
+
+    private async Task TestAsync()
+    {
+        _busy = true;
+        try
+        {
+            ConnectionTestOutcome? outcome;
+            if (Id is { } id && string.IsNullOrWhiteSpace(_connectionString))
+                outcome = await Runner.RunAsync<ConnectionTester, ConnectionTestOutcome?>(t => t.TestSavedAsync(id));
+            else if (!string.IsNullOrWhiteSpace(_connectionString))
+                outcome = await Runner.RunAsync<ConnectionTester, ConnectionTestOutcome?>(
+                    t => t.TestDraftAsync(_provider, _connectionString)!);
+            else
+            {
+                Refuse("connection_string_required", "Enter a connection string, then test it.");
+                await OnTested.InvokeAsync(false);
+                return;
+            }
+
+            if (outcome is null)
+            {
+                Refuse("connection_secret_missing", "The database or its stored secret is missing.");
+                await OnTested.InvokeAsync(false);
+                return;
+            }
+
+            if (Id is { } tested) State.RecordTest(tested, outcome.Success);
+
+            if (outcome.Success)
+            {
+                Succeed($"Connected. {outcome.ServerVersion}, {outcome.ElapsedMs} ms.");
+                await OnTested.InvokeAsync(true);
+            }
+            else
+            {
+                // The classified outcome, never the driver's own sentence — ConnectionTester logged that
+                // and did not return it, so there is nothing here that could leak.
+                Refuse(ConnectionFailureText.Code(outcome.Failure), ConnectionFailureText.Message(outcome.Failure));
+                await OnTested.InvokeAsync(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to test connection {ConnectionId}.", Id);
+            Fail("The database could not be tested. The details are in the server log.");
+            await OnTested.InvokeAsync(false);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_name))
+        {
+            Refuse("connection_name_required", "A name is required.");
+            return;
+        }
+
+        var input = new DatabaseConnectionInput(_name, _provider, _isReadOnly);
+        _busy = true;
+        try
+        {
+            if (Id is { } id)
+            {
+                var secret = string.IsNullOrWhiteSpace(_connectionString) ? null : _connectionString;
+                await Runner.RunAsync<DatabaseConnectionService>(s => s.UpdateAsync(id, input, secret));
+                _connectionString = "";
+                Succeed("Saved.");
+                State.NotifyConnectionsChanged();
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(_connectionString))
+                {
+                    // A refusal, not a failure: it carries a code like every other refusal in the UI.
+                    Refuse("connection_string_required", "A connection string is required for a new database.");
+                    return;
+                }
+                var created = await Runner.RunAsync<DatabaseConnectionService, DatabaseConnectionInfo>(
+                    s => s.CreateAsync(input, _connectionString));
+                _connectionString = "";
+                Succeed("Saved.");
+                State.NotifyConnectionsChanged();
+                await OnCreated.InvokeAsync(created.Id);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to save connection {ConnectionId}.", Id);
+            Fail("The database could not be saved. The details are in the server log.");
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void ShowDelete()
+    {
+        if (Dialogs.Current is not null) return;
+        Dialogs.Show(@<ConnectionDeleteDialog Name="@_name" OnCancel="Dialogs.Close" OnConfirm="DeleteAsync" />);
+    }
+
+    private async Task DeleteAsync()
+    {
+        Dialogs.Close();
+        if (Id is not { } id) return;
+        try
+        {
+            await Runner.RunAsync<DatabaseConnectionService>(s => s.DeleteAsync(id));
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to delete connection {ConnectionId}.", id);
+            Fail("The database could not be deleted. The details are in the server log.");
+            return;
+        }
+
+        // Both, and in this order: the dot must not outlive the row it belonged to, and the sidebar has
+        // to lose the row before this component navigates away from it.
+        State.ForgetStatus(id);
+        State.NotifyConnectionsChanged();
+        Nav.NavigateTo("/database");
+    }
+
+    private void Clear() { _status = null; _statusCode = null; }
+    private void Succeed(string message) { _status = message; _statusCode = null; }
+
+    /// <summary>An expected outcome the user should read as deliberate: shown with its stable code.</summary>
+    private void Refuse(string code, string message) { _status = message; _statusCode = code; }
+
+    /// <summary>Something broke. No code — a code would make it read as a rule the app applied on purpose.</summary>
+    private void Fail(string message) { _status = message; _statusCode = null; }
+}

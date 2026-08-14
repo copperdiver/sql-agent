@@ -68,8 +68,13 @@ Without a matching token every tool returns `unauthorized`.
 ## Stable error codes (surfaced unchanged from Core)
 
 `unauthorized`, `invalid_database_id`, `connection_not_found`, `connection_secret_missing`,
-`schema_extraction_error`, `policy_denied_readonly`, `policy_denied_hidden_table`,
+`schema_extraction_error`, `schema_unavailable`, `policy_denied_readonly`,
+`policy_denied_hidden_table`, `policy_denied_view_write`, `policy_denied_readonly_object`,
 `execution_timeout`, `execution_canceled`, `execution_error`.
+
+`schema_unavailable` means `query_database` could not read the connection's catalog, which it needs
+to tell a view from a table before allowing a write. The SQL itself may be fine — it is not a
+`policy_denied_*` code, and a connection that returns it is also unable to serve `describe_schema`.
 
 ## Troubleshooting
 
