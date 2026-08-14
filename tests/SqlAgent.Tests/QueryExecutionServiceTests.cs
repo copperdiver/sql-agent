@@ -223,6 +223,37 @@ public class QueryExecutionServiceTests
     }
 
     [Fact]
+    public async Task A_connection_with_a_missing_secret_reports_connection_secret_missing_not_schema_unavailable()
+    {
+        // The secret is deleted directly from the store (real ISecretStore, real DatabaseConnection
+        // .ConnectionStringSecretRef) leaving the connection row intact — the same shape ConnectionsPageTests
+        // uses for ConnectionTester.TestSavedAsync's null-secret case. A cold cache means the resolver would
+        // also need this same secret to read the schema; the secret check must win first so a broken
+        // installation is reported as connection_secret_missing (an operational "error"), not
+        // schema_unavailable (a policy "deny").
+        var (db, conn) = NewStore();
+        var secrets = new InMemorySecretStore();
+        var connections = new DatabaseConnectionService(db, secrets);
+        var created = await connections.CreateAsync(
+            new DatabaseConnectionInput("c", DatabaseProviderType.Postgres, false), "conn-string");
+        var entity = await db.DatabaseConnections.FindAsync(created.Id);
+        await secrets.DeleteAsync(entity!.ConnectionStringSecretRef);
+
+        var registry = new DatabaseProviderRegistry(
+            [new ExecFakeProvider(DatabaseProviderType.Postgres, schema: OrdersAndSummary())]);
+        var schemas = new SchemaService(connections, registry, db);
+        var svc = new QueryExecutionService(
+            connections, registry, db, schemas, NullLogger<QueryExecutionService>.Instance);
+
+        var r = await svc.ExecuteSqlAsync(created.Id, "SELECT id FROM orders");
+
+        Assert.False(r.Success);
+        Assert.Equal("connection_secret_missing", r.ErrorCode);
+        Assert.Equal("error", Assert.Single(await AuditAsync(db)).Decision);
+        conn.Dispose();
+    }
+
+    [Fact]
     public async Task The_cached_schema_is_reused_rather_than_re_extracted_per_query()
     {
         // SchemaCache exists precisely so the prompt path does not re-read the live catalog per request,

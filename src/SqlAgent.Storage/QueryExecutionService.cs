@@ -28,6 +28,18 @@ public class QueryExecutionService(
             // No connection row exists, so there is nothing to audit against — return the error directly.
             return QueryExecutionResult.Failure(sql, "connection_not_found", "No such database connection.");
 
+        // Resolved once, ahead of the resolver build below: a connection that can't execute at all (its
+        // secret is missing) must report connection_secret_missing, not get misdiagnosed as a schema
+        // problem by the schema read TryBuildPolicyResolverAsync is about to attempt with the same
+        // secret. The resolved string is reused for execution further down rather than resolved twice.
+        var connectionString = await connections.ResolveConnectionStringAsync(connectionId, ct);
+        if (connectionString is null)
+        {
+            const string msg = "Connection secret is missing.";
+            await AuditAsync(connectionId, sql, null, "error", msg, null, null);
+            return QueryExecutionResult.Failure(sql, "connection_secret_missing", msg);
+        }
+
         var resolve = await TryBuildPolicyResolverAsync(connectionId, ct);
         if (resolve is null)
         {
@@ -42,14 +54,6 @@ public class QueryExecutionService(
         {
             await AuditAsync(connectionId, sql, decision.NormalizedSql, "deny", decision.Reason, null, null);
             return QueryExecutionResult.Failure(sql, decision.DenyCode!, decision.Reason!);
-        }
-
-        var connectionString = await connections.ResolveConnectionStringAsync(connectionId, ct);
-        if (connectionString is null)
-        {
-            const string msg = "Connection secret is missing.";
-            await AuditAsync(connectionId, sql, decision.NormalizedSql, "error", msg, null, null);
-            return QueryExecutionResult.Failure(sql, "connection_secret_missing", msg);
         }
 
         var provider = providers.Get(info.ProviderType);
@@ -92,7 +96,9 @@ public class QueryExecutionService(
 
     /// <summary>
     /// Builds the resolver the policy asks about every referenced object, or null when the schema could
-    /// not be read.
+    /// not be read. Called only after ExecuteSqlAsync has already resolved the connection string
+    /// successfully, so the secret itself is known good here — a null result means the schema read
+    /// failed for some other reason (the provider's own catalog query, not the credential).
     ///
     /// Two sources. Levels come from this connection's TablePolicy rows; an object with no row is fully
     /// accessible, which is the rule every layer here applies. Whether an object is a view comes from the
