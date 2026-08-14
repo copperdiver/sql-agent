@@ -214,4 +214,34 @@ public class DatabasePageTests : IDisposable
         using var scope = _ctx.Services.CreateScope();
         Assert.Single(await scope.ServiceProvider.GetRequiredService<DatabaseConnectionService>().ListAsync());
     }
+
+    [Fact]
+    public async Task Navigating_in_place_between_two_databases_reuses_the_instance_and_loads_the_new_one()
+    {
+        // Every other test above calls Render(id), which builds a fresh DatabasePage/ConnectionPanel
+        // instance per call. That never exercises _initialized: Blazor's router does not tear down and
+        // rebuild the component when the route stays "/database/{Id:guid?}" and only the id changes, so
+        // the SAME instance receives a second OnParametersSetAsync. This test reproduces that reuse
+        // directly with SetParametersAndRender on the already-rendered instance, the same pattern
+        // ChatPageTests uses for the same reason on ChatPage's own Id parameter.
+        //
+        // A same-id variant (render, clear the name, re-set the SAME id, assert the clear survived) was
+        // tried and dropped: instrumenting OnParametersSetAsync with a call counter showed
+        // SetParametersAndRender never invokes it a second time when the id parameter is unchanged from
+        // the previous call — bUnit treats it as a no-op rather than reproducing the parameter pass a
+        // real re-render would perform. That path cannot be reached this way, so no test claims to cover
+        // it; this one is the reachable half of the guard's job.
+        var first = await SeedAsync("warehouse");
+        var second = await SeedAsync("reporting");
+
+        var page = Render(first);
+        Assert.Equal("warehouse", page.Find("[data-testid=connection-name]").GetAttribute("value"));
+
+        // Routed through InvokeAsync so ConnectionPanel's own OnParametersSetAsync (reloading the second
+        // database, then testing it) completes before the markup below is inspected — the same reason
+        // ClickAsync is used elsewhere instead of Click() for anything that awaits.
+        await page.InvokeAsync(() => page.SetParametersAndRender(p => p.Add(x => x.Id, second)));
+
+        Assert.Equal("reporting", page.Find("[data-testid=connection-name]").GetAttribute("value"));
+    }
 }
