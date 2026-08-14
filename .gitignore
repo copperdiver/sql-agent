@@ -61,3 +61,10 @@ nunit-*.xml
 
 # Playwright MCP scratch output
 .playwright-mcp/
+
+# Written by the host into its own source directory at run time. launch-url.txt holds a live launch
+# token; sqlagent.db is the local store, with its SQLite journal files.
+launch-url.txt
+sqlagent.db
+sqlagent.db-wal
+sqlagent.db-shm
