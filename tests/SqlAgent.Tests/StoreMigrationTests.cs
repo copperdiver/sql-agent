@@ -498,6 +498,64 @@ public class StoreMigrationTests : IDisposable
         Assert.Contains(provider.Records, r => r.Level == LogLevel.Warning);
     }
 
+    [Fact]
+    public async Task The_schema_cache_is_cleared_by_the_migration_and_policy_rows_are_not()
+    {
+        // A cache row written before views existed describes a database that appears to have none. The
+        // model would go on being told that until something unrelated invalidated it — so the migration
+        // that introduces views is what has to drop it. Policy rows in the same store must survive
+        // untouched: this migration changes no schema and owns no user decision.
+        Guid connectionId, policyId;
+        await using (var seed = NewContext())
+        {
+            await seed.GetService<IMigrator>().MigrateAsync("20260813161818_Projects");
+
+            connectionId = Guid.NewGuid();
+            policyId = Guid.NewGuid();
+            seed.DatabaseConnections.Add(new DatabaseConnection
+            {
+                Id = connectionId,
+                Name = "prod",
+                ProviderType = DatabaseProviderType.Postgres,
+                ConnectionStringSecretRef = "db:abc",
+                IsReadOnly = false,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+            seed.TablePolicies.Add(new TablePolicy
+            {
+                Id = policyId,
+                DatabaseConnectionId = connectionId,
+                SchemaName = "dbo",
+                TableName = "secrets",
+                IsVisible = false,
+                CanRead = true,
+                CanWrite = false,
+            });
+            seed.SchemaCaches.Add(new SchemaCache
+            {
+                Id = Guid.NewGuid(),
+                DatabaseConnectionId = connectionId,
+                SchemaHash = "stale",
+                FilteredSchemaJson = """{"tables":[{"schema":"dbo","name":"orders","columns":[]}]}""",
+                GeneratedAt = DateTime.UtcNow,
+            });
+            await seed.SaveChangesAsync();
+        }
+        SqliteConnection.ClearAllPools();
+
+        await using var db = NewContext();
+        await StoreInitializer.InitializeAsync(db, NullLogger.Instance);
+
+        Assert.Empty(await db.SchemaCaches.ToListAsync());
+
+        var policy = await db.TablePolicies.SingleAsync();
+        Assert.Equal(policyId, policy.Id);
+        Assert.False(policy.IsVisible);
+        Assert.Equal("secrets", policy.TableName);
+        Assert.Equal(connectionId, (await db.DatabaseConnections.SingleAsync()).Id);
+    }
+
     private LegacyStoreDbContext NewLegacyContext() => new(
         new DbContextOptionsBuilder<LegacyStoreDbContext>().UseSqlite(ConnectionString).Options);
 
