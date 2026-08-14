@@ -179,6 +179,24 @@ public class QueryExecutionServiceTests
     }
 
     [Fact]
+    public async Task A_write_to_a_view_through_an_alias_is_still_denied_as_a_view_write()
+    {
+        // The other half of the alias hole. A view has no policy row either, so the alias resolved to
+        // "full access, not a view" and this reached the provider — the one statement shape the phase
+        // exists to refuse, passing through the guard built to refuse it.
+        var (db, conn) = NewStore();
+        var provider = new ExecFakeProvider(DatabaseProviderType.Postgres, schema: OrdersAndSummary());
+        var (svc, connId) = await SetupAsync(db, provider, isReadOnly: false);
+
+        var r = await svc.ExecuteSqlAsync(connId, "UPDATE v SET total = 0 FROM order_summary v");
+
+        Assert.False(r.Success);
+        Assert.Equal("policy_denied_view_write", r.ErrorCode);
+        Assert.False(provider.WasCalled);
+        conn.Dispose();
+    }
+
+    [Fact]
     public async Task Reading_a_view_executes()
     {
         var (db, conn) = NewStore();
