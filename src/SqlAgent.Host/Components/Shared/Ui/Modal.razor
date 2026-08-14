@@ -71,12 +71,16 @@
     /// and reuses the instance, so firstRender is false and the focus move above never runs -- leaving the
     /// user to click back into the field to correct the name they just typed.
     ///
-    /// An opaque object rather than a bool or a counter type: the two failed prior fixes for this class of
-    /// bug (see this parameter's own history above) each reached for the type that was convenient at the
-    /// call site rather than the type the job needed, and a bool can only ask "is a request pending", which
-    /// cannot tell two consecutive identical errors apart from one request repeated forever. A caller
-    /// signals with whatever it already has -- NameDialog uses a counter it owns, another caller could use
-    /// the error string itself -- and comparison is Equals, so a boxed int works and so does a string.
+    /// An opaque object rather than a bool or a counter type: a bool can only ask "is a request pending",
+    /// which cannot represent two distinct requests at all, let alone tell them apart when they carry
+    /// identical content -- and identical content is not a corner case here. NameDialog's own two callers
+    /// split on exactly this: ChatRow's rename never repeats an error, so keying its fallback signal off
+    /// the error text is enough, but ProjectSection's create/rename dialog can show the byte-identical
+    /// "name already taken" text on two consecutive attempts -- the user retypes the exact name that was
+    /// just rejected -- so it forwards an attempt counter it increments itself (NameDialog.FocusToken)
+    /// rather than trusting the text to differ. Comparison is Equals, so a boxed int works and so does a
+    /// string, but which one a given caller needs is a property of that caller's own failure modes, not of
+    /// this parameter -- an object leaves that choice to the caller instead of forcing one on it.
     ///
     /// Recorded before the await, not after: if FocusAsync throws, the signal must already read as
     /// "handled" so a subsequent render (say, an unrelated keystroke bubbling up to a parent) does not

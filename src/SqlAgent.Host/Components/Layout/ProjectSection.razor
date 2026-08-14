@@ -117,11 +117,18 @@
             s => s.ListChatsInProjectAsync(project.Id));
     }
 
-    private void ShowCreate() => ShowNameDialog("New project", "Create", "", CreateAsync);
+    private void ShowCreate() { _saveAttempt = 0; ShowNameDialog("New project", "Create", "", CreateAsync); }
 
-    private void ShowRename(ProjectSummary project) =>
-        ShowNameDialog("Rename project", "Save", project.Name,
-            name => RenameAsync(project, name));
+    private void ShowRename(ProjectSummary project)
+    {
+        _saveAttempt = 0;
+        ShowNameDialog("Rename project", "Save", project.Name, name => RenameAsync(project, name));
+    }
+
+    // Counts failed Save attempts for the dialog currently open, so two consecutive rejections of the
+    // exact same name -- which produce byte-identical error text below -- still change NameDialog's
+    // FocusToken. Reset to 0 by ShowCreate/ShowRename above, each time a dialog is opened fresh.
+    private int _saveAttempt;
 
     /// <summary>One dialog for both writes, re-shown with an error when the name is taken. Re-showing
     /// replaces the open dialog rather than stacking a second one — DialogService holds exactly one.</summary>
@@ -130,12 +137,14 @@
     {
         Dialogs.Show(
             @<NameDialog Title="@title" Label="Name" InitialValue="@initial" ConfirmLabel="@confirm"
-                         Error="@error" OnCancel="Dialogs.Close"
+                         Error="@error" FocusToken="@(error is null ? null : (object)_saveAttempt)"
+                         OnCancel="Dialogs.Close"
                          OnSave="@(async name =>
                          {
                              var outcome = await write(name);
                              if (outcome == ProjectWriteOutcome.NameTaken)
                              {
+                                 _saveAttempt++;
                                  ShowNameDialog(title, confirm, name, write,
                                      $"A project called \"{name}\" already exists.");
                                  return;
