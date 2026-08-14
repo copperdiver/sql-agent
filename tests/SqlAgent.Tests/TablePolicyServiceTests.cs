@@ -120,7 +120,8 @@ public class TablePolicyServiceTests : IDisposable
         await svc.SetAccessAsync(id, "dbo", "orders", DatabaseObjectKind.Table, ObjectAccess.ReadOnly);
         var objects = await svc.ListObjectsAsync(id);
 
-        Assert.Equal(ObjectAccess.ReadOnly, objects!.Single(o => o.Name == "orders").Access);
+        Assert.NotNull(objects);
+        Assert.Equal(ObjectAccess.ReadOnly, objects.Single(o => o.Name == "orders").Access);
         Assert.Equal(ObjectAccess.Full, objects.Single(o => o.Name == "leads").Access);
     }
 
@@ -176,7 +177,8 @@ public class TablePolicyServiceTests : IDisposable
 
         Assert.Equal(SetAccessOutcome.Applied, outcome);
         var objects = await svc.ListObjectsAsync(id);
-        Assert.Equal(ObjectAccess.Hidden, objects!.Single(o => o.Name == "orders").Access);
+        Assert.NotNull(objects);
+        Assert.Equal(ObjectAccess.Hidden, objects.Single(o => o.Name == "orders").Access);
         Assert.Equal(ObjectAccess.Hidden, objects.Single(o => o.Name == "order_summary").Access);
         Assert.Equal(ObjectAccess.Full, objects.Single(o => o.Name == "leads").Access);
     }
@@ -192,7 +194,8 @@ public class TablePolicyServiceTests : IDisposable
 
         Assert.Equal(SetAccessOutcome.Applied, outcome);
         var objects = await svc.ListObjectsAsync(id);
-        Assert.Equal(ObjectAccess.Full, objects!.Single(o => o.Name == "orders").Access);
+        Assert.NotNull(objects);
+        Assert.Equal(ObjectAccess.Full, objects.Single(o => o.Name == "orders").Access);
         Assert.Equal(ObjectAccess.ReadOnly, objects.Single(o => o.Name == "order_summary").Access);
     }
 
