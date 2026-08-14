@@ -225,6 +225,27 @@ public class NlQueryServiceTests
     }
 
     [Fact]
+    public async Task Prompt_context_includes_views_marked_as_read_only()
+    {
+        var (db, conn) = NewStore();
+        var withView = new DatabaseSchema(
+            [new SchemaTable("public", "orders", [new SchemaColumn("id", "int", false)], ["id"], [], [])],
+            [new SchemaView("public", "order_summary", [new SchemaColumn("total", "numeric", true)])]);
+        var gateway = new FakeGateway(LlmSqlResponse.Clarify("?"));
+        var (svc, connections) = Build(db, new NlFakeProvider(withView), gateway);
+        var id = await AddConnectionAsync(connections);
+
+        await svc.AskAsync(id, "anything");
+
+        // A view the user made visible is queryable, so withholding it from the prompt hides half the
+        // schema from the model; handing it over unmarked invites an UPDATE that can only be refused.
+        var context = gateway.LastRequest!.SchemaContext;
+        Assert.Contains("public.order_summary(total numeric)", context);
+        Assert.Contains("VIEW", context);
+        conn.Dispose();
+    }
+
+    [Fact]
     public async Task Prompt_context_includes_column_sizing()
     {
         var (db, conn) = NewStore();

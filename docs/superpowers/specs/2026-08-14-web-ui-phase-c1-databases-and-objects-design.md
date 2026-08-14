@@ -414,8 +414,12 @@ component.
 
 ## Definition of done
 
-- Views appear in the Objects panel and in the schema handed to the model; a
-  hidden view is absent from both.
+- Views appear in the Objects panel and in the natural-language prompt, marked
+  as views so the model does not generate a write it can only be refused for; a
+  hidden view is absent from both. The MCP `describe_schema` response still
+  carries tables only, and extending it is C2's — its response shape is a
+  published contract that hosts parse, so widening it is a versioning decision
+  in its own right rather than a side effect of adding view extraction.
 - Each level produces the documented `TablePolicy` state, and a schema header row
   sets every object beneath it.
 - A write to a Read-only object is denied `policy_denied_readonly_object`; a write
