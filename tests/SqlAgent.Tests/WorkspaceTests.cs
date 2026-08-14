@@ -34,6 +34,7 @@ public class WorkspaceTests : IDisposable
         _ctx.Services.AddSingleton<IDatabaseProvider>(_providerStub);
         _ctx.Services.AddSingleton<IDatabaseProviderRegistry, DatabaseProviderRegistry>();
         _ctx.Services.AddScoped<DatabaseConnectionService>();
+        _ctx.Services.AddScoped<SchemaService>();
         _ctx.Services.AddScoped<QueryExecutionService>();
         _ctx.Services.AddScoped<ScopedRunner>();
         _ctx.Services.AddScoped<AppState>();

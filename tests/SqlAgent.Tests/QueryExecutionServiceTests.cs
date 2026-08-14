@@ -14,7 +14,9 @@ namespace SqlAgent.Tests;
 file sealed class ExecFakeProvider(
     DatabaseProviderType type,
     QueryResultSet? result = null,
-    Func<QueryExecutionOptions, CancellationToken, Task<QueryResultSet>>? behavior = null) : IDatabaseProvider
+    Func<QueryExecutionOptions, CancellationToken, Task<QueryResultSet>>? behavior = null,
+    DatabaseSchema? schema = null,
+    Exception? schemaFailure = null) : IDatabaseProvider
 {
     public bool WasCalled { get; private set; }
     public DatabaseProviderType ProviderType => type;
@@ -23,7 +25,9 @@ file sealed class ExecFakeProvider(
         => Task.FromResult(ConnectionTestResult.Ok(null, 0));
 
     public Task<DatabaseSchema> GetSchemaAsync(string connectionString, CancellationToken ct = default)
-        => throw new NotSupportedException();
+        => schemaFailure is not null
+            ? Task.FromException<DatabaseSchema>(schemaFailure)
+            : Task.FromResult(schema ?? new DatabaseSchema([]));
 
     public Task<QueryResultSet> ExecuteQueryAsync(
         string connectionString, string sql, QueryExecutionOptions options, CancellationToken ct = default)
@@ -32,6 +36,27 @@ file sealed class ExecFakeProvider(
         if (behavior is not null) return behavior(options, ct);
         return Task.FromResult(result ?? new QueryResultSet([], [], false));
     }
+}
+
+/// <summary>Provider double that counts <see cref="GetSchemaAsync"/> calls, proving the resolver reuses
+/// SchemaCache rather than re-extracting the schema on every query.</summary>
+file sealed class CountingSchemaProvider(DatabaseProviderType type, DatabaseSchema schema) : IDatabaseProvider
+{
+    public int SchemaReads { get; private set; }
+    public DatabaseProviderType ProviderType => type;
+
+    public Task<ConnectionTestResult> TestConnectionAsync(string cs, CancellationToken ct = default)
+        => Task.FromResult(ConnectionTestResult.Ok(null, 0));
+
+    public Task<DatabaseSchema> GetSchemaAsync(string cs, CancellationToken ct = default)
+    {
+        SchemaReads++;
+        return Task.FromResult(schema);
+    }
+
+    public Task<QueryResultSet> ExecuteQueryAsync(
+        string cs, string sql, QueryExecutionOptions options, CancellationToken ct = default)
+        => Task.FromResult(new QueryResultSet([], [], false));
 }
 
 public class QueryExecutionServiceTests
@@ -56,13 +81,163 @@ public class QueryExecutionServiceTests
         var created = await connections.CreateAsync(
             new DatabaseConnectionInput("c", provider.ProviderType, isReadOnly), "conn-string");
         var registry = new DatabaseProviderRegistry([provider]);
+        var schemas = new SchemaService(connections, registry, db);
         var svc = new QueryExecutionService(
-            connections, registry, db, NullLogger<QueryExecutionService>.Instance, options);
+            connections, registry, db, schemas, NullLogger<QueryExecutionService>.Instance, options);
         return (svc, created.Id);
     }
 
     private static async Task<List<QueryAuditLog>> AuditAsync(SqlAgentDbContext db)
         => await db.QueryAuditLogs.ToListAsync();
+
+    private static DatabaseSchema OrdersAndSummary() => new(
+        [new SchemaTable("dbo", "orders", [new SchemaColumn("id", "int", false)], ["id"], [], []),
+         new SchemaTable("dbo", "staging_orders", [new SchemaColumn("id", "int", false)], [], [], [])],
+        [new SchemaView("dbo", "order_summary", [new SchemaColumn("id", "int", false)])]);
+
+    private async Task SetLevelAsync(SqlAgentDbContext db, Guid connId, string name, bool visible, bool write)
+    {
+        db.TablePolicies.Add(new TablePolicy
+        {
+            Id = Guid.NewGuid(),
+            DatabaseConnectionId = connId,
+            SchemaName = "dbo",
+            TableName = name,
+            IsVisible = visible,
+            CanRead = true,
+            CanWrite = write,
+        });
+        await db.SaveChangesAsync();
+    }
+
+    [Fact]
+    public async Task A_write_to_a_read_only_object_is_denied_and_never_executes()
+    {
+        var (db, conn) = NewStore();
+        var provider = new ExecFakeProvider(DatabaseProviderType.Postgres, schema: OrdersAndSummary());
+        var (svc, connId) = await SetupAsync(db, provider, isReadOnly: false);
+        await SetLevelAsync(db, connId, "orders", visible: true, write: false);
+
+        var r = await svc.ExecuteSqlAsync(connId, "UPDATE orders SET total = 0");
+
+        Assert.False(r.Success);
+        Assert.Equal("policy_denied_readonly_object", r.ErrorCode);
+        Assert.False(provider.WasCalled);
+        Assert.Equal("deny", Assert.Single(await AuditAsync(db)).Decision);
+        conn.Dispose();
+    }
+
+    [Fact]
+    public async Task Reading_a_read_only_object_inside_a_write_still_executes()
+    {
+        var (db, conn) = NewStore();
+        var provider = new ExecFakeProvider(DatabaseProviderType.Postgres, schema: OrdersAndSummary());
+        var (svc, connId) = await SetupAsync(db, provider, isReadOnly: false);
+        await SetLevelAsync(db, connId, "staging_orders", visible: true, write: false);
+
+        var r = await svc.ExecuteSqlAsync(connId, "INSERT INTO orders (id) SELECT id FROM staging_orders");
+
+        Assert.True(r.Success);
+        Assert.True(provider.WasCalled);
+        conn.Dispose();
+    }
+
+    [Fact]
+    public async Task A_write_to_a_view_is_denied_as_a_view_write()
+    {
+        // The view has no policy row at all — it is fully accessible by the phase's own default rule —
+        // so the only thing that can refuse this is the schema, which is the point of reading it here.
+        var (db, conn) = NewStore();
+        var provider = new ExecFakeProvider(DatabaseProviderType.Postgres, schema: OrdersAndSummary());
+        var (svc, connId) = await SetupAsync(db, provider, isReadOnly: false);
+
+        var r = await svc.ExecuteSqlAsync(connId, "UPDATE order_summary SET total = 0");
+
+        Assert.False(r.Success);
+        Assert.Equal("policy_denied_view_write", r.ErrorCode);
+        Assert.False(provider.WasCalled);
+        conn.Dispose();
+    }
+
+    [Fact]
+    public async Task Reading_a_view_executes()
+    {
+        var (db, conn) = NewStore();
+        var provider = new ExecFakeProvider(DatabaseProviderType.Postgres, schema: OrdersAndSummary());
+        var (svc, connId) = await SetupAsync(db, provider, isReadOnly: false);
+
+        var r = await svc.ExecuteSqlAsync(connId, "SELECT id FROM order_summary");
+
+        Assert.True(r.Success);
+        conn.Dispose();
+    }
+
+    [Fact]
+    public async Task An_object_with_no_policy_row_is_writable_on_a_writable_connection()
+    {
+        var (db, conn) = NewStore();
+        var provider = new ExecFakeProvider(DatabaseProviderType.Postgres, schema: OrdersAndSummary());
+        var (svc, connId) = await SetupAsync(db, provider, isReadOnly: false);
+
+        var r = await svc.ExecuteSqlAsync(connId, "DELETE FROM orders WHERE id = 1");
+
+        Assert.True(r.Success);
+        conn.Dispose();
+    }
+
+    [Fact]
+    public async Task A_hidden_view_is_refused_as_hidden_rather_than_as_a_view()
+    {
+        var (db, conn) = NewStore();
+        var provider = new ExecFakeProvider(DatabaseProviderType.Postgres, schema: OrdersAndSummary());
+        var (svc, connId) = await SetupAsync(db, provider, isReadOnly: false);
+        await SetLevelAsync(db, connId, "order_summary", visible: false, write: false);
+
+        var r = await svc.ExecuteSqlAsync(connId, "SELECT id FROM order_summary");
+
+        Assert.False(r.Success);
+        Assert.Equal("policy_denied_hidden_table", r.ErrorCode);
+        conn.Dispose();
+    }
+
+    [Fact]
+    public async Task An_unreadable_schema_refuses_the_query_rather_than_guessing()
+    {
+        // Fail closed: without the schema, a view is indistinguishable from a table, and allowing the
+        // query would let a write to a view through unchecked.
+        var (db, conn) = NewStore();
+        var provider = new ExecFakeProvider(
+            DatabaseProviderType.Postgres, schemaFailure: new InvalidOperationException("catalog denied"));
+        var (svc, connId) = await SetupAsync(db, provider, isReadOnly: false);
+
+        var r = await svc.ExecuteSqlAsync(connId, "SELECT id FROM orders");
+
+        Assert.False(r.Success);
+        Assert.Equal("schema_unavailable", r.ErrorCode);
+        Assert.False(provider.WasCalled);
+        // The provider's own exception text can echo a connection string, so it must not reach the caller
+        // or the audit row.
+        Assert.DoesNotContain("catalog denied", r.ErrorMessage ?? "");
+        Assert.DoesNotContain("catalog denied", Assert.Single(await AuditAsync(db)).DenyReason ?? "");
+        conn.Dispose();
+    }
+
+    [Fact]
+    public async Task The_cached_schema_is_reused_rather_than_re_extracted_per_query()
+    {
+        // SchemaCache exists precisely so the prompt path does not re-read the live catalog per request,
+        // and this task put a schema read on the query path too. One extraction, then the cache.
+        var (db, conn) = NewStore();
+        var provider = new CountingSchemaProvider(DatabaseProviderType.Postgres, OrdersAndSummary());
+        var (svc, connId) = await SetupAsync(db, provider, isReadOnly: false);
+
+        await svc.ExecuteSqlAsync(connId, "SELECT id FROM orders");
+        await svc.ExecuteSqlAsync(connId, "SELECT id FROM orders");
+        await svc.ExecuteSqlAsync(connId, "SELECT id FROM orders");
+
+        Assert.Equal(1, provider.SchemaReads);
+        conn.Dispose();
+    }
 
     [Fact]
     public async Task Successful_query_returns_metadata_and_audits_without_rows()
@@ -145,7 +320,8 @@ public class QueryExecutionServiceTests
         var (db, conn) = NewStore();
         var connections = new DatabaseConnectionService(db, new InMemorySecretStore());
         var registry = new DatabaseProviderRegistry([new ExecFakeProvider(DatabaseProviderType.Postgres)]);
-        var svc = new QueryExecutionService(connections, registry, db, NullLogger<QueryExecutionService>.Instance);
+        var schemas = new SchemaService(connections, registry, db);
+        var svc = new QueryExecutionService(connections, registry, db, schemas, NullLogger<QueryExecutionService>.Instance);
 
         var r = await svc.ExecuteSqlAsync(Guid.NewGuid(), "SELECT 1");
 

@@ -32,9 +32,9 @@ public class ChatTurnServiceTests : IDisposable
         var registry = new DatabaseProviderRegistry([_provider]);
         _connections = new DatabaseConnectionService(_db, new InMemorySecretStore());
         _chats = new ChatService(_db);
-        var executor = new QueryExecutionService(
-            _connections, registry, _db, NullLogger<QueryExecutionService>.Instance);
         var schemas = new SchemaService(_connections, registry, _db);
+        var executor = new QueryExecutionService(
+            _connections, registry, _db, schemas, NullLogger<QueryExecutionService>.Instance);
         _turns = new ChatTurnService(
             _chats, new NlQueryService(_connections, schemas, executor, _gateway), _connections);
     }
@@ -265,9 +265,9 @@ public class ChatTurnServiceTests : IDisposable
     private ChatTurnService NewTurnServiceOver(ChatService chats)
     {
         var registry = new DatabaseProviderRegistry([_provider]);
-        var executor = new QueryExecutionService(
-            _connections, registry, _db, NullLogger<QueryExecutionService>.Instance);
         var schemas = new SchemaService(_connections, registry, _db);
+        var executor = new QueryExecutionService(
+            _connections, registry, _db, schemas, NullLogger<QueryExecutionService>.Instance);
         return new ChatTurnService(chats, new NlQueryService(_connections, schemas, executor, _gateway), _connections);
     }
 

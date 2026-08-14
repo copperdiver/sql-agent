@@ -62,8 +62,9 @@ public class NlQueryServiceTests
     {
         var connections = new DatabaseConnectionService(db, new InMemorySecretStore());
         var registry = new DatabaseProviderRegistry([provider]);
-        var svc = new NlQueryService(connections, new SchemaService(connections, registry, db),
-            new QueryExecutionService(connections, registry, db, NullLogger<QueryExecutionService>.Instance),
+        var schemas = new SchemaService(connections, registry, db);
+        var svc = new NlQueryService(connections, schemas,
+            new QueryExecutionService(connections, registry, db, schemas, NullLogger<QueryExecutionService>.Instance),
             gateway);
         return (svc, connections);
     }
