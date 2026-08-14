@@ -5270,6 +5270,17 @@ three focus claims phase B2 wrote from the framework's documented behaviour were
 - [ ] Tab through the objects panel. Every segmented control is reachable, and the selected segment is
       visible as selected without relying on colour alone.
 
+**Config-page state across repeat navigation** — bUnit's `SetParametersAndRender` never re-invokes
+`OnParametersSetAsync` when the parameter value is unchanged (proven with a call counter during
+Task 13), so a test of this guard's same-id branch would exercise no implementation at all — real
+Blazor invokes the lifecycle method on every parameter set regardless, so the gap is the tooling's,
+not the code's.
+
+- [ ] Open a database's config page, edit the name field, then navigate to the *same* database again
+      from the sidebar. The form must not discard what you typed. No automated test can reach this —
+      bUnit does not re-invoke the lifecycle method when the route parameter is unchanged, so a test
+      of it would exercise neither the guard nor its absence.
+
 **The status dot** — held in the circuit, so a reload is a real part of the behaviour.
 
 - [ ] A database never tested this session shows a neutral dot.
