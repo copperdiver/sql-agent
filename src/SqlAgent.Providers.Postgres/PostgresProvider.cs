@@ -34,14 +34,31 @@ public class PostgresProvider : IDatabaseProvider
         // information_schema hides every catalog/temp object while keeping all user schemas.
         const string userSchemas = @"c.table_schema NOT LIKE 'pg\_%' AND c.table_schema <> 'information_schema'";
 
-        var columns = await Query(conn, ct,
-            $"""
+        // One query shape, two object types. information_schema.columns covers views as well as base
+        // tables, and information_schema.tables reports a plain view as 'VIEW' — so the discriminator is
+        // a split rather than the filter it used to be. A materialized view appears in neither catalog,
+        // which is how they stay out of scope without a special case here.
+        const string columnSelect = """
             SELECT c.table_schema, c.table_name, c.column_name, c.data_type, c.is_nullable,
                    c.character_maximum_length, c.numeric_precision, c.numeric_scale
             FROM information_schema.columns c
             JOIN information_schema.tables t
               ON t.table_schema = c.table_schema AND t.table_name = c.table_name
-            WHERE t.table_type = 'BASE TABLE' AND {userSchemas}
+            WHERE t.table_type =
+            """;
+
+        var columns = await Query(conn, ct,
+            $"""
+            {columnSelect} 'BASE TABLE' AND {userSchemas}
+            ORDER BY c.table_schema, c.table_name, c.ordinal_position
+            """,
+            r => (r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3),
+                  string.Equals(r.GetString(4), "YES", StringComparison.OrdinalIgnoreCase),
+                  NullableInt(r, 5), NullableInt(r, 6), NullableInt(r, 7)));
+
+        var views = await Query(conn, ct,
+            $"""
+            {columnSelect} 'VIEW' AND {userSchemas}
             ORDER BY c.table_schema, c.table_name, c.ordinal_position
             """,
             r => (r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3),
@@ -99,7 +116,7 @@ public class PostgresProvider : IDatabaseProvider
             """,
             r => (r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3), r.GetBoolean(4)));
 
-        return SchemaModel.Build(columns, pks, fks, indexes);
+        return SchemaModel.Build(columns, pks, fks, indexes, views);
     }
 
     public async Task<QueryResultSet> ExecuteQueryAsync(
