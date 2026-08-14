@@ -252,7 +252,10 @@ public static class SqlAnalyzer
                 return resolved;
             }
 
-            return ClauseEntries(entries).Select(e => (object?)e.Relation);
+            return ClauseEntries(entries)
+                .Select(e => e.Relation)
+                .Where(r => r is not null)
+                .Cast<object?>();
         }
 
         /// <summary>
@@ -320,9 +323,10 @@ public static class SqlAnalyzer
         {
             foreach (var entry in ClauseEntries(clause))
             {
-                yield return entry.Relation;
+                if (entry.Relation is { } relation) yield return relation;
                 if (entry.Joins is null) continue;
-                foreach (var join in entry.Joins) yield return join.Relation;
+                foreach (var join in entry.Joins)
+                    if (join.Relation is { } joined) yield return joined;
             }
         }
 
@@ -449,11 +453,7 @@ public enum ObjectAccess
 /// because a caller resolving a name has to do exactly one lookup, and doing it twice is how the
 /// fail-closed matching rule for unqualified names ends up implemented two slightly different ways.
 /// </summary>
-public record ObjectPolicy(ObjectAccess Access, bool IsView)
-{
-    /// <summary>An object with no policy row: fully accessible, and not a view until something says so.</summary>
-    public static ObjectPolicy Default { get; } = new(ObjectAccess.Full, false);
-}
+public record ObjectPolicy(ObjectAccess Access, bool IsView);
 
 /// <summary>
 /// Applies connection policy to parsed SQL (CD-50 T5): rejects multi-statement batches, unsupported
@@ -465,10 +465,11 @@ public static class SqlPolicyValidator
 {
     /// <param name="resolve">
     /// Returns the effective policy for one referenced object. An object with no policy row must resolve
-    /// to <see cref="ObjectPolicy.Default"/> — absence means full access, which is the rule every layer
-    /// in this codebase applies. Only real objects reach this resolver: CTE aliases are resolved out
-    /// scope-aware during parsing, while the real base tables inside a CTE body are still passed in, so a
-    /// hidden object cannot be masked by wrapping it in a CTE or alias.
+    /// to <see cref="ObjectAccess.Full"/> and <c>IsView: false</c> — absence means full access, which is
+    /// the rule every layer in this codebase applies. Only real objects reach this resolver: CTE aliases
+    /// are resolved out scope-aware during parsing, as is the alias an UPDATE names its target by, while
+    /// the real base tables inside a CTE body are still passed in — so a hidden object cannot be masked
+    /// by wrapping it in a CTE or standing an alias in front of it.
     ///
     /// The caller owns the fail-closed rule for an unqualified name — take the most restrictive
     /// <see cref="ObjectAccess"/> among same-named objects across schemas, and report a view if any match

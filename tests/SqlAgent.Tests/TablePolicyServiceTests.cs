@@ -78,6 +78,57 @@ public class TablePolicyServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task A_policy_row_stored_in_another_case_still_applies_to_the_object()
+    {
+        // The validator matches names with OrdinalIgnoreCase. If the panel matched case-sensitively it
+        // would read no row here and show Full access, while a query against the same object came back
+        // refused — a refusal the page says is impossible.
+        var (svc, id) = await SetupAsync();
+        _db.TablePolicies.Add(new TablePolicy
+        {
+            Id = Guid.NewGuid(),
+            DatabaseConnectionId = id,
+            SchemaName = "DBO",
+            TableName = "ORDERS",
+            IsVisible = false,
+            CanRead = true,
+            CanWrite = false,
+        });
+        await _db.SaveChangesAsync();
+
+        var objects = await svc.ListObjectsAsync(id);
+
+        Assert.Equal(ObjectAccess.Hidden, objects!.Single(o => o.Name == "orders").Access);
+    }
+
+    [Fact]
+    public async Task Rows_differing_only_in_case_resolve_to_the_most_restrictive_level()
+    {
+        // SQLite compares text case-sensitively, so the unique index does not stop this pair existing.
+        // Folding them the way the validator folds its matches keeps the panel from throwing on a store
+        // it can perfectly well describe — and keeps it agreeing with what will actually be enforced.
+        var (svc, id) = await SetupAsync();
+        foreach (var (schema, name, visible) in new[] { ("dbo", "orders", true), ("DBO", "ORDERS", false) })
+        {
+            _db.TablePolicies.Add(new TablePolicy
+            {
+                Id = Guid.NewGuid(),
+                DatabaseConnectionId = id,
+                SchemaName = schema,
+                TableName = name,
+                IsVisible = visible,
+                CanRead = true,
+                CanWrite = visible,
+            });
+        }
+        await _db.SaveChangesAsync();
+
+        var objects = await svc.ListObjectsAsync(id);
+
+        Assert.Equal(ObjectAccess.Hidden, objects!.Single(o => o.Name == "orders").Access);
+    }
+
+    [Fact]
     public async Task Tables_and_views_are_listed_together_and_labelled()
     {
         var (svc, id) = await SetupAsync();

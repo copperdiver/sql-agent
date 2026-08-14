@@ -113,9 +113,12 @@ public class QueryExecutionService(
     /// matching a table in one schema and a view in another is treated as a view, and a write to it is
     /// refused. That is the same trade the hidden-object rule has always made.
     ///
-    /// Returning null rather than throwing keeps ExecuteSqlAsync's contract — it answers with a result,
-    /// never an exception — and denying is the fail-closed answer: without the schema a view cannot be
-    /// told from a table, and allowing the query would let a write to a view through unchecked.
+    /// Returning null rather than throwing keeps ExecuteSqlAsync's contract for a genuine failure — it
+    /// answers with a result — and denying is the fail-closed answer: without the schema a view cannot be
+    /// told from a table, and allowing the query would let a write to a view through unchecked. A cancel
+    /// is the one thing that does propagate, because it is the caller's own signal rather than a verdict
+    /// about the connection; every caller of ExecuteSqlAsync already handles it that way, and the chat
+    /// path names this exact case (cancelled while the schema was being read) in its own catch.
     /// </summary>
     private async Task<Func<SqlTableReference, ObjectPolicy>?> TryBuildPolicyResolverAsync(
         Guid connectionId, CancellationToken ct)
@@ -132,10 +135,15 @@ public class QueryExecutionService(
             if (schema is null) return null;
             views = schema.ViewList;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // The provider's own text can echo a connection string, so it goes to the log and nowhere
             // else — the caller gets the fixed sentence at the call site above.
+            //
+            // A cancel is excluded, on the argument already accepted for connection_secret_missing: the
+            // user pressing Cancel is not a schema failure, and swallowing it here would file an error in
+            // the server log and a schema_unavailable deny row in the audit for something the user did on
+            // purpose — telling a later reader the connection cannot read its own catalog when it can.
             logger.LogError(ex, "The schema for connection {ConnectionId} could not be read.", connectionId);
             return null;
         }

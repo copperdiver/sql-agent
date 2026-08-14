@@ -242,6 +242,26 @@ public class QueryExecutionServiceTests
     }
 
     [Fact]
+    public async Task A_cancel_while_the_schema_is_read_is_not_reported_as_an_unreadable_schema()
+    {
+        // A user pressing Cancel is not a verdict about the connection. Swallowed into the fail-closed
+        // branch it filed an error in the server log and a schema_unavailable deny row in the audit,
+        // telling a later reader this connection cannot read its own catalog when it can. Callers already
+        // expect a cancel to propagate — ChatTurnService names this exact case in its own catch.
+        var (db, conn) = NewStore();
+        var provider = new ExecFakeProvider(
+            DatabaseProviderType.Postgres, schemaFailure: new OperationCanceledException());
+        var (svc, connId) = await SetupAsync(db, provider, isReadOnly: false);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => svc.ExecuteSqlAsync(connId, "SELECT id FROM orders"));
+
+        Assert.Empty(await AuditAsync(db));
+        Assert.False(provider.WasCalled);
+        conn.Dispose();
+    }
+
+    [Fact]
     public async Task A_connection_with_a_missing_secret_reports_connection_secret_missing_not_schema_unavailable()
     {
         // The secret is deleted directly from the store (real ISecretStore, real DatabaseConnection

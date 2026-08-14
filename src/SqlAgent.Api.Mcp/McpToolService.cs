@@ -75,8 +75,15 @@ public record QueryDatabaseResponse(
 /// <remarks>
 /// Error codes: <c>invalid_database_id</c>, <c>connection_not_found</c>, <c>connection_secret_missing</c>,
 /// <c>schema_extraction_error</c> (describe_schema), and — passed through from T6 query validation/execution —
-/// <c>policy_denied_readonly</c>, <c>policy_denied_hidden_table</c>, <c>execution_timeout</c>,
+/// <c>policy_denied_readonly</c>, <c>policy_denied_hidden_table</c>, <c>policy_denied_view_write</c>,
+/// <c>policy_denied_readonly_object</c>, <c>schema_unavailable</c>, <c>execution_timeout</c>,
 /// <c>execution_canceled</c>, <c>execution_error</c>.
+///
+/// <c>schema_unavailable</c> is worth calling out because it is the one refusal that is not about the SQL
+/// asked for: query_database has to read the connection's catalog to tell a view from a table, so a
+/// connection that can execute but cannot describe itself is refused rather than run. It is not a
+/// <c>policy_denied_*</c> code, so a host that treats that prefix as "the query was the problem" will
+/// misfile it — the query may be perfectly valid.
 /// </remarks>
 public class McpToolService(
     DatabaseConnectionService connections,

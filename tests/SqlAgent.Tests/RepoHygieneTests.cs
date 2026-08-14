@@ -8,18 +8,33 @@ namespace SqlAgent.Tests;
 /// </summary>
 public class RepoHygieneTests
 {
-    [Theory]
-    [InlineData("launch-url.txt")]
-    [InlineData("sqlagent.db")]
-    [InlineData("sqlagent.db-wal")]
-    [InlineData("sqlagent.db-shm")]
-    public void Run_time_artifacts_are_gitignored(string entry)
-    {
-        var lines = File.ReadAllLines(RepoPaths.Find(".gitignore"))
+    private static HashSet<string> Entries() =>
+        File.ReadAllLines(RepoPaths.Find(".gitignore"))
             .Select(l => l.Trim())
             .Where(l => l.Length > 0 && !l.StartsWith('#'))
             .ToHashSet(StringComparer.Ordinal);
 
-        Assert.Contains(entry, lines);
+    [Theory]
+    [InlineData("launch-url.txt")]
+    [InlineData("sqlagent.db*")]
+    public void Run_time_artifacts_are_gitignored(string entry)
+    {
+        Assert.Contains(entry, Entries());
+    }
+
+    [Theory]
+    [InlineData("sqlagent.db-journal")]
+    [InlineData("sqlagent.db-wal")]
+    [InlineData("sqlagent.db-shm")]
+    public void The_stores_sidecar_files_are_covered_whatever_journal_mode_is_in_use(string file)
+    {
+        // Naming journal files one at a time is how sqlagent.db-journal came to be tracked-able: the
+        // ignore list covered -wal and -shm, and the store runs in SQLite's default DELETE mode, whose
+        // journal is none of those. The glob is asserted here through what it has to cover, so a future
+        // narrowing back to named entries fails rather than quietly re-opening the same gap.
+        var entries = Entries();
+        Assert.True(
+            entries.Contains(file) || entries.Contains("sqlagent.db*"),
+            $"{file} is not covered by .gitignore.");
     }
 }

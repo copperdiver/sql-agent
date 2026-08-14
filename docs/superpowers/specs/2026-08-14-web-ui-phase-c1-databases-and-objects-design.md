@@ -335,12 +335,17 @@ to close, deferred rather than prevented.
 It is accepted rather than fixed because the staleness is not new: a table
 created after the cache warmed is equally invisible to the model, and has been
 since `SchemaCache` was introduced. What this phase adds is a security decision
-resting on it. Both available remedies — an age bound on `GeneratedAt`, or an
-explicit refresh action — are behaviour this spec never designed, and the age
-bound changes the cache's contract for every consumer. Bounding the window
-belongs with whichever phase gives the config page a refresh control; until then
-it is recorded here and carried on the manual checklist rather than left
-invisible.
+resting on it. Three remedies exist, none of them built here. An age bound on
+`GeneratedAt` changes the cache's contract for every consumer. An explicit
+refresh action is behaviour this spec never designed. The third is the cheapest
+and was found only during this phase's final review: `ObjectsPanel` already runs
+a live extraction on every visit to the config page and then throws it away, so
+writing that result back through `SchemaService` would make each visit a refresh
+point for the cost of one upsert. It is recorded rather than implemented because
+this spec's testing section never covered it and the panel's extraction is not
+today a write path; the next phase should weigh it against the other two rather
+than inherit "only two options, both expensive". Until one is chosen, the window
+is carried on the manual checklist rather than left invisible.
 
 `schema_unavailable` is the fail-closed answer when the schema cannot be read at
 execution time. Identifying a view requires it, so a connection that can run a

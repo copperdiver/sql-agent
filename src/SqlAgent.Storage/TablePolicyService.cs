@@ -112,23 +112,59 @@ public class TablePolicyService(
         return await providers.Get(info.ProviderType).GetSchemaAsync(connectionString, ct);
     }
 
-    private async Task<Dictionary<(string, string), TablePolicy>> LoadPoliciesAsync(
+    /// <summary>
+    /// This connection's stored levels, keyed case-insensitively — the same way
+    /// <c>QueryExecutionService</c>'s resolver matches a name in SQL. With the default (case-sensitive)
+    /// tuple comparer the two could disagree about which row applies to an object, and the disagreement
+    /// runs in the worse direction: the panel reads no row and shows Full access while the validator
+    /// matches the row and enforces Not visible, so the user sees a refusal the page says is impossible.
+    ///
+    /// Rows differing only in case are folded most-restrictive-first rather than collided into an
+    /// exception, again matching the resolver. SQLite compares text case-sensitively, so the unique index
+    /// on (connection, schema, name) does not prevent such a pair from existing.
+    /// </summary>
+    private async Task<Dictionary<(string, string), ObjectAccess>> LoadPoliciesAsync(
         Guid connectionId, CancellationToken ct)
-        => (await db.TablePolicies.Where(p => p.DatabaseConnectionId == connectionId).ToListAsync(ct))
-            .ToDictionary(p => (p.SchemaName, p.TableName));
+    {
+        var rows = await db.TablePolicies.Where(p => p.DatabaseConnectionId == connectionId).ToListAsync(ct);
+
+        var byKey = new Dictionary<(string, string), ObjectAccess>(ObjectKeyComparer.Instance);
+        foreach (var row in rows)
+        {
+            var access = LevelOf(row);
+            var key = (row.SchemaName, row.TableName);
+            byKey[key] = byKey.TryGetValue(key, out var existing) && existing < access ? existing : access;
+        }
+        return byKey;
+    }
 
     /// <summary>
-    /// The one place the three levels are read back out of the two columns. No row means full access;
-    /// invisible outranks everything; visible-but-not-writable is read-only. CanRead is not consulted —
-    /// no path writes it false, and treating it as an axis would invent a fourth state the UI cannot
-    /// produce or display.
+    /// The one place the three levels are read back out of the two columns. Invisible outranks
+    /// everything; visible-but-not-writable is read-only. CanRead is not consulted — no path writes it
+    /// false, and treating it as an axis would invent a fourth state the UI cannot produce or display.
     /// </summary>
-    private static ObjectAccess AccessOf(
-        Dictionary<(string, string), TablePolicy> byKey, string schema, string name)
-        => !byKey.TryGetValue((schema, name), out var p) ? ObjectAccess.Full
-            : !p.IsVisible ? ObjectAccess.Hidden
+    private static ObjectAccess LevelOf(TablePolicy p)
+        => !p.IsVisible ? ObjectAccess.Hidden
             : p.CanWrite ? ObjectAccess.Full
             : ObjectAccess.ReadOnly;
+
+    /// <summary>No row means full access — the rule every layer in this codebase applies.</summary>
+    private static ObjectAccess AccessOf(
+        Dictionary<(string, string), ObjectAccess> byKey, string schema, string name)
+        => byKey.TryGetValue((schema, name), out var access) ? access : ObjectAccess.Full;
+
+    private sealed class ObjectKeyComparer : IEqualityComparer<(string Schema, string Name)>
+    {
+        public static readonly ObjectKeyComparer Instance = new();
+
+        public bool Equals((string Schema, string Name) x, (string Schema, string Name) y) =>
+            StringComparer.OrdinalIgnoreCase.Equals(x.Schema, y.Schema) &&
+            StringComparer.OrdinalIgnoreCase.Equals(x.Name, y.Name);
+
+        public int GetHashCode((string Schema, string Name) key) => HashCode.Combine(
+            StringComparer.OrdinalIgnoreCase.GetHashCode(key.Schema),
+            StringComparer.OrdinalIgnoreCase.GetHashCode(key.Name));
+    }
 
     private async Task UpsertAsync(
         Guid connectionId, string schema, string name, ObjectAccess access, CancellationToken ct)
