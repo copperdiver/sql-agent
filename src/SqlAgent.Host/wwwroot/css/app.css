@@ -362,3 +362,19 @@ th { color: var(--text-100); font-weight: 500; font-size: var(--text-xs); text-t
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
+
+/* ============================================================================
+   Database config page. These live here rather than in a scoped stylesheet
+   because ConnectionPanel and ObjectsPanel both render them, and a scoped sheet
+   cannot reach another component's markup.
+   ========================================================================== */
+.panel {
+  border: 1px solid var(--base-100);
+  border-radius: var(--radius-card);
+  padding: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.field { display: flex; flex-direction: column; gap: var(--space-1); margin-bottom: var(--space-3); }
+.field-inline { flex-direction: row; align-items: center; gap: var(--space-2); }
+.actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }

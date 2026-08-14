@@ -17,9 +17,13 @@
         <Icon Name="terminal" Size="18" />
         <span class="nav-label">SQL</span>
     </NavLink>
-    <NavLink class="nav-row" href="/connections">
+    @* This row survives even though Projects and History have none: sidebar-body is hidden entirely
+       when the sidebar collapses to the icon rail, and theme.js restores a collapsed sidebar before
+       first paint — so without this row, a fresh install opening collapsed has no path to "add a
+       database" at all. *@
+    <NavLink class="nav-row" href="/database">
         <Icon Name="database" Size="18" />
-        <span class="nav-label">Connections</span>
+        <span class="nav-label">Databases</span>
     </NavLink>
     <NavLink class="nav-row" href="/settings">
         <Icon Name="settings" Size="18" />

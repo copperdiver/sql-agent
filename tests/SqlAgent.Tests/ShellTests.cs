@@ -41,7 +41,9 @@ public class ShellTests : IDisposable
         // Phase B1 replaced the Workspace row: conversations are the front door now, and the SQL editor
         // keeps its own row rather than a tab inside a page. Search arrives in B2 with its modal.
         Assert.Contains("New chat", sidebar.Markup);
-        Assert.Contains("Connections", sidebar.Markup);
+        // The row was "Connections" through Phase B; Task 13 gave /connections a replacement page at
+        // /database and moved the row's label and target with it.
+        Assert.Contains("Databases", sidebar.Markup);
     }
 
     [Fact]
