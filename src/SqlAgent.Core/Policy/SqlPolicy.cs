@@ -159,6 +159,12 @@ public static class SqlAnalyzer
             // read sources beside it in a FROM or USING clause. The only thing that separates them is
             // which property of the statement they hang off, so that property is walked first with the
             // flag set; _visited then keeps the generic walk below from revisiting it as a read source.
+            // An UPDATE's target is walked as a whole subtree, which over-marks if a joined relation ever
+            // appears under it — not valid in either supported dialect, and the fail-closed answer if it
+            // becomes so. A DELETE's is not: T-SQL's `DELETE o FROM orders o JOIN lookup x` puts genuine
+            // read sources in the same clause, and marking them written would make a Read-only lookup
+            // table refuse a legitimate join-qualified DELETE — the exact toxicity the write/read split
+            // exists to prevent.
             foreach (var target in WriteTargets(node))
                 Walk(target, scope, writeTarget: true);
 
@@ -190,13 +196,78 @@ public static class SqlAnalyzer
                     yield break;
                 }
 
-                case DeleteOperation:
+                case DeleteOperation deletion:
                 {
                     var from = Property(node, "From");
-                    if (from is not null) yield return from;
+                    if (from is null) yield break;
+
+                    // FromTable.WithFromKeyword and .WithoutKeyword both wrap the entry list in `From`.
+                    var targets = DeleteTargets(deletion, Property(from, "From")).ToList();
+                    if (targets.Count == 0)
+                    {
+                        yield return from;
+                        yield break;
+                    }
+                    foreach (var target in targets) yield return target;
                     yield break;
                 }
             }
+        }
+
+        /// <summary>
+        /// Which relations of a DELETE's FROM clause are actually deleted from. Two forms:
+        ///
+        /// T-SQL's <c>DELETE x FROM orders o JOIN lookup x ON ...</c> names its target ahead of the FROM
+        /// clause, in <c>DeleteOperation.Tables</c>, by alias where one is declared and by table name
+        /// where none is. It is not necessarily the first relation — that example deletes from
+        /// <c>lookup</c> — so the name is resolved against the clause rather than positionally, and the
+        /// relations it does not name stay reads.
+        ///
+        /// Plain <c>DELETE FROM a</c> (and the comma form <c>DELETE FROM a, b</c>) names nothing, so every
+        /// comma-separated entry is a target — but not the relations joined onto them, which are reads.
+        ///
+        /// Returning nothing means the shape was not recognised, and the caller falls back to marking the
+        /// whole clause written: coarse, and in the safe direction.
+        /// </summary>
+        private static IEnumerable<object?> DeleteTargets(DeleteOperation deletion, object? entries)
+        {
+            if (entries is null) return [];
+
+            if (deletion.Tables is { Count: > 0 } named)
+            {
+                var relations = ClauseRelations(entries).ToList();
+                var resolved = new List<object?>();
+                foreach (var name in named)
+                {
+                    var match = MatchRelation(relations, name);
+                    if (match is null) return [];
+                    resolved.Add(match);
+                }
+                return resolved;
+            }
+
+            return ClauseEntries(entries).Select(e => (object?)e.Relation);
+        }
+
+        /// <summary>
+        /// The relation a bare name in <c>DELETE &lt;name&gt; FROM ...</c> refers to. A relation that
+        /// declares an alias is addressable only by that alias, so the alias is what is compared when one
+        /// is present and the table name when it is not — the rule the engines themselves apply.
+        /// </summary>
+        private static TableFactor.Table? MatchRelation(IEnumerable<TableFactor> relations, ObjectName name)
+        {
+            if (name.Values.Count == 0) return null;
+            var wanted = name.Values[^1].Value;
+
+            foreach (var relation in relations)
+            {
+                if (relation is not TableFactor.Table candidate) continue;
+                var addressable = candidate.Alias?.Name.Value ?? candidate.Name.Values[^1].Value;
+                if (string.Equals(addressable, wanted, StringComparison.OrdinalIgnoreCase))
+                    return candidate;
+            }
+
+            return null;
         }
 
         /// <summary>
@@ -241,20 +312,21 @@ public static class SqlAnalyzer
         /// </summary>
         private static IEnumerable<TableFactor> ClauseRelations(object clause)
         {
-            IEnumerable<TableWithJoins> entries = clause switch
-            {
-                TableWithJoins one => [one],
-                IEnumerable<TableWithJoins> many => many,
-                _ => [],
-            };
-
-            foreach (var entry in entries)
+            foreach (var entry in ClauseEntries(clause))
             {
                 yield return entry.Relation;
                 if (entry.Joins is null) continue;
                 foreach (var join in entry.Joins) yield return join.Relation;
             }
         }
+
+        /// <summary>The comma-separated entries of a FROM-style clause, whatever wrapper holds them.</summary>
+        private static IEnumerable<TableWithJoins> ClauseEntries(object clause) => clause switch
+        {
+            TableWithJoins one => [one],
+            IEnumerable<TableWithJoins> many => many,
+            _ => [],
+        };
 
         private static object? Property(object node, string name)
         {

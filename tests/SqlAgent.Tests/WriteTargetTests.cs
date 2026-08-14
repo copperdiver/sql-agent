@@ -93,6 +93,55 @@ public class WriteTargetTests
         Assert.Equal(["orders"], Names(stmt.WrittenTables));
     }
 
+    [Theory]
+    [InlineData(DatabaseProviderType.Postgres)]
+    [InlineData(DatabaseProviderType.SqlServer)]
+    public void Delete_joined_to_a_lookup_reads_the_lookup_rather_than_writing_it(DatabaseProviderType provider)
+    {
+        // The read side of the split, on the write statement that most needs it: joining a DELETE to a
+        // lookup table is ordinary SQL, and marking the whole clause written would let a Read-only lookup
+        // refuse it — turning the level into exactly the toxic thing WrittenTables exists to avoid.
+        var stmt = Parse("DELETE o FROM orders o JOIN lookup x ON x.id = o.id", provider);
+
+        Assert.Equal(["orders"], Names(stmt.WrittenTables));
+        Assert.Equal(["lookup", "orders"], Names(stmt.Tables));
+    }
+
+    [Theory]
+    [InlineData(DatabaseProviderType.Postgres)]
+    [InlineData(DatabaseProviderType.SqlServer)]
+    public void Delete_naming_the_joined_relation_writes_that_one_and_not_the_first(DatabaseProviderType provider)
+    {
+        // The reason the target is resolved by name rather than taken positionally: T-SQL deletes from
+        // whichever relation the name ahead of FROM resolves to, and here that is the joined one. Taking
+        // the first relation would check `orders` while the engine deletes from `lookup`.
+        var stmt = Parse("DELETE x FROM orders o JOIN lookup x ON x.id = o.id", provider);
+
+        Assert.Equal(["lookup"], Names(stmt.WrittenTables));
+        Assert.Equal(["lookup", "orders"], Names(stmt.Tables));
+    }
+
+    [Fact]
+    public void Delete_using_a_second_table_does_not_write_it()
+    {
+        // Postgres' spelling of the same idiom. USING hangs off its own property, so it was already read
+        // only — pinned here so narrowing the FROM clause cannot quietly widen this one.
+        var stmt = Parse("DELETE FROM orders o USING lookup x WHERE x.id = o.id");
+
+        Assert.Equal(["orders"], Names(stmt.WrittenTables));
+        Assert.Equal(["lookup", "orders"], Names(stmt.Tables));
+    }
+
+    [Fact]
+    public void Delete_from_several_comma_separated_tables_writes_all_of_them()
+    {
+        // Neither supported engine accepts this, but the parser does, and every entry of an unqualified
+        // DELETE's FROM clause is a target. Narrowing to the first would under-mark.
+        var stmt = Parse("DELETE FROM orders, lookup");
+
+        Assert.Equal(["lookup", "orders"], Names(stmt.WrittenTables));
+    }
+
     [Fact]
     public void Delete_with_a_subquery_does_not_treat_the_subquery_source_as_written()
     {
