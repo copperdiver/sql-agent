@@ -206,6 +206,20 @@ set a level for that object from the config page, and until then the object is f
 a level to every object under it at once, clamping a view in the batch to Read-only rather than
 failing the whole call if one member can't take the level requested.
 
+**Upgrading from a store written before access levels existed.** The old schema rail could only hide
+and un-hide an object, and its toggle wrote `IsVisible` alone — leaving `CanWrite` at the entity's
+`false` default. Nothing read that column back then, so it did not matter. It does now: a row saying
+"visible, not writable" is exactly Read-only. So an object you hid under the old rail and later
+un-hid comes back as **Read-only**, not Full access, and a write to it is refused with
+`policy_denied_readonly_object` until you say otherwise. One click on that object's Full access
+segment in the Objects panel fixes it for good.
+
+There is deliberately no migration for this. A legacy row and a Read-only level a user chose on
+purpose in the new panel are the same two column values — the store cannot tell them apart — so any
+migration that "restored" the legacy rows would silently unlock objects somebody had chosen to
+protect. Refusing a write that should have been allowed is recoverable in one click; allowing a
+write that should have been refused is not.
+
 **`schema_unavailable`.** Telling a table from a view — which decides whether
 `policy_denied_view_write` applies to a given write — needs the live schema, so a connection that can
 run a query but cannot read its own catalog (a role granted `SELECT` but not the metadata views, for

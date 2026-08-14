@@ -5280,6 +5280,12 @@ not the code's.
       from the sidebar. The form must not discard what you typed. No automated test can reach this —
       bUnit does not re-invoke the lifecycle method when the route parameter is unchanged, so a test
       of it would exercise neither the guard nor its absence.
+- [ ] **With the Objects panel open on a database, trigger any re-render that sets parameters again**
+      (navigate to the same database from the sidebar, or let a parent re-render the page).
+      `DatabasePage.OnParametersSet` clears `_connected` unconditionally, so the panel may vanish and
+      need another Test press even though nothing about the connection changed. Confirm whether it does.
+      Same tooling gap as the row above: bUnit will not re-invoke the lifecycle method for an unchanged
+      parameter, so only a browser can say whether this fires in practice.
 
 **The status dot** — held in the circuit, so a reload is a real part of the behaviour.
 
@@ -5323,6 +5329,14 @@ measurement. This is the measurement.
 - [ ] Set a schema header to Not visible and confirm every object under it goes hidden — views included.
 - [ ] Start the host against a store from before this release: it migrates, a `.bak` appears beside it,
       the saved databases are all still listed, and the first schema read carries views.
+- [ ] **On that same pre-release store, open the Objects panel and find an object you had hidden and
+      later un-hidden under the old schema rail.** It reads **Read-only**, not Full access, and a write
+      to it is refused with `policy_denied_readonly_object`. That is expected: the rail wrote `IsVisible`
+      alone and left `CanWrite` at its `false` default, which the new panel reads as Read-only. Confirm
+      one click on Full access restores it. No automated test replaces this, because it needs a store
+      whose rows were written by the *previous* release — and no migration fixes it, because a legacy
+      row and a deliberate Read-only choice are byte-identical, so unlocking the first would silently
+      unlock the second. Documented in `docs/web-ui.md` under Access levels.
 
 ---
 
