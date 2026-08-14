@@ -2,6 +2,15 @@ using SqlAgent.Storage;
 
 namespace SqlAgent.Host.Web;
 
+/// <summary>How the last connection test in this session went. There is no background poller, so
+/// "untested" is the honest answer until somebody presses the button.</summary>
+public enum ConnectionStatus
+{
+    Untested,
+    Ok,
+    Failed,
+}
+
 /// <summary>
 /// Which connection the workspace is pointed at. Scoped to the circuit, so it is per browser tab.
 /// The rail and the SQL page read it, so it lives here rather than in a parent component's
@@ -39,6 +48,40 @@ public sealed class AppState
 
     /// <summary>Announces a create/edit/delete against the saved-connection set.</summary>
     public void NotifyConnectionsChanged() => ConnectionsChanged?.Invoke();
+
+    private readonly Dictionary<Guid, ConnectionStatus> _connectionStatus = [];
+
+    /// <summary>
+    /// The dot beside a database in the sidebar. Scoped to the circuit like everything else here, which
+    /// is deliberate: a status persisted across restarts would claim a database was reachable at a moment
+    /// nobody checked, and a background poller against arbitrary remote servers is a feature nobody asked
+    /// for. Unknown until this session tested it.
+    /// </summary>
+    public ConnectionStatus StatusOf(Guid connectionId)
+        => _connectionStatus.GetValueOrDefault(connectionId, ConnectionStatus.Untested);
+
+    /// <summary>Raised when a dot should change. Separate from <see cref="ConnectionsChanged"/> because
+    /// the set of databases has not moved — only what is known about one of them.</summary>
+    public event Action? ConnectionStatusChanged;
+
+    /// <summary>Records the result of a test. Silent on an unchanged value: the section re-reads its whole
+    /// list from SQLite on this event, and pressing Test twice on a working connection should not cost
+    /// two queries and two renders.</summary>
+    public void RecordTest(Guid connectionId, bool success)
+    {
+        var next = success ? ConnectionStatus.Ok : ConnectionStatus.Failed;
+        if (_connectionStatus.TryGetValue(connectionId, out var current) && current == next) return;
+        _connectionStatus[connectionId] = next;
+        ConnectionStatusChanged?.Invoke();
+    }
+
+    /// <summary>Drops what was known about a connection — called when one is deleted, so a later
+    /// connection reusing the id (or a stale render) cannot inherit its dot.</summary>
+    public void ForgetStatus(Guid connectionId)
+    {
+        if (_connectionStatus.Remove(connectionId))
+            ConnectionStatusChanged?.Invoke();
+    }
 
     /// <summary>Which chat the page is showing, so the sidebar can highlight its row. Null on a new,
     /// unsaved chat — the row does not exist until the first message is sent.</summary>

@@ -69,4 +69,52 @@ public class AppStateTests
         Assert.Equal("SELECT 1", state.TakePendingSql());
         Assert.Null(state.TakePendingSql());
     }
+
+    [Fact]
+    public void Connection_status_starts_untested_and_records_both_outcomes()
+    {
+        var state = new AppState();
+        var id = Guid.NewGuid();
+
+        Assert.Equal(ConnectionStatus.Untested, state.StatusOf(id));
+
+        state.RecordTest(id, success: true);
+        Assert.Equal(ConnectionStatus.Ok, state.StatusOf(id));
+
+        state.RecordTest(id, success: false);
+        Assert.Equal(ConnectionStatus.Failed, state.StatusOf(id));
+    }
+
+    [Fact]
+    public void Recording_the_same_status_twice_raises_nothing()
+    {
+        // The section re-reads its whole list on this event. Firing it for an unchanged value would
+        // re-query SQLite every time a user pressed Test on an already-passing connection.
+        var state = new AppState();
+        var id = Guid.NewGuid();
+        var raised = 0;
+        state.ConnectionStatusChanged += () => raised++;
+
+        state.RecordTest(id, success: true);
+        state.RecordTest(id, success: true);
+
+        Assert.Equal(1, raised);
+    }
+
+    [Fact]
+    public void Forgetting_a_status_raises_only_when_there_was_one()
+    {
+        var state = new AppState();
+        var id = Guid.NewGuid();
+        var raised = 0;
+        state.ConnectionStatusChanged += () => raised++;
+
+        state.ForgetStatus(id);
+        Assert.Equal(0, raised);
+
+        state.RecordTest(id, success: true);
+        state.ForgetStatus(id);
+        Assert.Equal(2, raised);
+        Assert.Equal(ConnectionStatus.Untested, state.StatusOf(id));
+    }
 }
