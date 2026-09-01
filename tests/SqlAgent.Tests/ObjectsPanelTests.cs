@@ -33,7 +33,7 @@ file sealed class ObjectsFakeProvider(DatabaseProviderType type) : IDatabaseProv
 public class ObjectsPanelTests : IDisposable
 {
     private readonly SqliteConnection _conn = new("DataSource=:memory:");
-    private readonly Bunit.TestContext _ctx = new();
+    private readonly Bunit.BunitContext _ctx = new();
 
     public ObjectsPanelTests()
     {
@@ -69,7 +69,7 @@ public class ObjectsPanelTests : IDisposable
     private async Task<IRenderedComponent<ObjectsPanel>> RenderAsync()
     {
         var id = await SeedAsync();
-        return _ctx.RenderComponent<ObjectsPanel>(p => p.Add(x => x.ConnectionId, id));
+        return _ctx.Render<ObjectsPanel>(p => p.Add(x => x.ConnectionId, id));
     }
 
     private async Task<ObjectAccess> LevelAsync(string name)

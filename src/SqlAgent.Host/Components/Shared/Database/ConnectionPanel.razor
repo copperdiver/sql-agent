@@ -3,6 +3,7 @@
 @inject DialogService Dialogs
 @inject NavigationManager Nav
 @inject ILogger<ConnectionPanel> Logger
+@using Microsoft.JSInterop
 
 <section class="panel">
     <h2>Connection</h2>
@@ -43,7 +44,8 @@
         <button type="button" class="primary" data-testid="connection-save" @onclick="SaveAsync" disabled="@_busy">Save</button>
         @if (Id is not null)
         {
-            <button type="button" class="danger" data-testid="connection-delete" @onclick="ShowDelete">Delete</button>
+            <button type="button" class="danger" data-testid="connection-delete" @onclick="ShowDelete"
+                    @ref="_deleteButton">Delete</button>
         }
     </div>
 
@@ -72,6 +74,8 @@
     private string? _statusCode;
     private Guid? _loaded;
     private bool _initialized;
+    private ElementReference _deleteButton;
+    private bool _restoreDeleteFocus;
 
     private static string Label(DatabaseProviderType type) => type switch
     {
@@ -234,7 +238,31 @@
     private void ShowDelete()
     {
         if (Dialogs.Current is not null) return;
-        Dialogs.Show(@<ConnectionDeleteDialog Name="@_name" OnCancel="Dialogs.Close" OnConfirm="DeleteAsync" />);
+        _restoreDeleteFocus = false;
+        Dialogs.Show(@<ConnectionDeleteDialog Name="@_name" OnCancel="CancelDeleteAsync" OnConfirm="DeleteAsync" />);
+    }
+
+    private async Task CancelDeleteAsync()
+    {
+        Dialogs.Close();
+        _restoreDeleteFocus = true;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_restoreDeleteFocus) return;
+        _restoreDeleteFocus = false;
+
+        try
+        {
+            await _deleteButton.FocusAsync();
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or OperationCanceledException)
+        {
+            Logger.Log(ex is JSException ? LogLevel.Warning : LogLevel.Debug, ex,
+                "Restoring focus to the database delete button failed.");
+        }
     }
 
     private async Task DeleteAsync()

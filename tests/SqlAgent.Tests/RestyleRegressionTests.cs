@@ -79,7 +79,7 @@ public class RestyleRegressionTests
         var scopedRoots = Directory.Exists(configRoot)
             ? Directory.GetDirectories(configRoot, "scopedcss", SearchOption.AllDirectories)
             : [];
-        Assert.NotEmpty(scopedRoots.Where(r => Directory.Exists(Path.Combine(r, "Components"))));
+        Assert.Contains(scopedRoots, r => Directory.Exists(Path.Combine(r, "Components")));
 
         var relative = Path.GetRelativePath(hostRoot, razorPath) + ".rz.scp.css";
         foreach (var root in scopedRoots)

@@ -140,9 +140,10 @@ public class ProviderConnectionFailureTests
     public async Task SqlServer_returns_failure_for_a_refused_connection()
     {
         var result = await new SqlServerProvider().TestConnectionAsync(
-            "Server=127.0.0.1,1;Database=d;User Id=u;Password=p;Connect Timeout=2;Encrypt=false;TrustServerCertificate=true");
+            "Server=127.0.0.1,59999;Database=d;User Id=u;Password=p;Connect Timeout=2;Encrypt=false;TrustServerCertificate=true");
 
         Assert.False(result.Success);
+        Assert.Equal(ConnectionFailure.HostUnreachable, result.Failure);
         Assert.False(string.IsNullOrEmpty(result.Diagnostic));
     }
 }

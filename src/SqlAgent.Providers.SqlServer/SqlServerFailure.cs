@@ -19,9 +19,10 @@ public static class SqlServerFailure
             18456 or 18452 => ConnectionFailure.AuthenticationFailed,
             // 4060 cannot open database, 911 database does not exist.
             4060 or 911 => ConnectionFailure.DatabaseNotFound,
-            // 2 server not found, 53 network path not found, 10060/10061 refused or timed out at the
-            // socket, 11001 host not found, 40615 Azure firewall.
-            2 or 53 or 10060 or 10061 or 11001 or 40615 => ConnectionFailure.HostUnreachable,
+            // 0 is the number SqlClient uses for a transport-level failure without a server error
+            // number. 2 server not found, 53 network path not found, 10060/10061 refused or timed out
+            // at the socket, 11001 host not found, 40615 Azure firewall.
+            -1 or 0 or 2 or 53 or 258 or 10060 or 10061 or 11001 or 40615 => ConnectionFailure.HostUnreachable,
             null => isSocketFailure ? ConnectionFailure.HostUnreachable : ConnectionFailure.Unknown,
             _ => ConnectionFailure.Unknown,
         };

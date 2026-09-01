@@ -15,7 +15,7 @@ namespace SqlAgent.Tests;
 public class SearchDialogTests : IDisposable
 {
     private readonly SqliteConnection _conn = new("DataSource=:memory:");
-    private readonly Bunit.TestContext _ctx = new();
+    private readonly Bunit.BunitContext _ctx = new();
 
     public SearchDialogTests()
     {
@@ -42,7 +42,7 @@ public class SearchDialogTests : IDisposable
     public void An_empty_box_shows_a_hint_rather_than_an_empty_list()
     {
         // A blank result area reads as "nothing found" when nothing has been asked yet.
-        var dialog = _ctx.RenderComponent<SearchDialog>();
+        var dialog = _ctx.Render<SearchDialog>();
 
         Assert.Empty(dialog.FindAll("[data-testid=search-hit]"));
         Assert.Contains("Search", dialog.Markup);
@@ -63,7 +63,7 @@ public class SearchDialogTests : IDisposable
         // button default, which means there is exactly one FocusAsync call and no ordering left to race.
         // Actually landing on the input, on both open paths, is covered only by the manual browser row in
         // docs/web-ui.md -- see "New project" / "Search" there.
-        var dialog = _ctx.RenderComponent<SearchDialog>();
+        var dialog = _ctx.Render<SearchDialog>();
 
         Assert.NotNull(dialog.FindComponent<Modal>().Instance.InitialFocus);
     }
@@ -72,7 +72,7 @@ public class SearchDialogTests : IDisposable
     public async Task Typing_finds_a_chat_by_title_and_opening_it_navigates()
     {
         await SeedChatAsync("quarterly revenue", "body");
-        var dialog = _ctx.RenderComponent<SearchDialog>();
+        var dialog = _ctx.Render<SearchDialog>();
 
         dialog.Find("input").Input("quarterly");
         await WaitForHitsAsync(dialog);
@@ -81,7 +81,7 @@ public class SearchDialogTests : IDisposable
         Assert.Contains("quarterly revenue", hit.TextContent);
         await hit.ClickAsync(new MouseEventArgs());
 
-        Assert.Contains("/chat/", _ctx.Services.GetRequiredService<FakeNavigationManager>().Uri);
+        Assert.Contains("/chat/", _ctx.Services.GetRequiredService<BunitNavigationManager>().Uri);
     }
 
     [Fact]
@@ -90,7 +90,7 @@ public class SearchDialogTests : IDisposable
         // The title is the first sixty characters of the first question, so a body match with no snippet
         // gives the user no idea why the chat is in the list.
         await SeedChatAsync("untitled", "the quick brown fox jumps over the lazy dog");
-        var dialog = _ctx.RenderComponent<SearchDialog>();
+        var dialog = _ctx.Render<SearchDialog>();
 
         dialog.Find("input").Input("lazy");
         await WaitForHitsAsync(dialog);
@@ -102,7 +102,7 @@ public class SearchDialogTests : IDisposable
     public async Task Nothing_found_says_so()
     {
         await SeedChatAsync("quarterly revenue", "body");
-        var dialog = _ctx.RenderComponent<SearchDialog>();
+        var dialog = _ctx.Render<SearchDialog>();
 
         dialog.Find("input").Input("zzzz");
         await WaitForConditionAsync(() => dialog.Markup.Contains("No matches", StringComparison.Ordinal));
@@ -116,7 +116,7 @@ public class SearchDialogTests : IDisposable
         // The point of a command palette is that the hands never leave the keyboard.
         await SeedChatAsync("lazy one", "x");
         await SeedChatAsync("lazy two", "x");
-        var dialog = _ctx.RenderComponent<SearchDialog>();
+        var dialog = _ctx.Render<SearchDialog>();
         dialog.Find("input").Input("lazy");
         await WaitForHitsAsync(dialog);
 
@@ -129,14 +129,14 @@ public class SearchDialogTests : IDisposable
         Assert.Contains("highlighted", dialog.FindAll("[data-testid=search-hit]")[0].ClassName);
 
         await dialog.Find("input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
-        Assert.Contains("/chat/", _ctx.Services.GetRequiredService<FakeNavigationManager>().Uri);
+        Assert.Contains("/chat/", _ctx.Services.GetRequiredService<BunitNavigationManager>().Uri);
     }
 
     [Fact]
     public async Task The_highlight_does_not_run_off_either_end()
     {
         await SeedChatAsync("lazy one", "x");
-        var dialog = _ctx.RenderComponent<SearchDialog>();
+        var dialog = _ctx.Render<SearchDialog>();
         dialog.Find("input").Input("lazy");
         await WaitForHitsAsync(dialog);
 
@@ -156,7 +156,7 @@ public class SearchDialogTests : IDisposable
         using (var scope = _ctx.Services.CreateScope())
             projectId = (await scope.ServiceProvider.GetRequiredService<ProjectService>()
                 .CreateProjectAsync("quarterly")).Id!.Value;
-        var dialog = _ctx.RenderComponent<SearchDialog>();
+        var dialog = _ctx.Render<SearchDialog>();
         dialog.Find("input").Input("quarterly");
         await WaitForHitsAsync(dialog);
 
@@ -173,14 +173,14 @@ public class SearchDialogTests : IDisposable
         // carries the connection id (SearchService.cs), so the navigation can go straight to the row rather
         // than to a list the user would have to search again.
         var id = await SeedConnectionAsync("warehouse");
-        var dialog = _ctx.RenderComponent<SearchDialog>();
+        var dialog = _ctx.Render<SearchDialog>();
         dialog.Find("input").Input("warehouse");
         await WaitForHitsAsync(dialog);
 
         await dialog.FindAll("[data-testid=search-hit]").First().ClickAsync(new MouseEventArgs());
 
         Assert.EndsWith($"/database/{id}",
-            _ctx.Services.GetRequiredService<FakeNavigationManager>().Uri, StringComparison.Ordinal);
+            _ctx.Services.GetRequiredService<BunitNavigationManager>().Uri, StringComparison.Ordinal);
     }
 
     private async Task<Guid> SeedConnectionAsync(string name)

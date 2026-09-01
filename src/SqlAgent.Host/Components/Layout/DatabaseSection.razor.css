@@ -21,7 +21,7 @@
 
 /* The dot is decorative; the state is announced by the sr-only span beside it. Sized in em so it tracks
    the row's text rather than needing its own breakpoint. */
-.database-dot { width: .5em; height: .5em; border-radius: 50%; margin-left: auto; flex: none; }
+.database-dot { display: inline-block; width: .5em; height: .5em; border-radius: 50%; margin-left: auto; flex: none; }
 /* app.css has no bare --text-300 / --success / --danger tokens -- --text-100 is the muted-text token it
    already uses for secondary labels (see .databases-label above and .muted in app.css), and --success-500
    / --danger-500 are the tokens the status colours actually live under (see button.danger, .badge). */

@@ -122,6 +122,18 @@ public class DesignSystemTests : IClassFixture<WebTestHost>
     }
 
     [Fact]
+    public void Database_status_dot_has_a_visible_box()
+    {
+        var css = File.ReadAllText(RepoPaths.Find(
+            "src/SqlAgent.Host/Components/Layout/DatabaseSection.razor.css"));
+
+        var rule = Regex.Match(css, @"\.database-dot\s*\{([^}]*)\}");
+
+        Assert.True(rule.Success);
+        Assert.Contains("display: inline-block", rule.Groups[1].Value);
+    }
+
+    [Fact]
     public void The_vendored_font_ships_its_license_and_copyright_notice()
     {
         // OFL 1.1 condition 2 permits redistribution only if "each copy contains the above copyright

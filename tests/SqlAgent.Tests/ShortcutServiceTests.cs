@@ -20,7 +20,7 @@ public class ShortcutServiceTests
         // Safari does not focus a button on a plain mouse click, so Menu's own keydown handler never
         // fires there: the keypress goes to the document and nothing in the menu hears it.
         using var ctx = NewContext(out var shortcuts);
-        var menu = ctx.RenderComponent<Menu>(p => p
+        var menu = ctx.Render<Menu>(p => p
             .Add(m => m.Trigger, (RenderFragment)(b => b.AddMarkupContent(0, "<span>t</span>")))
             .AddChildContent("<div id=\"body\">contents</div>"));
         menu.Find(".menu-trigger").Click();
@@ -38,7 +38,7 @@ public class ShortcutServiceTests
         // a global Escape would run one handler per row. The same conditional-attachment discipline
         // Phase A applied to the drawer's keydown handler.
         using var ctx = NewContext(out var shortcuts);
-        var menu = ctx.RenderComponent<Menu>(p => p
+        var menu = ctx.Render<Menu>(p => p
             .Add(m => m.Trigger, (RenderFragment)(b => b.AddMarkupContent(0, "<span>t</span>")))
             .AddChildContent("<div id=\"body\">contents</div>"));
 
@@ -57,7 +57,7 @@ public class ShortcutServiceTests
     {
         using var ctx = NewContext(out var shortcuts);
         var closes = 0;
-        var modal = ctx.RenderComponent<Modal>(p => p
+        var modal = ctx.Render<Modal>(p => p
             .Add(m => m.Title, "About")
             .Add(m => m.OnClose, EventCallback.Factory.Create(new object(), () => closes++))
             .AddChildContent("<p>body</p>"));
@@ -68,18 +68,18 @@ public class ShortcutServiceTests
     }
 
     [Fact]
-    public void A_disposed_component_stops_listening()
+    public async Task A_disposed_component_stops_listening()
     {
         // A leaked subscription keeps a torn-down component alive for the rest of the circuit — the same
         // leak ShellTests pins for Sidebar's LocationChanged handler.
         using var ctx = NewContext(out var shortcuts);
         var closes = 0;
-        ctx.RenderComponent<Modal>(p => p
+        ctx.Render<Modal>(p => p
             .Add(m => m.Title, "About")
             .Add(m => m.OnClose, EventCallback.Factory.Create(new object(), () => closes++))
             .AddChildContent("<p>body</p>"));
 
-        ctx.DisposeComponents();
+        await ctx.DisposeComponentsAsync();
         shortcuts.RaiseEscape();
 
         Assert.Equal(0, closes);
@@ -138,9 +138,9 @@ public class ShortcutServiceTests
         Assert.Contains("!e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k'", js);
     }
 
-    private static Bunit.TestContext NewContext(out ShortcutService shortcuts)
+    private static Bunit.BunitContext NewContext(out ShortcutService shortcuts)
     {
-        var ctx = new Bunit.TestContext();
+        var ctx = new Bunit.BunitContext();
         shortcuts = new ShortcutService();
         ctx.Services.AddSingleton(shortcuts);
         // Modal now moves focus explicitly on open (a real JS interop call, replacing the autofocus

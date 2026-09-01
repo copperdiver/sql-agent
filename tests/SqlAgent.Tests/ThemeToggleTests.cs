@@ -11,9 +11,9 @@ public class ThemeToggleTests
     // ThemeToggle injects ILogger<ThemeToggle> (both interop catches log through it), so every test
     // needs logging registered or bUnit's DI container fails to resolve the component at all. Tests that
     // care about what was logged pass a recorder; the rest keep the default no-op factory.
-    private static Bunit.TestContext NewContext(RecordingLoggerProvider? logs = null)
+    private static Bunit.BunitContext NewContext(RecordingLoggerProvider? logs = null)
     {
-        var ctx = new Bunit.TestContext();
+        var ctx = new Bunit.BunitContext();
         try
         {
             ctx.Services.AddLogging();
@@ -42,7 +42,7 @@ public class ThemeToggleTests
         using var ctx = NewContext();
         ctx.JSInterop.Setup<string>("sqlAgentUi.getTheme").SetResult("dark");
 
-        var toggle = ctx.RenderComponent<ThemeToggle>();
+        var toggle = ctx.Render<ThemeToggle>();
 
         var dark = toggle.FindAll("button").Single(b => b.TextContent.Contains("Dark"));
         Assert.Equal("true", dark.GetAttribute("aria-pressed"));
@@ -60,7 +60,7 @@ public class ThemeToggleTests
         // not derive from any of them, so an unplanned call still fails this test loudly rather than
         // being absorbed into the same silence a real interop failure gets.
         ctx.JSInterop.SetupVoid("sqlAgentUi.setTheme", _ => true);
-        var toggle = ctx.RenderComponent<ThemeToggle>();
+        var toggle = ctx.Render<ThemeToggle>();
 
         toggle.FindAll("button").Single(b => b.TextContent.Contains("Light")).Click();
 
@@ -74,7 +74,7 @@ public class ThemeToggleTests
         using var ctx = NewContext();
         ctx.JSInterop.Setup<string>("sqlAgentUi.getTheme").SetResult("system");
 
-        var toggle = ctx.RenderComponent<ThemeToggle>();
+        var toggle = ctx.Render<ThemeToggle>();
 
         Assert.Equal(3, toggle.FindAll("button").Count);
         Assert.Contains("System", toggle.Markup);
@@ -91,7 +91,7 @@ public class ThemeToggleTests
         ctx.JSInterop.Mode = JSRuntimeMode.Strict;
         ctx.JSInterop.Setup<string>("sqlAgentUi.getTheme").SetException(new InvalidOperationException("no storage"));
 
-        var toggle = ctx.RenderComponent<ThemeToggle>();
+        var toggle = ctx.Render<ThemeToggle>();
 
         var system = toggle.FindAll("button").Single(b => b.TextContent.Contains("System"));
         Assert.Equal("true", system.GetAttribute("aria-pressed"));
@@ -108,7 +108,7 @@ public class ThemeToggleTests
         using var ctx = NewContext();
         ctx.JSInterop.Setup<string>("sqlAgentUi.getTheme").SetResult("purple-haze");
 
-        var toggle = ctx.RenderComponent<ThemeToggle>();
+        var toggle = ctx.Render<ThemeToggle>();
 
         var system = toggle.FindAll("button").Single(b => b.TextContent.Contains("System"));
         Assert.Equal("true", system.GetAttribute("aria-pressed"));
@@ -129,7 +129,7 @@ public class ThemeToggleTests
         ctx.JSInterop.Setup<string>("sqlAgentUi.getTheme").SetResult("system");
         ctx.JSInterop.SetupVoid("sqlAgentUi.setTheme", _ => true)
             .SetException(new JSException("Could not find 'sqlAgentUi.setTheme'"));
-        var toggle = ctx.RenderComponent<ThemeToggle>();
+        var toggle = ctx.Render<ThemeToggle>();
 
         toggle.FindAll("button").Single(b => b.TextContent.Contains("Dark")).Click();
 
@@ -154,7 +154,7 @@ public class ThemeToggleTests
         ctx.JSInterop.Setup<string>("sqlAgentUi.getTheme").SetResult("system");
         ctx.JSInterop.SetupVoid("sqlAgentUi.setTheme", _ => true)
             .SetException(new JSDisconnectedException("circuit gone"));
-        var toggle = ctx.RenderComponent<ThemeToggle>();
+        var toggle = ctx.Render<ThemeToggle>();
 
         toggle.FindAll("button").Single(b => b.TextContent.Contains("Dark")).Click();
 
@@ -192,7 +192,7 @@ public class ThemeToggleTests
         ctx.JSInterop.Setup<string>("sqlAgentUi.getTheme").SetResult("system");
         ctx.JSInterop.SetupVoid("sqlAgentUi.setTheme", _ => true)
             .SetException(new TaskCanceledException("JS interop call timed out"));
-        var toggle = ctx.RenderComponent<ThemeToggle>();
+        var toggle = ctx.Render<ThemeToggle>();
 
         toggle.FindAll("button").Single(b => b.TextContent.Contains("Dark")).Click();
 
@@ -219,7 +219,7 @@ public class ThemeToggleTests
             ctx.JSInterop.Setup<string>("sqlAgentUi.getTheme").SetResult("system");
             ctx.JSInterop.SetupVoid("sqlAgentUi.setTheme", _ => true)
                 .SetException(new JSException("Could not find 'sqlAgentUi.setTheme'"));
-            ctx.RenderComponent<ThemeToggle>()
+            ctx.Render<ThemeToggle>()
                 .FindAll("button").Single(b => b.TextContent.Contains("Dark")).Click();
         }
 
@@ -232,7 +232,7 @@ public class ThemeToggleTests
             ctx.JSInterop.Setup<string>("sqlAgentUi.getTheme").SetResult("system");
             ctx.JSInterop.SetupVoid("sqlAgentUi.setTheme", _ => true)
                 .SetException(new JSDisconnectedException("circuit gone"));
-            ctx.RenderComponent<ThemeToggle>()
+            ctx.Render<ThemeToggle>()
                 .FindAll("button").Single(b => b.TextContent.Contains("Dark")).Click();
         }
 
@@ -254,7 +254,7 @@ public class ThemeToggleTests
         ctx.JSInterop.Setup<string>("sqlAgentUi.getTheme")
             .SetException(new JSException("Could not find 'sqlAgentUi.getTheme'"));
 
-        ctx.RenderComponent<ThemeToggle>();
+        ctx.Render<ThemeToggle>();
 
         Assert.Equal(LogLevel.Warning,
             logs.Records.Single(r => r.Message.Contains("sqlAgentUi.getTheme failed")).Level);

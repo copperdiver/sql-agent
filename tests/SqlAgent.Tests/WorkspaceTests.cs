@@ -22,7 +22,7 @@ namespace SqlAgent.Tests;
 public class WorkspaceTests : IDisposable
 {
     private readonly SqliteConnection _conn = new("DataSource=:memory:");
-    private readonly Bunit.TestContext _ctx = new();
+    private readonly Bunit.BunitContext _ctx = new();
     private readonly WorkspaceProviderStub _providerStub = new();
     private Guid _connectionId;
 
@@ -69,7 +69,7 @@ public class WorkspaceTests : IDisposable
         // and one writer, both on this page, which is why the control belongs here.
         await SeedConnectionAsync("warehouse");
 
-        var page = _ctx.RenderComponent<Workspace>();
+        var page = _ctx.Render<Workspace>();
 
         Assert.Single(page.FindAll("[data-testid=sql-connection]"));
         Assert.Contains("warehouse", page.Find("[data-testid=sql-connection]").TextContent);
@@ -79,7 +79,7 @@ public class WorkspaceTests : IDisposable
     public async Task Choosing_a_connection_reveals_the_editor()
     {
         var id = await SeedConnectionAsync("warehouse");
-        var page = _ctx.RenderComponent<Workspace>();
+        var page = _ctx.Render<Workspace>();
 
         Assert.Contains("Select a database", page.Markup);
 
@@ -123,7 +123,7 @@ public class WorkspaceTests : IDisposable
         // re-pointing step, or revert AppState.Select to id-only equality, and Connection keeps holding
         // the stale "warehouse" record either way.
         var id = await SeedConnectionAsync("warehouse");
-        var page = _ctx.RenderComponent<Workspace>();
+        var page = _ctx.Render<Workspace>();
         page.Find("[data-testid=sql-connection]").Change(id.ToString());
         Assert.Contains("warehouse", page.Find("[data-testid=sql-connection]").TextContent);
 
@@ -151,7 +151,7 @@ public class WorkspaceTests : IDisposable
         // pins happens only because ReloadConnectionsAsync resolves the deleted id to nothing on its
         // next read. DatabasePageTests stops at the confirmation dialog and never reaches this half.
         var id = await SeedConnectionAsync("warehouse");
-        var page = _ctx.RenderComponent<Workspace>();
+        var page = _ctx.Render<Workspace>();
         page.Find("[data-testid=sql-connection]").Change(id.ToString());
         Assert.DoesNotContain("Select a database", page.Markup);
 
@@ -170,7 +170,7 @@ public class WorkspaceTests : IDisposable
     [Fact]
     public async Task The_picker_re_reads_when_the_connection_set_changes()
     {
-        var page = _ctx.RenderComponent<Workspace>();
+        var page = _ctx.Render<Workspace>();
         Assert.Empty(page.FindAll("[data-testid=sql-connection] option[value]:not([value=''])"));
 
         await SeedConnectionAsync("warehouse");
@@ -181,7 +181,7 @@ public class WorkspaceTests : IDisposable
     }
 
     [Fact]
-    public void Disposing_the_page_unsubscribes_from_both_AppState_events()
+    public async Task Disposing_the_page_unsubscribes_from_both_AppState_events()
     {
         // SchemaRailTests pinned this same class of leak for the rail before Task 15 deleted it: without
         // both unsubscribes in Dispose, a Workspace instance from an earlier /sql visit stays subscribed
@@ -189,19 +189,19 @@ public class WorkspaceTests : IDisposable
         // selection or database edit fires a callback into a component tree bUnit (and the real renderer)
         // have already torn down.
         //
-        // _ctx.DisposeComponents(), not page.Instance.Dispose(): Workspace.Dispose is a plain public
+        // _ctx.DisposeComponentsAsync(), not page.Instance.Dispose(): Workspace.Dispose is a plain public
         // method, so calling it directly would still pass even if @implements IDisposable were ever
         // dropped from the component -- exactly the mistake that would reopen this leak. DisposeComponents
         // disposes the whole rendered tree the way the real Blazor renderer does when a component leaves
         // it, which only reaches Dispose() through the IDisposable interface. WorkAreaBoundaryTests uses
         // the same pattern for the same reason.
-        _ctx.RenderComponent<Workspace>();
+        _ctx.Render<Workspace>();
         var state = _ctx.Services.GetRequiredService<AppState>();
 
         Assert.Equal(1, SubscriberCountOf(state, "Changed"));
         Assert.Equal(1, SubscriberCountOf(state, "ConnectionsChanged"));
 
-        _ctx.DisposeComponents();
+        await _ctx.DisposeComponentsAsync();
 
         Assert.Equal(0, SubscriberCountOf(state, "Changed"));
         Assert.Equal(0, SubscriberCountOf(state, "ConnectionsChanged"));
@@ -230,7 +230,7 @@ public class WorkspaceTests : IDisposable
     public void No_connection_selected_shows_a_prompt_and_no_editor()
     {
         // AppState.Connection is never set in this test: the "empty selection" branch.
-        var page = _ctx.RenderComponent<Workspace>();
+        var page = _ctx.Render<Workspace>();
 
         Assert.Contains("Select a database to start querying.", page.Markup);
         Assert.Empty(page.FindComponents<SqlEditor>());
@@ -249,7 +249,7 @@ public class WorkspaceTests : IDisposable
         // whether it subscribes to Changed -- that blind spot is exactly why the bug went unnoticed the
         // first time. Here the order is deliberately reversed, and nothing else happens afterwards (no
         // button click, no picker change) that could force a render some other way.
-        var page = _ctx.RenderComponent<Workspace>();
+        var page = _ctx.Render<Workspace>();
         Assert.Contains("Select a database to start querying.", page.Markup);
 
         using var scope = _ctx.Services.CreateScope();
@@ -270,7 +270,7 @@ public class WorkspaceTests : IDisposable
         // (or passed the wrong initial value) would leave every other test in this file green.
         await SelectConnectionAsync(isReadOnly: true);
 
-        _ctx.RenderComponent<Workspace>();
+        _ctx.Render<Workspace>();
 
         var invocation = _ctx.JSInterop.VerifyInvoke("sqlAgentEditor.create");
         // Arguments are (ElementReference host, DotNetObjectReference<SqlEditor> self, string initialValue)
@@ -282,7 +282,7 @@ public class WorkspaceTests : IDisposable
     public async Task A_denied_query_shows_the_deny_code_and_reason_without_touching_the_provider()
     {
         await SelectConnectionAsync(isReadOnly: true);
-        var page = _ctx.RenderComponent<Workspace>();
+        var page = _ctx.Render<Workspace>();
 
         await TypeSqlAsync(page, "UPDATE orders SET total = 0");
         await ClickAsync(FindButton(page, "Run"));
@@ -299,7 +299,7 @@ public class WorkspaceTests : IDisposable
         await SelectConnectionAsync(isReadOnly: true);
         _providerStub.NextResult = new QueryResultSet(["id"], [new object?[] { 1 }], Truncated: true);
 
-        var page = _ctx.RenderComponent<Workspace>();
+        var page = _ctx.Render<Workspace>();
         await TypeSqlAsync(page, "SELECT id FROM orders");
         await ClickAsync(FindButton(page, "Run"));
 
@@ -310,7 +310,7 @@ public class WorkspaceTests : IDisposable
     public async Task Whitespace_only_sql_keeps_the_Run_button_disabled()
     {
         await SelectConnectionAsync(isReadOnly: true);
-        var page = _ctx.RenderComponent<Workspace>();
+        var page = _ctx.Render<Workspace>();
 
         await TypeSqlAsync(page, "   ");
 
@@ -323,7 +323,7 @@ public class WorkspaceTests : IDisposable
         await SelectConnectionAsync(isReadOnly: true);
         _providerStub.NextResult = new QueryResultSet(["id"], [new object?[] { 1 }], Truncated: false);
 
-        var page = _ctx.RenderComponent<Workspace>();
+        var page = _ctx.Render<Workspace>();
         await TypeSqlAsync(page, "SELECT id FROM orders");
         await ClickAsync(FindButton(page, "Run"));
 
@@ -376,7 +376,7 @@ public class WorkspaceTests : IDisposable
         await SelectConnectionAsync(isReadOnly: true);
         _providerStub.CallsToBlock = 1;
 
-        var page = _ctx.RenderComponent<Workspace>();
+        var page = _ctx.Render<Workspace>();
         await TypeSqlAsync(page, "SELECT id FROM orders");
 
         var runClick = ClickAsync(FindButton(page, "Run"));
@@ -418,7 +418,7 @@ public class WorkspaceTests : IDisposable
         _providerStub.CallsToBlock = 1;
         _providerStub.NextResult = new QueryResultSet(["id"], [new object?[] { 42 }], Truncated: false);
 
-        var page = _ctx.RenderComponent<Workspace>();
+        var page = _ctx.Render<Workspace>();
         await TypeSqlAsync(page, "SELECT id FROM orders");
 
         var firstRun = ClickAsync(FindButton(page, "Run"));
@@ -454,7 +454,7 @@ public class WorkspaceTests : IDisposable
     public async Task Ctrl_Enter_with_whitespace_SQL_runs_nothing()
     {
         await SelectConnectionAsync(isReadOnly: true);
-        var page = _ctx.RenderComponent<Workspace>();
+        var page = _ctx.Render<Workspace>();
         await TypeSqlAsync(page, "   ");
 
         await PressCtrlEnterAsync(page);
@@ -472,7 +472,7 @@ public class WorkspaceTests : IDisposable
         await SelectConnectionAsync(isReadOnly: true);
         _providerStub.CallsToBlock = 1;
 
-        var page = _ctx.RenderComponent<Workspace>();
+        var page = _ctx.Render<Workspace>();
         await TypeSqlAsync(page, "SELECT id FROM orders");
 
         var firstRun = PressCtrlEnterAsync(page);

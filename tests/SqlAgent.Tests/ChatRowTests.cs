@@ -17,7 +17,7 @@ namespace SqlAgent.Tests;
 public class ChatRowTests : IDisposable
 {
     private readonly SqliteConnection _conn = new("DataSource=:memory:");
-    private readonly Bunit.TestContext _ctx = new();
+    private readonly Bunit.BunitContext _ctx = new();
 
     public ChatRowTests()
     {
@@ -39,11 +39,11 @@ public class ChatRowTests : IDisposable
     public async Task The_row_shows_the_title_and_opens_the_chat()
     {
         var chat = await SeedAsync("quarterly revenue");
-        var row = _ctx.RenderComponent<ChatRow>(p => p.Add(r => r.Chat, chat));
+        var row = _ctx.Render<ChatRow>(p => p.Add(r => r.Chat, chat));
 
         row.Find(".chat-row-open").Click();
 
-        var nav = _ctx.Services.GetRequiredService<FakeNavigationManager>();
+        var nav = _ctx.Services.GetRequiredService<BunitNavigationManager>();
         Assert.Contains("quarterly revenue", row.Markup);
         Assert.EndsWith($"/chat/{chat.Id}", nav.Uri);
     }
@@ -55,7 +55,7 @@ public class ChatRowTests : IDisposable
         // transcript scrolls past the first message.
         var chat = await SeedAsync("quarterly revenue");
 
-        var row = _ctx.RenderComponent<ChatRow>(p => p.Add(r => r.Chat, chat).Add(r => r.Active, true));
+        var row = _ctx.Render<ChatRow>(p => p.Add(r => r.Chat, chat).Add(r => r.Active, true));
 
         Assert.Contains("active", row.Find(".chat-row").ClassName);
     }
@@ -67,9 +67,9 @@ public class ChatRowTests : IDisposable
         // a child that reads circuit state directly can be skipped by the diff when its own parameters
         // have not changed, stranding the highlight on the chat the user just left.
         var chat = await SeedAsync("quarterly revenue");
-        var row = _ctx.RenderComponent<ChatRow>(p => p.Add(r => r.Chat, chat).Add(r => r.Active, true));
+        var row = _ctx.Render<ChatRow>(p => p.Add(r => r.Chat, chat).Add(r => r.Active, true));
 
-        row.SetParametersAndRender(p => p.Add(r => r.Active, false));
+        row.Render(p => p.Add(r => r.Active, false));
 
         Assert.DoesNotContain("active", row.Find(".chat-row").ClassName);
     }
@@ -79,7 +79,7 @@ public class ChatRowTests : IDisposable
     {
         var chat = await SeedAsync("first question, truncated");
         var dialogs = _ctx.Services.GetRequiredService<DialogService>();
-        var row = _ctx.RenderComponent<ChatRow>(p => p.Add(r => r.Chat, chat));
+        var row = _ctx.Render<ChatRow>(p => p.Add(r => r.Chat, chat));
 
         row.Find(".menu-trigger").Click();
         row.FindAll(".menu-item-action").First(r => r.TextContent.Contains("Rename")).Click();
@@ -100,7 +100,7 @@ public class ChatRowTests : IDisposable
     {
         var chat = await SeedAsync("throwaway");
         var dialogs = _ctx.Services.GetRequiredService<DialogService>();
-        var row = _ctx.RenderComponent<ChatRow>(p => p.Add(r => r.Chat, chat));
+        var row = _ctx.Render<ChatRow>(p => p.Add(r => r.Chat, chat));
 
         row.Find(".menu-trigger").Click();
         row.FindAll(".menu-item-action").First(r => r.TextContent.Contains("Delete")).Click();
@@ -118,7 +118,7 @@ public class ChatRowTests : IDisposable
     {
         var chat = await SeedAsync("keep me");
         var dialogs = _ctx.Services.GetRequiredService<DialogService>();
-        var row = _ctx.RenderComponent<ChatRow>(p => p.Add(r => r.Chat, chat));
+        var row = _ctx.Render<ChatRow>(p => p.Add(r => r.Chat, chat));
         row.Find(".menu-trigger").Click();
         row.FindAll(".menu-item-action").First(r => r.TextContent.Contains("Delete")).Click();
 
@@ -138,7 +138,7 @@ public class ChatRowTests : IDisposable
         var state = _ctx.Services.GetRequiredService<AppState>();
         state.SetActiveChat(chat.Id);
         var dialogs = _ctx.Services.GetRequiredService<DialogService>();
-        var row = _ctx.RenderComponent<ChatRow>(p => p.Add(r => r.Chat, chat).Add(r => r.Active, true));
+        var row = _ctx.Render<ChatRow>(p => p.Add(r => r.Chat, chat).Add(r => r.Active, true));
         row.Find(".menu-trigger").Click();
         row.FindAll(".menu-item-action").First(r => r.TextContent.Contains("Delete")).Click();
 
@@ -146,7 +146,7 @@ public class ChatRowTests : IDisposable
         await dialog.Find("[data-testid=delete-confirm]").ClickAsync(new Microsoft.AspNetCore.Components.Web.MouseEventArgs());
 
         Assert.Null(state.ActiveChatId);
-        Assert.EndsWith("/", _ctx.Services.GetRequiredService<FakeNavigationManager>().Uri);
+        Assert.EndsWith("/", _ctx.Services.GetRequiredService<BunitNavigationManager>().Uri);
     }
 
     [Fact]
@@ -158,7 +158,7 @@ public class ChatRowTests : IDisposable
         var notified = 0;
         _ctx.Services.GetRequiredService<AppState>().ChatsChanged += () => notified++;
         var dialogs = _ctx.Services.GetRequiredService<DialogService>();
-        var row = _ctx.RenderComponent<ChatRow>(p => p.Add(r => r.Chat, chat));
+        var row = _ctx.Render<ChatRow>(p => p.Add(r => r.Chat, chat));
         row.Find(".menu-trigger").Click();
         row.FindAll(".menu-item-action").First(r => r.TextContent.Contains("Rename")).Click();
 
@@ -175,7 +175,7 @@ public class ChatRowTests : IDisposable
         // A sidebar of twenty identical "more actions" buttons is unusable without it.
         var chat = await SeedAsync("quarterly revenue");
 
-        var row = _ctx.RenderComponent<ChatRow>(p => p.Add(r => r.Chat, chat));
+        var row = _ctx.Render<ChatRow>(p => p.Add(r => r.Chat, chat));
 
         Assert.Contains("quarterly revenue", row.Find(".menu-trigger .sr-only").TextContent);
     }
@@ -189,7 +189,7 @@ public class ChatRowTests : IDisposable
             projectId = (await scope.ServiceProvider.GetRequiredService<ProjectService>()
                 .CreateProjectAsync("quarterly")).Id!.Value;
         var dialogs = _ctx.Services.GetRequiredService<DialogService>();
-        var row = _ctx.RenderComponent<ChatRow>(p => p.Add(r => r.Chat, chat));
+        var row = _ctx.Render<ChatRow>(p => p.Add(r => r.Chat, chat));
 
         row.Find(".menu-trigger").Click();
         row.FindAll(".menu-item-action").First(r => r.TextContent.Contains("Move")).Click();

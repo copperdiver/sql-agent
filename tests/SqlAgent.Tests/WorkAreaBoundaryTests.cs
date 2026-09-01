@@ -17,9 +17,9 @@ public class WorkAreaBoundaryTests
     [Fact]
     public void An_exception_inside_the_work_area_renders_a_retry_prompt()
     {
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
 
-        var area = ctx.RenderComponent<WorkArea>(p => p.AddChildContent<ThrowingChild>());
+        var area = ctx.Render<WorkArea>(p => p.AddChildContent<ThrowingChild>());
 
         Assert.Contains("Something went wrong", area.Markup);
     }
@@ -27,9 +27,9 @@ public class WorkAreaBoundaryTests
     [Fact]
     public void The_exception_message_is_never_rendered()
     {
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
 
-        var area = ctx.RenderComponent<WorkArea>(p => p.AddChildContent<ThrowingChild>());
+        var area = ctx.Render<WorkArea>(p => p.AddChildContent<ThrowingChild>());
 
         Assert.DoesNotContain(ThrowingChild.SecretText, area.Markup);
     }
@@ -37,10 +37,10 @@ public class WorkAreaBoundaryTests
     [Fact]
     public void Clicking_retry_after_a_trip_renders_the_child_content_again()
     {
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
         var condition = new FlakyCondition();
 
-        var area = ctx.RenderComponent<WorkArea>(
+        var area = ctx.Render<WorkArea>(
             p => p.AddChildContent<FlakyChild>(c => c.Add(x => x.Condition, condition)));
         Assert.Contains("Something went wrong", area.Markup);
 
@@ -56,10 +56,10 @@ public class WorkAreaBoundaryTests
     [Fact]
     public void A_location_change_clears_a_tripped_boundary()
     {
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
         var condition = new FlakyCondition();
 
-        var area = ctx.RenderComponent<WorkArea>(
+        var area = ctx.Render<WorkArea>(
             p => p.AddChildContent<FlakyChild>(c => c.Add(x => x.Condition, condition)));
         Assert.Contains("Something went wrong", area.Markup);
 
@@ -67,7 +67,7 @@ public class WorkAreaBoundaryTests
         // that keeps a page failure from taking down every page reached afterward via the header nav
         // is the boundary recovering on its own when the location changes, not only on an explicit Retry.
         condition.ShouldThrow = false;
-        var nav = ctx.Services.GetRequiredService<FakeNavigationManager>();
+        var nav = ctx.Services.GetRequiredService<BunitNavigationManager>();
         nav.NavigateTo("connections");
 
         Assert.DoesNotContain("Something went wrong", area.Markup);
@@ -75,17 +75,17 @@ public class WorkAreaBoundaryTests
     }
 
     [Fact]
-    public void Disposing_the_work_area_unsubscribes_from_navigation_changes()
+    public async Task Disposing_the_work_area_unsubscribes_from_navigation_changes()
     {
-        using var ctx = new Bunit.TestContext();
-        var area = ctx.RenderComponent<WorkArea>(p => p.AddChildContent<FlakyChild>());
-        var nav = ctx.Services.GetRequiredService<FakeNavigationManager>();
+        using var ctx = new Bunit.BunitContext();
+        var area = ctx.Render<WorkArea>(p => p.AddChildContent<FlakyChild>());
+        var nav = ctx.Services.GetRequiredService<BunitNavigationManager>();
 
         Assert.Equal(1, LocationChangedSubscriberCount(nav));
 
         // bUnit disposes the whole rendered component tree here, the same as the real Blazor renderer
         // does when a component leaves the render tree (e.g. the circuit's page navigates elsewhere).
-        ctx.DisposeComponents();
+        await ctx.DisposeComponentsAsync();
 
         // If WorkArea.Dispose() did not unsubscribe from NavigationManager.LocationChanged, this would
         // still be 1 and the component would keep itself alive for the rest of the circuit — the same

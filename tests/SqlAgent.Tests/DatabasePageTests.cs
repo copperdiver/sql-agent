@@ -36,7 +36,7 @@ file sealed class PageFakeProvider(Func<ConnectionTestResult> result, DatabasePr
 public class DatabasePageTests : IDisposable
 {
     private readonly SqliteConnection _conn = new("DataSource=:memory:");
-    private readonly Bunit.TestContext _ctx = new();
+    private readonly Bunit.BunitContext _ctx = new();
     private ConnectionTestResult _result = ConnectionTestResult.Ok("PostgreSQL 16.0", 12);
 
     public DatabasePageTests()
@@ -78,7 +78,7 @@ public class DatabasePageTests : IDisposable
     }
 
     private IRenderedComponent<DatabasePage> Render(Guid? id = null)
-        => _ctx.RenderComponent<DatabasePage>(p => p.Add(x => x.Id, id));
+        => _ctx.Render<DatabasePage>(p => p.Add(x => x.Id, id));
 
     [Fact]
     public void A_new_database_starts_with_an_empty_form_and_no_objects_panel()
@@ -261,12 +261,12 @@ public class DatabasePageTests : IDisposable
         // instance per call. That never exercises _initialized: Blazor's router does not tear down and
         // rebuild the component when the route stays "/database/{Id:guid?}" and only the id changes, so
         // the SAME instance receives a second OnParametersSetAsync. This test reproduces that reuse
-        // directly with SetParametersAndRender on the already-rendered instance, the same pattern
+        // directly with Render on the already-rendered instance, the same pattern
         // ChatPageTests uses for the same reason on ChatPage's own Id parameter.
         //
         // A same-id variant (render, clear the name, re-set the SAME id, assert the clear survived) was
         // tried and dropped: instrumenting OnParametersSetAsync with a call counter showed
-        // SetParametersAndRender never invokes it a second time when the id parameter is unchanged from
+        // Render never invokes it a second time when the id parameter is unchanged from
         // the previous call — bUnit treats it as a no-op rather than reproducing the parameter pass a
         // real re-render would perform. That path cannot be reached this way, so no test claims to cover
         // it; this one is the reachable half of the guard's job.
@@ -279,7 +279,7 @@ public class DatabasePageTests : IDisposable
         // Routed through InvokeAsync so ConnectionPanel's own OnParametersSetAsync (reloading the second
         // database, then testing it) completes before the markup below is inspected — the same reason
         // ClickAsync is used elsewhere instead of Click() for anything that awaits.
-        await page.InvokeAsync(() => page.SetParametersAndRender(p => p.Add(x => x.Id, second)));
+        await page.InvokeAsync(() => page.Render(p => p.Add(x => x.Id, second)));
 
         Assert.Equal("reporting", page.Find("[data-testid=connection-name]").GetAttribute("value"));
     }

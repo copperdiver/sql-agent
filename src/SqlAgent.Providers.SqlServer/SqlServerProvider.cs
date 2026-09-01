@@ -20,13 +20,39 @@ public class SqlServerProvider : IDatabaseProvider
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            var number = ex is SqlException sql ? sql.Number : (int?)null;
-            var socket = ex.GetBaseException() is System.Net.Sockets.SocketException;
-            var timeout = ex.GetBaseException() is TimeoutException;
+            // SqlClient can surface the provider exception through a wrapper on some async transport
+            // paths. Walk the chain so a network error is not downgraded to the generic outcome merely
+            // because the outer exception is not SqlException itself.
+            var sql = FindSqlException(ex);
+            var number = sql?.Number;
+            // On Windows, Microsoft.Data.SqlClient may expose TCP refusal/timeout as a Win32Exception
+            // instead of SocketException. It is still a transport failure, not an unknown SQL failure.
+            var transport = sql is not null
+                || HasException<System.Net.Sockets.SocketException>(ex)
+                || HasException<System.ComponentModel.Win32Exception>(ex);
+            var timeout = HasException<TimeoutException>(ex);
 
             return ConnectionTestResult.Fail(
-                SqlServerFailure.Classify(number, socket, timeout), ex.Message, sw.ElapsedMilliseconds);
+                SqlServerFailure.Classify(number, transport, timeout),
+                ex.Message,
+                sw.ElapsedMilliseconds);
         }
+    }
+
+    private static SqlException? FindSqlException(Exception ex)
+    {
+        for (var current = ex; current is not null; current = current.InnerException)
+            if (current is SqlException sql) return sql;
+
+        return null;
+    }
+
+    private static bool HasException<T>(Exception ex) where T : Exception
+    {
+        for (var current = ex; current is not null; current = current.InnerException)
+            if (current is T) return true;
+
+        return false;
     }
 
     public async Task<DatabaseSchema> GetSchemaAsync(string connectionString, CancellationToken ct = default)

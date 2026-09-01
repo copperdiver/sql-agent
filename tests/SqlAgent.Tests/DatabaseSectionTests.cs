@@ -13,7 +13,7 @@ namespace SqlAgent.Tests;
 public class DatabaseSectionTests : IDisposable
 {
     private readonly SqliteConnection _conn = new("DataSource=:memory:");
-    private readonly Bunit.TestContext _ctx = new();
+    private readonly Bunit.BunitContext _ctx = new();
 
     public DatabaseSectionTests()
     {
@@ -46,7 +46,7 @@ public class DatabaseSectionTests : IDisposable
     {
         // Same judgement the project section made: "no databases yet" tells the user nothing the empty
         // list does not already say, and the add button is right there.
-        var section = _ctx.RenderComponent<DatabaseSection>();
+        var section = _ctx.Render<DatabaseSection>();
 
         Assert.Empty(section.FindAll(".database-row"));
         Assert.Single(section.FindAll("[data-testid=database-add]"));
@@ -57,7 +57,7 @@ public class DatabaseSectionTests : IDisposable
     {
         await SeedAsync("warehouse", DatabaseProviderType.SqlServer);
 
-        var section = _ctx.RenderComponent<DatabaseSection>();
+        var section = _ctx.Render<DatabaseSection>();
 
         var row = Assert.Single(section.FindAll(".database-row"));
         Assert.Contains("warehouse", row.TextContent);
@@ -69,7 +69,7 @@ public class DatabaseSectionTests : IDisposable
     {
         var id = await SeedAsync("warehouse");
 
-        var section = _ctx.RenderComponent<DatabaseSection>();
+        var section = _ctx.Render<DatabaseSection>();
 
         Assert.Equal($"/database/{id}", section.Find(".database-open").GetAttribute("href"));
         Assert.Equal("/database", section.Find("[data-testid=database-add]").GetAttribute("href"));
@@ -79,7 +79,7 @@ public class DatabaseSectionTests : IDisposable
     public async Task A_database_is_untested_until_something_records_a_test()
     {
         var id = await SeedAsync("warehouse");
-        var section = _ctx.RenderComponent<DatabaseSection>();
+        var section = _ctx.Render<DatabaseSection>();
 
         Assert.Contains("untested", section.Find(".database-dot").GetAttribute("class"));
 
@@ -93,7 +93,7 @@ public class DatabaseSectionTests : IDisposable
     public async Task A_failed_test_shows_a_failed_dot()
     {
         var id = await SeedAsync("warehouse");
-        var section = _ctx.RenderComponent<DatabaseSection>();
+        var section = _ctx.Render<DatabaseSection>();
         var state = _ctx.Services.GetRequiredService<AppState>();
 
         await section.InvokeAsync(() => state.RecordTest(id, success: false));
@@ -107,7 +107,7 @@ public class DatabaseSectionTests : IDisposable
         // A coloured dot with no text is invisible to a screen reader and to anyone who cannot tell the
         // two colours apart.
         var id = await SeedAsync("warehouse");
-        var section = _ctx.RenderComponent<DatabaseSection>();
+        var section = _ctx.Render<DatabaseSection>();
         var state = _ctx.Services.GetRequiredService<AppState>();
 
         await section.InvokeAsync(() => state.RecordTest(id, success: false));
@@ -129,7 +129,7 @@ public class DatabaseSectionTests : IDisposable
     {
         // The section is a sibling of every page, not a child, and MainLayout is not recreated across
         // navigation — the same reason HistorySection and the old rail both subscribe.
-        var section = _ctx.RenderComponent<DatabaseSection>();
+        var section = _ctx.Render<DatabaseSection>();
         Assert.Empty(section.FindAll(".database-row"));
 
         await SeedAsync("warehouse");
@@ -143,7 +143,7 @@ public class DatabaseSectionTests : IDisposable
     public async Task The_list_collapses_and_expands()
     {
         await SeedAsync("warehouse");
-        var section = _ctx.RenderComponent<DatabaseSection>();
+        var section = _ctx.Render<DatabaseSection>();
 
         Assert.Single(section.FindAll(".database-row"));
 

@@ -17,13 +17,13 @@ public class UiPrimitiveTests
         // bUnit cannot observe document.activeElement, so what is asserted here is the decision to
         // focus — how many times the dialog asks for its target. Whether the browser honours it is a
         // manual-checklist row, and always will be.
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
         ctx.Services.AddScoped<ShortcutService>();
 
         var asked = 0;
         ElementReference captured = default;
-        var modal = ctx.RenderComponent<Modal>(p => p
+        var modal = ctx.Render<Modal>(p => p
             .Add(m => m.Title, "t")
             .Add(m => m.FocusSignal, 0)
             .Add(m => m.ChildContent, (RenderFragment)(b =>
@@ -36,19 +36,19 @@ public class UiPrimitiveTests
 
         Assert.Equal(1, asked);
 
-        modal.SetParametersAndRender(p => p.Add(m => m.FocusSignal, 0));
+        modal.Render(p => p.Add(m => m.FocusSignal, 0));
         Assert.Equal(1, asked);
 
-        modal.SetParametersAndRender(p => p.Add(m => m.FocusSignal, 1));
+        modal.Render(p => p.Add(m => m.FocusSignal, 1));
         Assert.Equal(2, asked);
     }
 
     [Fact]
     public void An_icon_renders_an_svg_with_the_requested_size()
     {
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
 
-        var icon = ctx.RenderComponent<Icon>(p => p.Add(i => i.Name, "database").Add(i => i.Size, 16));
+        var icon = ctx.Render<Icon>(p => p.Add(i => i.Name, "database").Add(i => i.Size, 16));
 
         var svg = icon.Find("svg");
         Assert.Equal("16", svg.GetAttribute("width"));
@@ -61,9 +61,9 @@ public class UiPrimitiveTests
     {
         // Icons sit inside buttons and menu rows whose color changes on hover and between themes.
         // A hard-coded stroke would strand them at one color in one theme.
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
 
-        var icon = ctx.RenderComponent<Icon>(p => p.Add(i => i.Name, "database"));
+        var icon = ctx.Render<Icon>(p => p.Add(i => i.Name, "database"));
 
         Assert.Equal("currentColor", icon.Find("svg").GetAttribute("stroke"));
     }
@@ -73,9 +73,9 @@ public class UiPrimitiveTests
     {
         // A typo'd icon name must degrade to a blank space, not take out the whole page through
         // WorkArea's error boundary.
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
 
-        var icon = ctx.RenderComponent<Icon>(p => p.Add(i => i.Name, "definitely-not-an-icon"));
+        var icon = ctx.Render<Icon>(p => p.Add(i => i.Name, "definitely-not-an-icon"));
 
         Assert.Empty(icon.FindAll("svg"));
     }
@@ -147,9 +147,9 @@ public class UiPrimitiveTests
     [Fact]
     public void A_badge_renders_its_content_and_carries_its_tone_as_a_class()
     {
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
 
-        var badge = ctx.RenderComponent<Badge>(p => p
+        var badge = ctx.Render<Badge>(p => p
             .Add(b => b.Tone, BadgeTone.Success)
             .AddChildContent("connected"));
 
@@ -160,9 +160,9 @@ public class UiPrimitiveTests
     [Fact]
     public void A_spinner_announces_itself_to_assistive_technology()
     {
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
 
-        var spinner = ctx.RenderComponent<Spinner>(p => p.Add(s => s.Label, "Running query"));
+        var spinner = ctx.Render<Spinner>(p => p.Add(s => s.Label, "Running query"));
 
         Assert.Equal("status", spinner.Find("[role]").GetAttribute("role"));
         Assert.Contains("Running query", spinner.Markup);
@@ -171,9 +171,9 @@ public class UiPrimitiveTests
     [Fact]
     public void An_empty_state_renders_its_title_hint_and_actions()
     {
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
 
-        var empty = ctx.RenderComponent<EmptyState>(p => p
+        var empty = ctx.Render<EmptyState>(p => p
             .Add(e => e.Icon, "database")
             .Add(e => e.Title, "No databases yet")
             .Add(e => e.Hint, "Add one to get started")

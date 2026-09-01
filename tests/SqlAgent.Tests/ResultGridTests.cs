@@ -24,9 +24,9 @@ public class ResultGridTests
     [Fact]
     public void Rows_and_columns_are_rendered()
     {
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
 
-        var grid = ctx.RenderComponent<ResultGrid>(p => p.Add(g => g.Result, Success(truncated: false)));
+        var grid = ctx.Render<ResultGrid>(p => p.Add(g => g.Result, Success(truncated: false)));
 
         Assert.Contains("id", grid.Markup);
         Assert.Contains("name", grid.Markup);
@@ -36,9 +36,9 @@ public class ResultGridTests
     [Fact]
     public void A_null_value_renders_as_NULL_not_as_an_empty_cell()
     {
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
 
-        var grid = ctx.RenderComponent<ResultGrid>(p => p.Add(g => g.Result, Success(truncated: false)));
+        var grid = ctx.Render<ResultGrid>(p => p.Add(g => g.Result, Success(truncated: false)));
 
         Assert.Contains("NULL", grid.Markup);
     }
@@ -46,9 +46,9 @@ public class ResultGridTests
     [Fact]
     public void Row_count_and_elapsed_time_are_shown()
     {
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
 
-        var grid = ctx.RenderComponent<ResultGrid>(p => p.Add(g => g.Result, Success(truncated: false)));
+        var grid = ctx.Render<ResultGrid>(p => p.Add(g => g.Result, Success(truncated: false)));
 
         Assert.Contains("2 rows", grid.Markup);
         Assert.Contains("18 ms", grid.Markup);
@@ -57,9 +57,9 @@ public class ResultGridTests
     [Fact]
     public void Truncation_is_announced()
     {
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
 
-        var grid = ctx.RenderComponent<ResultGrid>(p => p.Add(g => g.Result, Success(truncated: true)));
+        var grid = ctx.Render<ResultGrid>(p => p.Add(g => g.Result, Success(truncated: true)));
 
         // A capped result is a normal outcome, not an error — but the user must know rows are missing.
         Assert.Contains("truncated", grid.Markup, StringComparison.OrdinalIgnoreCase);
@@ -68,9 +68,9 @@ public class ResultGridTests
     [Fact]
     public void A_policy_denial_renders_as_a_message_with_its_code()
     {
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
 
-        var message = ctx.RenderComponent<OutcomeMessage>(p => p
+        var message = ctx.Render<OutcomeMessage>(p => p
             .Add(m => m.Code, "policy_denied_readonly")
             .Add(m => m.Message, "Connection is read-only; 'UPDATE' would modify data."));
 
@@ -83,10 +83,10 @@ public class ResultGridTests
     {
         // Guards against a future switch to MarkupString reintroducing an injection hole: cell values
         // must stay plain Razor interpolation, which HTML-encodes automatically.
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
         const string payload = "<script>alert(1)</script>";
 
-        var grid = ctx.RenderComponent<ResultGrid>(p => p.Add(g => g.Result, SuccessWithValue(payload)));
+        var grid = ctx.Render<ResultGrid>(p => p.Add(g => g.Result, SuccessWithValue(payload)));
 
         Assert.DoesNotContain("<script>", grid.Markup);
         Assert.Equal(payload, grid.Find("td").TextContent);
@@ -104,9 +104,9 @@ public class ResultGridTests
     {
         // bUnit has no JS engine: this only proves the component asks the browser to download the right
         // filename, mime type, and payload. It does not prove a file actually lands on disk in a real browser.
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose; // component only needs the call recorded, not a real return value
-        var grid = ctx.RenderComponent<ResultGrid>(p => p.Add(g => g.Result, Success(truncated: false)));
+        var grid = ctx.Render<ResultGrid>(p => p.Add(g => g.Result, Success(truncated: false)));
 
         var csvButton = grid.FindAll("button").Single(b => b.TextContent.Contains("CSV"));
         csvButton.Click();
@@ -120,9 +120,9 @@ public class ResultGridTests
     [Fact]
     public void Export_JSON_button_is_wired_to_sqlAgentDownload_with_the_json_of_the_rows_on_screen()
     {
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
-        var grid = ctx.RenderComponent<ResultGrid>(p => p.Add(g => g.Result, Success(truncated: false)));
+        var grid = ctx.Render<ResultGrid>(p => p.Add(g => g.Result, Success(truncated: false)));
 
         var jsonButton = grid.FindAll("button").Single(b => b.TextContent.Contains("JSON"));
         jsonButton.Click();
