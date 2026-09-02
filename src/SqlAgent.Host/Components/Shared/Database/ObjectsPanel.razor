@@ -48,6 +48,7 @@
                     <div data-testid="@($"schema-set-{group.Key}")">
                         <Segmented Options="TableLevels" Value=""
                                    AriaLabel="@($"Set every object in {group.Key}")"
+                                   ShowLabels="true"
                                    ValueChanged="v => SetSchemaAsync(group.Key, v)" />
                     </div>
                 </div>
@@ -58,15 +59,20 @@
                     {
                         <div class="object-row" @key="@($"{o.Schema}.{o.Name}")"
                              data-testid="@($"object-row-{o.Schema}-{o.Name}")">
-                            <span class="object-name truncate">@o.Name</span>
-                            @if (o.Kind == DatabaseObjectKind.View)
-                            {
-                                <Badge Tone="BadgeTone.Neutral">View</Badge>
-                            }
-                            <Segmented Options="@(o.Kind == DatabaseObjectKind.View ? ViewLevels : TableLevels)"
-                                       Value="@o.Access.ToString()"
-                                       AriaLabel="@($"Access for {o.Schema}.{o.Name}")"
-                                       ValueChanged="v => SetAsync(o, v)" />
+                            <span class="object-identity">
+                                <span class="object-name truncate">@o.Name</span>
+                                @if (o.Kind == DatabaseObjectKind.View)
+                                {
+                                    <Badge Tone="BadgeTone.Neutral">View</Badge>
+                                }
+                            </span>
+                            <span class="object-access">
+                                <Segmented Options="@(o.Kind == DatabaseObjectKind.View ? ViewLevels : TableLevels)"
+                                           Value="@o.Access.ToString()"
+                                           AriaLabel="@($"Access for {o.Schema}.{o.Name}")"
+                                           ShowLabels="true"
+                                           ValueChanged="v => SetAsync(o, v)" />
+                            </span>
                         </div>
                     }
                 }

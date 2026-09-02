@@ -114,6 +114,7 @@ public class ObjectsPanelTests : IDisposable
 
         var row = panel.Find("[data-testid=object-row-dbo-order_summary]");
         Assert.Contains("View", row.TextContent);
+        Assert.Single(row.QuerySelectorAll(".object-identity .badge"));
         Assert.Equal(2, row.QuerySelectorAll(".segment").Length);
     }
 

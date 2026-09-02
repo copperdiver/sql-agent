@@ -64,6 +64,21 @@ public class DatabaseSectionTests : IDisposable
         Assert.Contains("SQL Server", row.TextContent);
     }
 
+    [Theory]
+    [InlineData(DatabaseProviderType.Postgres, "database-engine-icon-postgres")]
+    [InlineData(DatabaseProviderType.SqlServer, "database-engine-icon-sqlserver")]
+    public async Task A_database_uses_its_engine_logo_beside_its_name(
+        DatabaseProviderType provider, string expectedClass)
+    {
+        await SeedAsync("warehouse", provider);
+
+        var section = _ctx.Render<DatabaseSection>();
+
+        var row = Assert.Single(section.FindAll(".database-row"));
+        Assert.NotEmpty(row.QuerySelectorAll(".database-engine-icon"));
+        Assert.Contains(expectedClass, row.QuerySelector(".database-engine-icon")!.GetAttribute("class"));
+    }
+
     [Fact]
     public async Task A_row_links_to_that_database_and_the_add_button_to_a_new_one()
     {

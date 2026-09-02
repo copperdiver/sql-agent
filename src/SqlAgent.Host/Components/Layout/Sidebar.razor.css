@@ -12,6 +12,10 @@
    therefore the menu) is hidden entirely anyway. See also app.css's html.sidebar-collapsed rule, which
    carries the same clip for the pre-connection window this rule cannot cover. */
 .sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  max-height: 100vh;
   display: flex;
   flex-direction: column;
   width: var(--sidebar-width);
@@ -65,8 +69,26 @@
      SchemaRail and no way back to the collapse toggle, which is itself display:none on narrow screens. */
   .sidebar.collapsed ::deep .nav-label,
   .sidebar.collapsed ::deep .brand-name,
-  .sidebar.collapsed .sidebar-body,
-  .sidebar.collapsed .sidebar-foot { display: none; }
+  .sidebar.collapsed .sidebar-body { display: none; }
+
+  .sidebar.collapsed .sidebar-foot {
+    position: absolute;
+    right: var(--space-5);
+    bottom: var(--space-5);
+    left: var(--space-5);
+    display: block;
+    width: auto;
+    margin-top: 0;
+  }
+  .sidebar.collapsed ::deep .user-text,
+  .sidebar.collapsed ::deep .user-chevron,
+  .sidebar.collapsed ::deep .brand { display: none; }
+  .sidebar.collapsed ::deep .sidebar-head { justify-content: center; }
+  .sidebar.collapsed ::deep .user-card-trigger {
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
 
   /* The rail's own clip, restored only here (Task 6 review finding). At 72px wide, minus the sidebar's
      own padding, SidebarHeader's brand icon and collapse-toggle button (each sized to their own

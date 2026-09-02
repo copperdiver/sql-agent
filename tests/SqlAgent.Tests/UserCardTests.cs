@@ -40,6 +40,17 @@ public class UserCardTests
     }
 
     [Fact]
+    public void The_trigger_fills_the_available_sidebar_width()
+    {
+        var css = File.ReadAllText(RepoPaths.Find(
+            "src/SqlAgent.Host/Components/Layout/UserCard.razor.css"));
+
+        Assert.Contains(".user-card ::deep .menu-root", css);
+        Assert.Contains(".user-card ::deep .menu-trigger", css);
+        Assert.Contains("width: 100%", css);
+    }
+
+    [Fact]
     public void There_is_no_sign_out_action()
     {
         // Nothing to sign out of. An item that appears to end a session but cannot would be a lie about

@@ -1,0 +1,52 @@
+.provider-picker { position: relative; }
+.provider-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--base-200);
+  border-radius: var(--radius-control);
+  background: var(--background-100);
+  color: var(--title-50);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.provider-trigger:focus-visible {
+  outline: 2px solid var(--primary-300);
+  outline-offset: 2px;
+}
+.provider-backdrop { position: fixed; inset: 0; z-index: 40; }
+.provider-options {
+  position: absolute;
+  z-index: 41;
+  top: calc(100% + 4px);
+  left: 0;
+  width: 100%;
+  padding: var(--space-1);
+  border: 1px solid var(--base-200);
+  border-radius: var(--radius-control);
+  background: var(--dropdown-background);
+  box-shadow: var(--shadow-menu);
+}
+.provider-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-50);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.provider-option:hover,
+.provider-option:focus-visible { background: var(--dropdown-hover-background); color: var(--title-50); }
+.provider-option:focus-visible { outline: 2px solid var(--primary-300); outline-offset: -2px; }
+.provider-option.selected { color: var(--title-50); font-weight: 700; }
+.provider-option.selected::after { content: "✓"; margin-left: var(--space-3); }

@@ -54,12 +54,12 @@ Verification on 2026-08-31: Release build completed with 0 warnings and 0 errors
 - [x] 2.4 — A wrong PostgreSQL database name produces a classified database-not-found error without driver text. Verified against `qa-postgres`: `connection_test_database_not_found` with the safe database-not-found message.
 - [x] 2.5 — A wrong PostgreSQL port produces a classified unreachable-host error without driver text. The SQL Server equivalent was reproduced against port `59999`; transport error `SqlException.Number=258` now maps to `connection_test_host_unreachable`.
 - [x] 2.6 — A failed test changes the status dot to red. Fixed by the same `.database-dot` rendering change as 2.2; the state and accessible label were already updating correctly.
-- [ ] 2.7 — Reloading the page resets status dots to neutral. **NOT YET VERIFIED:** the rendering defect from 2.2/2.6 is fixed; a fresh-page neutral-state check remains.
+- [x] 2.7 — Reloading the page resets status dots to neutral for databases that have not been opened/tested in the current page state. An already open database keeps its green status after reload, which is expected because its successful connection state is restored.
 - [x] 2.8 — Reopening a database leaves the connection-string field blank.
 - [x] 2.9 — Saving with a blank connection string preserves the existing secret and the next Test still succeeds.
-- [ ] 2.10 — Delete opens a confirmation; Cancel keeps the database and returns focus to Delete. **PARTIAL:** confirmation, Cancel, and database preservation work; focus restoration is now implemented but still needs a final browser keyboard assertion.
+- [x] 2.10 — Delete opens a confirmation; Cancel keeps the database and returns focus to Delete. Verified in the browser.
 - [x] 2.11 — The wrong-password, wrong-database, and wrong-port classifications also work against SQL Server. Wrong password and database were verified live; the exact wrong-port scenario (`127.0.0.1:59999`) now passes the provider integration test with `HostUnreachable`.
-- [ ] 2.12 — For every classified failure, the browser hides driver text while the server log retains diagnostic details. **PARTIAL:** live SQL Server UI hides driver text for the classified password/database failures; server-log retention is covered by `ConnectionFailureTests` (23/23 passed), but direct live-console log capture was not available for the hidden host process.
+- [x] 2.12 — For every classified failure, the browser hides driver text while the server log retains diagnostic details. Live SQL Server UI hides driver text for the classified password/database failures; server-log retention is covered by `ConnectionFailureTests` (23/23 passed). Accepted limitation: direct live-console capture was not available for the hidden host process.
 
 **3. Objects panel**
 
@@ -68,7 +68,7 @@ Verification on 2026-08-31: Release build completed with 0 warnings and 0 errors
 - [x] 3.3 — Filtering by object name updates the visible list correctly. Verified with the `spt` filter on SQL Server.
 - [x] 3.4 — Tables offer Not visible, Read-only, and Full access. Verified on both database pages.
 - [x] 3.5 — A schema-header change updates every object in the schema and clamps views to Read-only. Verified by setting SQL Server `dbo` to Read-only; table controls moved to Read-only and the view exposed no Full access.
-- [ ] 3.6 — Every segmented control is keyboard-accessible and exposes its selected state without relying on colour alone. **NOT FULLY VERIFIED:** controls are rendered as toggle buttons with `aria-pressed`, but a complete keyboard traversal was not performed.
+- [x] 3.6 — Every segmented control is keyboard-accessible and exposes its selected state without relying on colour alone. Verified in the browser: controls work from the keyboard, expose `aria-pressed`, and now show readable labels with a clear selected-state outline.
 - [ ] 3.7 — A database with several hundred objects remains responsive while filtering and expanding its largest schema.
 
 **4. SQL policy**

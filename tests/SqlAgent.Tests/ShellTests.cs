@@ -47,6 +47,14 @@ public class ShellTests : IDisposable
     }
 
     [Fact]
+    public void The_primary_navigation_does_not_duplicate_the_databases_section()
+    {
+        var sidebar = _ctx.Render<Sidebar>();
+
+        Assert.Empty(sidebar.FindAll(".sidebar-nav a[href='/database']"));
+    }
+
+    [Fact]
     public void Collapsing_the_sidebar_marks_it_collapsed_and_persists_the_choice()
     {
         var sidebar = _ctx.Render<Sidebar>();
@@ -251,7 +259,17 @@ public class ShellTests : IDisposable
         Assert.Contains(".sidebar.collapsed ::deep .nav-label", wideBlock);
         Assert.Contains(".sidebar.collapsed ::deep .brand-name", wideBlock);
         Assert.Contains(".sidebar.collapsed .sidebar-body", wideBlock);
-        Assert.Contains(".sidebar.collapsed .sidebar-foot", wideBlock);
+
+        var foot = ExtractBlock(wideBlock, ".sidebar.collapsed .sidebar-foot {");
+        Assert.Contains("display: block", foot);
+        Assert.Contains("position: absolute", foot);
+        Assert.Contains("bottom: var(--space-5)", foot);
+        Assert.Contains("left: var(--space-5)", foot);
+        Assert.Contains("right: var(--space-5)", foot);
+        Assert.Contains(".sidebar.collapsed ::deep .user-text", wideBlock);
+        Assert.Contains(".sidebar.collapsed ::deep .user-chevron", wideBlock);
+        Assert.Contains(".sidebar.collapsed ::deep .brand {", wideBlock);
+        Assert.Contains(".sidebar.collapsed ::deep .sidebar-head {", wideBlock);
 
         // Regression guard: these must not also sit in the narrow (drawer) block, or unguarded above
         // every media query, where they would apply at every viewport including the drawer.
@@ -277,6 +295,18 @@ public class ShellTests : IDisposable
 
         var baseRule = ExtractBlock(css, ".sidebar {");
         Assert.DoesNotContain("overflow", baseRule);
+    }
+
+    [Fact]
+    public void The_sidebar_keeps_its_footer_inside_the_viewport()
+    {
+        var css = File.ReadAllText(RepoPaths.Find("src/SqlAgent.Host/Components/Layout/Sidebar.razor.css"));
+
+        var baseRule = ExtractBlock(css, ".sidebar {");
+        Assert.Contains("position: sticky", baseRule);
+        Assert.Contains("top: 0", baseRule);
+        Assert.Contains("height: 100vh", baseRule);
+        Assert.Contains("max-height: 100vh", baseRule);
     }
 
     [Fact]
@@ -312,7 +342,17 @@ public class ShellTests : IDisposable
         // Anchored under ".app aside.sidebar" (Task 6): the bare class names would otherwise hide every
         // .nav-label/.sidebar-body/.sidebar-foot on the page, not just the sidebar's own.
         Assert.Contains("html.sidebar-collapsed .app aside.sidebar .sidebar-body", css);
-        Assert.Contains("html.sidebar-collapsed .app aside.sidebar .sidebar-foot", css);
+        var foot = ExtractBlock(css,
+            "html.sidebar-collapsed .app aside.sidebar .sidebar-foot {");
+        Assert.Contains("display: block", foot);
+        Assert.Contains("position: absolute", foot);
+        Assert.Contains("bottom: var(--space-5)", foot);
+        Assert.Contains("left: var(--space-5)", foot);
+        Assert.Contains("right: var(--space-5)", foot);
+        Assert.Contains("html.sidebar-collapsed .app aside.sidebar .user-text", css);
+        Assert.Contains("html.sidebar-collapsed .app aside.sidebar .user-chevron", css);
+        Assert.Contains("html.sidebar-collapsed .app aside.sidebar .brand {", css);
+        Assert.Contains("html.sidebar-collapsed .app aside.sidebar .sidebar-head {", css);
     }
 
     [Fact]

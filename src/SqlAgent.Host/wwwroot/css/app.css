@@ -41,6 +41,11 @@
 
   --dropdown-background: #fff;
   --dropdown-hover-background: #f3f4f6;
+  --postgres-brand: #336791;
+  --sqlserver-brand: #cc2927;
+  /* Native Windows/Chromium select popups use a separate light surface even when the page is dark. */
+  --native-select-option-background: #fff;
+  --native-select-option-text: #1f2937;
   --input-background: #fff;
   --input-placeholder: #9ca3af;
   --scrim: rgb(17 24 39 / .45);
@@ -97,6 +102,8 @@
   --warning-text: #f59e0b;
   --dropdown-background: #1f2937;
   --dropdown-hover-background: #374151;
+  --native-select-option-background: #fff;
+  --native-select-option-text: #1f2937;
   --input-background: rgb(255 255 255 / .05);
   --input-placeholder: #6b7280;
   --scrim: rgb(3 7 18 / .6);
@@ -129,6 +136,8 @@
     --warning-text: #f59e0b;
     --dropdown-background: #1f2937;
     --dropdown-hover-background: #374151;
+    --native-select-option-background: #fff;
+    --native-select-option-text: #1f2937;
     --input-background: rgb(255 255 255 / .05);
     --input-placeholder: #6b7280;
     --scrim: rgb(3 7 18 / .6);
@@ -216,6 +225,18 @@ input, select, textarea {
   border-radius: var(--radius-control);
   padding: var(--space-2) var(--space-3);
 }
+select {
+  color-scheme: light;
+}
+:root.dark select,
+:root:not(.light):not(.dark) select {
+  color-scheme: dark;
+}
+select option {
+  color: var(--native-select-option-text) !important;
+  background: var(--native-select-option-background) !important;
+  -webkit-text-fill-color: var(--native-select-option-text) !important;
+}
 input::placeholder, textarea::placeholder { color: var(--input-placeholder); }
 input:focus, select:focus, textarea:focus { border-color: var(--primary-300); outline: none; }
 /* Checkboxes and radios are the exception to the rule above, and must be exempted explicitly. For a
@@ -298,8 +319,26 @@ th { color: var(--text-100); font-weight: 500; font-size: var(--text-xs); text-t
   }
   html.sidebar-collapsed .app aside.sidebar .nav-label,
   html.sidebar-collapsed .app aside.sidebar .brand-name,
-  html.sidebar-collapsed .app aside.sidebar .sidebar-body,
-  html.sidebar-collapsed .app aside.sidebar .sidebar-foot { display: none; }
+  html.sidebar-collapsed .app aside.sidebar .sidebar-body { display: none; }
+
+  html.sidebar-collapsed .app aside.sidebar .sidebar-foot {
+    position: absolute;
+    right: var(--space-5);
+    bottom: var(--space-5);
+    left: var(--space-5);
+    display: block;
+    width: auto;
+    margin-top: 0;
+  }
+  html.sidebar-collapsed .app aside.sidebar .user-text,
+  html.sidebar-collapsed .app aside.sidebar .user-chevron,
+  html.sidebar-collapsed .app aside.sidebar .brand { display: none; }
+  html.sidebar-collapsed .app aside.sidebar .sidebar-head { justify-content: center; }
+  html.sidebar-collapsed .app aside.sidebar .user-card-trigger {
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
 }
 
 /* ============================================================================

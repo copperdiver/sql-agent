@@ -18,18 +18,19 @@
 
    Fixing either properly needs a portal (rendering the backdrop/panel outside the transformed
    ancestor), which is out of scope for this phase. *@
-<Menu Placement="MenuPlacement.Top">
-    <Trigger>
-        <div class="user-card-trigger">
-            <span class="avatar" aria-hidden="true">@Info.Initials</span>
-            <span class="user-text">
-                <span class="user-name truncate">@Info.AccountName</span>
-                <span class="user-host truncate">@Info.MachineName</span>
-            </span>
-            <Icon Name="chevron-down" Size="16" />
-        </div>
-    </Trigger>
-    <ChildContent>
+<div class="user-card">
+    <Menu Placement="MenuPlacement.Top">
+        <Trigger>
+            <div class="user-card-trigger">
+                <span class="avatar" aria-hidden="true">@Info.Initials</span>
+                <span class="user-text">
+                    <span class="user-name truncate">@Info.AccountName</span>
+                    <span class="user-host truncate">@Info.MachineName</span>
+                </span>
+                <Icon Name="chevron-down" Size="16" Class="user-chevron" />
+            </div>
+        </Trigger>
+        <ChildContent>
         @* No Sign out: the only session concept is the cookie the launch token is exchanged for, and
            there is no user record to sign out of. An item that looked like one would misrepresent the
            security model. *@
@@ -43,8 +44,9 @@
             <Trailing><ThemeToggle /></Trailing>
         </MenuItem>
         <MenuItem Icon="info" OnClick="ShowAbout">About</MenuItem>
-    </ChildContent>
-</Menu>
+        </ChildContent>
+    </Menu>
+</div>
 
 @if (_aboutOpen)
 {

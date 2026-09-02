@@ -63,11 +63,22 @@ public class DesignSystemTests : IClassFixture<WebTestHost>
 
         var head = html[..html.IndexOf("</head>", StringComparison.OrdinalIgnoreCase)];
 
-        Assert.Contains("css/app.css", head);
-        Assert.Contains("SqlAgent.Host.styles.css", head);
+        Assert.Matches("href=\"css/app\\.[a-z0-9]+\\.css\"", head);
+        Assert.Matches("href=\"SqlAgent\\.Host\\.[a-z0-9]+\\.styles\\.css\"", head);
         Assert.Contains("js/theme.js", head);
         Assert.DoesNotContain("defer", head);
         Assert.DoesNotContain("async", head);
+    }
+
+    [Fact]
+    public void Stylesheets_use_fingerprinted_static_asset_urls()
+    {
+        var app = File.ReadAllText(RepoPaths.Find("src/SqlAgent.Host/Components/App.razor"));
+        var program = File.ReadAllText(RepoPaths.Find("src/SqlAgent.Host/Program.cs"));
+
+        Assert.Contains("@Assets[\"css/app.css\"]", app);
+        Assert.Contains("@Assets[\"SqlAgent.Host.styles.css\"]", app);
+        Assert.Contains("app.MapStaticAssets()", program);
     }
 
     [Fact]
@@ -131,6 +142,53 @@ public class DesignSystemTests : IClassFixture<WebTestHost>
 
         Assert.True(rule.Success);
         Assert.Contains("display: inline-block", rule.Groups[1].Value);
+    }
+
+    [Fact]
+    public void Segmented_controls_make_selection_and_keyboard_focus_obvious()
+    {
+        var css = File.ReadAllText(RepoPaths.Find(
+            "src/SqlAgent.Host/Components/Shared/Ui/Segmented.razor.css"));
+
+        var selected = Regex.Match(css, @"\.segment\.selected\s*\{([^}]*)\}");
+        Assert.True(selected.Success);
+        Assert.Contains("font-weight", selected.Groups[1].Value);
+        Assert.Contains("border", selected.Groups[1].Value);
+
+        var focus = Regex.Match(css, @"\.segment:focus-visible\s*\{([^}]*)\}");
+        Assert.True(focus.Success, "Segmented controls must expose a visible keyboard focus ring.");
+        Assert.Contains("outline", focus.Groups[1].Value);
+        Assert.DoesNotContain("outline: none", focus.Groups[1].Value);
+    }
+
+    [Fact]
+    public void Object_rows_are_visually_nested_and_highlight_on_hover()
+    {
+        var panel = File.ReadAllText(RepoPaths.Find(
+            "src/SqlAgent.Host/Components/Shared/Database/ObjectsPanel.razor"));
+        var css = File.ReadAllText(RepoPaths.Find(
+            "src/SqlAgent.Host/Components/Shared/Database/ObjectsPanel.razor.css"));
+
+        Assert.Equal(2, Regex.Matches(panel, @"<Segmented[\s\S]*?ShowLabels=""true""").Count);
+
+        var objectRow = Regex.Match(css, @"\.object-row\s*\{([^}]*)\}");
+        Assert.True(objectRow.Success);
+        Assert.Contains("margin-left: var(--space-8)", objectRow.Groups[1].Value);
+        Assert.Contains("padding-left: var(--space-8)", objectRow.Groups[1].Value);
+        Assert.Contains("border-left", objectRow.Groups[1].Value);
+
+        var hover = Regex.Match(css, @"\.object-row:hover\s*\{([^}]*)\}");
+        Assert.True(hover.Success, "Object rows must expose the row under the pointer.");
+        Assert.Contains("background: var(--background-soft-200)", hover.Groups[1].Value);
+    }
+
+    [Fact]
+    public void Database_links_receive_their_layout_through_the_NavLink_boundary()
+    {
+        var css = File.ReadAllText(RepoPaths.Find(
+            "src/SqlAgent.Host/Components/Layout/DatabaseSection.razor.css"));
+
+        Assert.Contains(".databases ::deep .database-open {", css);
     }
 
     [Fact]

@@ -15,12 +15,30 @@
 
     <div class="field">
         <label for="connection-provider">DBMS</label>
-        <select id="connection-provider" data-testid="connection-provider" @onchange="OnProviderChanged">
-            @foreach (var p in Enum.GetValues<DatabaseProviderType>())
+        <div class="provider-picker" @onkeydown="OnProviderKeyDown">
+            <button id="connection-provider" type="button" class="provider-trigger"
+                    data-testid="connection-provider-trigger"
+                    aria-label="@($"DBMS: {Label(_provider)}")"
+                    aria-haspopup="listbox" aria-expanded="@_providerOpen"
+                    aria-controls="connection-provider-options" @onclick="ToggleProviderPicker">
+                <span>@Label(_provider)</span>
+                <Icon Name="chevron-down" Size="14" />
+            </button>
+            @if (_providerOpen)
             {
-                <option value="@p" selected="@(p == _provider)">@Label(p)</option>
+                <div class="provider-backdrop" @onclick="CloseProviderPicker"></div>
+                <div id="connection-provider-options" class="provider-options" role="listbox"
+                     aria-label="DBMS">
+                    @foreach (var p in Enum.GetValues<DatabaseProviderType>())
+                    {
+                        <button type="button" role="option" aria-selected="@(p == _provider)"
+                                class="provider-option @(p == _provider ? "selected" : "")"
+                                data-testid="@($"connection-provider-option-{p}")"
+                                @onclick="() => SelectProvider(p)">@Label(p)</button>
+                    }
+                </div>
             }
-        </select>
+        </div>
     </div>
 
     <div class="field">
@@ -70,6 +88,7 @@
     private bool _isReadOnly = true;
     private string _connectionString = "";
     private bool _busy;
+    private bool _providerOpen;
     private string? _status;
     private string? _statusCode;
     private Guid? _loaded;
@@ -130,10 +149,18 @@
     private void OnConnectionStringChanged(ChangeEventArgs e) => _connectionString = e.Value?.ToString() ?? "";
     private void OnReadOnlyChanged(ChangeEventArgs e) => _isReadOnly = (bool)(e.Value ?? false);
 
-    private void OnProviderChanged(ChangeEventArgs e)
+    private void ToggleProviderPicker() => _providerOpen = !_providerOpen;
+    private void CloseProviderPicker() => _providerOpen = false;
+
+    private void SelectProvider(DatabaseProviderType provider)
     {
-        if (Enum.TryParse<DatabaseProviderType>(e.Value?.ToString(), out var parsed))
-            _provider = parsed;
+        _provider = provider;
+        _providerOpen = false;
+    }
+
+    private void OnProviderKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") _providerOpen = false;
     }
 
     private async Task TestAsync()

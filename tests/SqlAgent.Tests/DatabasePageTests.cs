@@ -92,6 +92,27 @@ public class DatabasePageTests : IDisposable
     }
 
     [Fact]
+    public async Task The_DBMS_picker_renders_both_readable_options_and_updates_its_trigger()
+    {
+        var page = Render();
+
+        Assert.Empty(page.FindAll("select[data-testid=connection-provider]"));
+        var trigger = page.Find("[data-testid=connection-provider-trigger]");
+        Assert.Equal("Postgres", trigger.TextContent.Trim());
+        Assert.Equal("DBMS: Postgres", trigger.GetAttribute("aria-label"));
+
+        await trigger.ClickAsync(new MouseEventArgs());
+        Assert.Equal(2, page.FindAll("[data-testid^=connection-provider-option-]").Count);
+
+        await page.Find("[data-testid=connection-provider-option-SqlServer]")
+            .ClickAsync(new MouseEventArgs());
+        Assert.Equal("SQL Server", page.Find("[data-testid=connection-provider-trigger]").TextContent.Trim());
+        Assert.Equal("DBMS: SQL Server",
+            page.Find("[data-testid=connection-provider-trigger]").GetAttribute("aria-label"));
+        Assert.Empty(page.FindAll("[data-testid^=connection-provider-option-]"));
+    }
+
+    [Fact]
     public async Task Opening_a_saved_database_tests_it_and_shows_the_objects_panel()
     {
         // Requiring a manual click on every visit would put a button between the user and the thing they

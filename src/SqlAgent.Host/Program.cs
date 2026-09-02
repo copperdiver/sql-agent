@@ -71,7 +71,7 @@ using (var scope = app.Services.CreateScope())
 app.UseMiddleware<LocalOriginMiddleware>();
 app.UseMiddleware<TokenAuthMiddleware>();
 
-app.UseStaticFiles();
+app.MapStaticAssets();
 app.UseAntiforgery();
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
 

@@ -1,6 +1,11 @@
+.user-card,
+.user-card ::deep .menu-root,
+.user-card ::deep .menu-trigger { width: 100%; min-width: 0; }
 .user-card-trigger {
   display: flex;
   align-items: center;
+  width: 100%;
+  min-width: 0;
   gap: var(--space-2);
   padding: var(--space-2);
   border: 1px solid var(--base-100);

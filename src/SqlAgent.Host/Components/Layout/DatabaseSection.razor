@@ -40,7 +40,18 @@
         {
             <div class="database-row" @key="c.Id">
                 <NavLink class="database-open truncate" href="@($"/database/{c.Id}")">
-                    <Icon Name="database" Size="16" />
+                    @if (c.ProviderType == DatabaseProviderType.Postgres)
+                    {
+                        <Icon Name="postgres" Size="16" Class="database-engine-icon database-engine-icon-postgres" />
+                    }
+                    else if (c.ProviderType == DatabaseProviderType.SqlServer)
+                    {
+                        <Icon Name="sqlserver" Size="16" Class="database-engine-icon database-engine-icon-sqlserver" />
+                    }
+                    else
+                    {
+                        <Icon Name="database" Size="16" Class="database-engine-icon database-engine-icon-generic" />
+                    }
                     <span class="truncate">@c.Name</span>
                     <Badge Tone="BadgeTone.Neutral">@EngineLabel(c.ProviderType)</Badge>
                     @* The sr-only label lives inside the dot rather than beside it: .sr-only is
