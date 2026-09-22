@@ -15,6 +15,12 @@ public class ComposerTests
     {
         var ctx = new Bunit.TestContext();
         ctx.Services.AddScoped<ShortcutService>();
+        var provider = new LocalDiskFileStorageProvider(Path.Combine(Path.GetTempPath(), $"sqlagent-composer-{Guid.NewGuid():N}"));
+        ctx.Services.AddSingleton(new FileStorageOptions());
+        ctx.Services.AddSingleton<IFileStorageProvider>(provider);
+        ctx.Services.AddSingleton<IFileStorageProviderRegistry>(new FileStorageProviderRegistry([provider]));
+        ctx.Services.AddScoped<FileStorageService>();
+        ctx.Services.AddLogging();
         // Composer binds its Enter handling in JS, the same shape SqlEditor uses for Ctrl+Enter. bUnit's
         // strict JSInterop needs both calls planned; the `_ => true` matcher accepts any arguments
         // because one of them is an ElementReference the test cannot predict.
@@ -142,6 +148,27 @@ public class ComposerTests
 
         Assert.Single(chips.FindAll(".chip"));
         Assert.Empty(chips.FindAll(".chip-remove"));
+    }
+
+    [Fact]
+    public void Composer_renders_pending_file_chips_and_reports_removal()
+    {
+        using var ctx = NewContext();
+        var removed = default(PendingFileAttachment);
+        var pending = new List<PendingFileAttachment>
+        {
+            new("notes.txt", "text/plain", 5, "local-disk", "notes", "/files/notes"),
+        };
+
+        var composer = ctx.RenderComponent<Composer>(p => p
+            .Add(c => c.Files, pending)
+            .Add(c => c.OnRemoveFile, EventCallback.Factory.Create<PendingFileAttachment>(
+                this, file => removed = file)));
+
+        Assert.Contains("notes.txt", composer.Markup);
+        composer.Find(".pending-file-remove").Click();
+
+        Assert.Equal("notes.txt", removed!.FileName);
     }
 
     [Fact]

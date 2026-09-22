@@ -1,5 +1,6 @@
 using Bunit;
 using Bunit.TestDoubles;
+using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -27,6 +28,7 @@ public class ChatPageTests : IDisposable
     private readonly Bunit.TestContext _ctx = new();
     private readonly ChatGatewayStub _gateway = new();
     private readonly TurnProviderStub _provider = new();
+    private readonly string _fileRoot = Path.Combine(Path.GetTempPath(), $"sqlagent-chat-page-files-{Guid.NewGuid():N}");
 
     // Read afresh every time a scope resolves SqlAgentDbContext, so a test can arm it (see
     // ThrowCanceledOnFirstSaveInterceptor's use below) after the constructor has already run.
@@ -44,6 +46,11 @@ public class ChatPageTests : IDisposable
         _ctx.Services.AddSingleton<IDatabaseProvider>(_provider);
         _ctx.Services.AddSingleton<IDatabaseProviderRegistry, DatabaseProviderRegistry>();
         _ctx.Services.AddSingleton<ILlmSqlGateway>(_gateway);
+        var fileProvider = new LocalDiskFileStorageProvider(_fileRoot);
+        _ctx.Services.AddSingleton(new FileStorageOptions());
+        _ctx.Services.AddSingleton<IFileStorageProvider>(fileProvider);
+        _ctx.Services.AddSingleton<IFileStorageProviderRegistry>(new FileStorageProviderRegistry([fileProvider]));
+        _ctx.Services.AddScoped<FileStorageService>();
         _ctx.Services.AddScoped<DatabaseConnectionService>();
         _ctx.Services.AddScoped<QueryExecutionService>();
         _ctx.Services.AddScoped<SchemaService>();
@@ -192,6 +199,53 @@ public class ChatPageTests : IDisposable
         await ClickAsync(page.Find("[data-testid=send]"));
 
         Assert.Contains(page.FindAll(".composer .chip"), c => c.TextContent.Contains("prod"));
+    }
+
+    [Fact]
+    public async Task Sending_persists_pending_files_then_clears_the_pending_chips()
+    {
+        var page = _ctx.RenderComponent<ChatPage>();
+        await UploadFileAsync(page, "report.txt", "hello");
+        Type(page, "summarize the report");
+
+        await ClickAsync(page.Find("[data-testid=send]"));
+
+        var chat = Assert.Single(await ListChatsAsync());
+        var message = (await LoadAsync(chat.Id))!.Messages.First(m => m.Role == ChatRole.User);
+        var file = Assert.Single(message.Files!);
+        Assert.Equal("report.txt", file.FileName);
+        Assert.Empty(page.FindAll(".composer .pending-file"));
+    }
+
+    [Fact]
+    public async Task A_failed_send_keeps_pending_files_for_retry()
+    {
+        var page = _ctx.RenderComponent<ChatPage>();
+        await UploadFileAsync(page, "retry.txt", "try again");
+        Type(page, "send this later");
+        _saveInterceptor = new ThrowCanceledOnFirstSaveInterceptor();
+
+        await ClickAsync(page.Find("[data-testid=send]"));
+
+        Assert.Contains(page.FindAll(".composer .pending-file"), chip => chip.TextContent.Contains("retry.txt"));
+        Assert.Empty(await ListChatsAsync());
+    }
+
+    [Fact]
+    public void Sent_file_chips_are_read_only_authenticated_download_links()
+    {
+        var fileId = Guid.NewGuid();
+        var message = new ChatMessageView(
+            Guid.NewGuid(), 0, ChatRole.User, "with file", DateTime.UtcNow, null,
+            ChatOutcomeKind.None, null, null, null, false, [], Files:
+            [new ChatFileRef(fileId, "report.pdf", "application/pdf", 42, $"/files/{fileId}")]);
+
+        var rendered = _ctx.RenderComponent<UserMessage>(p => p.Add(c => c.Message, message));
+
+        var link = Assert.Single(rendered.FindAll(".file-chip"));
+        Assert.Equal($"/files/{fileId}", link.GetAttribute("href"));
+        Assert.Equal("report.pdf", link.QuerySelector(".chip-name")!.TextContent.Trim());
+        Assert.Empty(rendered.FindAll(".file-chip-remove"));
     }
 
     [Fact]
@@ -543,6 +597,13 @@ public class ChatPageTests : IDisposable
             .First(r => r.TextContent.Contains(name)));
     }
 
+    private static async Task UploadFileAsync(IRenderedComponent<ChatPage> page, string name, string text)
+    {
+        await ClickAsync(page.Find(".composer .menu-trigger"));
+        page.FindComponent<AttachmentMenu>().FindComponent<InputFile>().UploadFiles(
+            InputFileContent.CreateFromText(text, name, contentType: "text/plain"));
+    }
+
     private static void Type(IRenderedComponent<ChatPage> page, string text) =>
         page.Find("textarea").Input(text);
 
@@ -553,6 +614,7 @@ public class ChatPageTests : IDisposable
     {
         _ctx.Dispose();
         _conn.Dispose();
+        if (Directory.Exists(_fileRoot)) Directory.Delete(_fileRoot, recursive: true);
     }
 }
 

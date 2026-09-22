@@ -1,9 +1,10 @@
-@* Phase E adds a Files section beside this one. The section heading exists from the start so that
-   addition is a second block rather than a restructuring. *@
+@using Microsoft.AspNetCore.Components.Forms
+@inject IServiceProvider Services
+
 <Menu Placement="MenuPlacement.Top">
     <Trigger>
         <Icon Name="paperclip" Size="18" />
-        <span class="sr-only">Attach a database</span>
+        <span class="sr-only">Attach a database or file</span>
     </Trigger>
     <ChildContent>
         <p class="menu-section">Databases</p>
@@ -27,6 +28,27 @@
                 </MenuItem>
             }
         }
+
+        <p class="menu-section">Files</p>
+        <InputFile class="file-input" OnChange="OnFilesSelectedAsync" multiple />
+        @if (Files.Count == 0)
+        {
+            <EmptyState Icon="paperclip"
+                        Title="No files attached"
+                        Hint="Choose up to 10 files to include with your question." />
+        }
+        else
+        {
+            <p class="file-count">@Files.Count file@(Files.Count == 1 ? "" : "s") attached</p>
+        }
+        @if (_busy)
+        {
+            <Spinner Size="14" Label="Uploading file" />
+        }
+        @foreach (var error in _errors)
+        {
+            <p class="file-error" data-error="@error.Code">@error.Code: @error.Message</p>
+        }
     </ChildContent>
 </Menu>
 
@@ -38,7 +60,84 @@
     [Parameter] public IReadOnlyList<Guid> AttachedIds { get; set; } = [];
 
     [Parameter] public EventCallback<DatabaseConnectionInfo> OnAttach { get; set; }
+    [Parameter] public IReadOnlyList<PendingFileAttachment> Files { get; set; } = [];
+    [Parameter] public EventCallback<IReadOnlyList<PendingFileAttachment>> OnFilesChanged { get; set; }
+    [Parameter] public FileStorageService? FileStorage { get; set; }
+    [Parameter] public FileStorageOptions StorageOptions { get; set; } = new();
 
     private IReadOnlyList<DatabaseConnectionInfo> Selectable =>
         Connections.Where(c => !AttachedIds.Contains(c.Id)).ToList();
+
+    private readonly List<FileError> _errors = [];
+    private bool _busy;
+
+    private async Task OnFilesSelectedAsync(InputFileChangeEventArgs args)
+    {
+        _errors.Clear();
+        var storage = FileStorage ?? Services.GetService<FileStorageService>();
+        if (storage is null)
+        {
+            _errors.Add(new("file_rejected", "Files are unavailable right now."));
+            return;
+        }
+        var remaining = StorageOptions.MaxAttachmentsPerMessage - Files.Count;
+        if (remaining <= 0)
+        {
+            _errors.Add(new("file_rejected", "The maximum number of files is already attached."));
+            return;
+        }
+
+        var selected = args.GetMultipleFiles(Math.Min(args.FileCount, remaining));
+        if (args.FileCount > remaining)
+            _errors.Add(new("file_rejected", "You can attach up to 10 files."));
+
+        _busy = true;
+        try
+        {
+            var pending = Files.ToList();
+            foreach (var file in selected)
+            {
+                if (file.Size > StorageOptions.MaxBytes)
+                {
+                    _errors.Add(new("file_too_large", "That file is larger than the 25 MiB limit."));
+                    continue;
+                }
+
+                try
+                {
+                    await using var content = file.OpenReadStream(StorageOptions.MaxBytes);
+                    var uploaded = await storage.UploadAsync(
+                        new FileUpload(file.Name, file.ContentType, content));
+                    pending.Add(uploaded);
+                    await OnFilesChanged.InvokeAsync(pending.ToList());
+                }
+                catch (FileTooLargeException)
+                {
+                    _errors.Add(new("file_too_large", "That file is larger than the 25 MiB limit."));
+                }
+                catch (FileRejectedException)
+                {
+                    _errors.Add(new("file_rejected", "That file could not be attached."));
+                }
+                catch (IOException)
+                {
+                    _errors.Add(new("file_rejected", "That file could not be attached."));
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch
+                {
+                    _errors.Add(new("file_rejected", "That file could not be attached."));
+                }
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private sealed record FileError(string Code, string Message);
 }

@@ -6,3 +6,7 @@
   text-transform: uppercase;
   letter-spacing: .04em;
 }
+
+.file-input { width: 100%; padding: var(--space-2) var(--space-3); font-size: var(--text-xs); }
+.file-count { padding: 0 var(--space-3); color: var(--text-100); font-size: var(--text-xs); }
+.file-error { padding: 0 var(--space-3); color: var(--danger-50); font-size: var(--text-xs); }

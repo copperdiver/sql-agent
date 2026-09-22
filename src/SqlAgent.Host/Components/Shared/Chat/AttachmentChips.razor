@@ -19,11 +19,58 @@
     </div>
 }
 
+@if (Files.Count > 0)
+{
+    <div class="chips file-chips">
+        @foreach (var file in Files)
+        {
+            <span class="chip file-chip pending-file" data-file="@file.FileName">
+                <Icon Name="paperclip" Size="14" />
+                <span class="chip-name truncate">@file.FileName</span>
+                <span class="file-size">@FormatSize(file.SizeBytes)</span>
+                @if (!ReadOnly)
+                {
+                    <button type="button" class="ghost chip-remove pending-file-remove"
+                            @onclick="() => OnRemoveFile.InvokeAsync(file)"
+                            aria-label="@($"Remove {file.FileName}")">
+                        <Icon Name="x" Size="12" />
+                    </button>
+                }
+            </span>
+        }
+    </div>
+}
+
+@if (ReadOnly && SentFiles.Count > 0)
+{
+    <div class="chips file-chips">
+        @foreach (var file in SentFiles)
+        {
+            <a class="chip file-chip" href="@file.Url" download="@file.FileName"
+               aria-label="Download @file.FileName">
+                <Icon Name="paperclip" Size="14" />
+                <span class="chip-name truncate">@file.FileName</span>
+                <span class="file-size">@FormatSize(file.SizeBytes)</span>
+            </a>
+        }
+    </div>
+}
+
 @code {
     [Parameter] public IReadOnlyList<ChatDatabaseRef> Databases { get; set; } = [];
     [Parameter] public EventCallback<ChatDatabaseRef> OnRemove { get; set; }
+    [Parameter] public IReadOnlyList<PendingFileAttachment> Files { get; set; } = [];
+    [Parameter] public IReadOnlyList<ChatFileRef> SentFiles { get; set; } = [];
+    [Parameter] public EventCallback<PendingFileAttachment> OnRemoveFile { get; set; }
 
     /// <summary>True for chips under a message that has already been sent. Those attachments are a
     /// record, not a choice, so they carry no remove button.</summary>
     [Parameter] public bool ReadOnly { get; set; }
+
+    private static string FormatSize(long bytes) => bytes switch
+    {
+        >= 1024 * 1024 => $"{bytes / (1024d * 1024d):0.#} MiB",
+        >= 1024 => $"{bytes / 1024d:0.#} KiB",
+        _ => $"{bytes} B",
+    };
 }

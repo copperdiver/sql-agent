@@ -5,7 +5,7 @@
     <div class="bubble">@Message.Text</div>
     @* Read-only: these attachments are what the question was actually sent with, not a choice still
        being made. *@
-    <AttachmentChips Databases="Message.Databases" ReadOnly="true" />
+    <AttachmentChips Databases="Message.Databases" SentFiles="@(Message.Files ?? [])" ReadOnly="true" />
     <div class="message-actions">
         <button type="button" class="ghost" data-testid="user-copy" @onclick="CopyAsync">Copy</button>
         <button type="button" class="ghost" data-testid="user-edit" @onclick="() => OnEdit.InvokeAsync(Message.Text)">Edit</button>

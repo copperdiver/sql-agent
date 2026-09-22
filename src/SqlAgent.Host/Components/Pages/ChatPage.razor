@@ -5,6 +5,7 @@
 @inject AppState State
 @inject NavigationManager Nav
 @inject DialogService Dialogs
+@inject IServiceProvider Services
 
 <div class="chat">
     @if (_messages.Count == 0)
@@ -27,11 +28,14 @@
         <Composer @ref="_composer"
                   Value="@_question" ValueChanged="v => _question = v"
                   Attached="_attached" OnRemoveAttachment="Detach"
+                  Files="_pendingFiles" OnRemoveFile="RemoveFileAsync"
                   Busy="_busy" OnSend="SendAsync" OnStop="Stop">
             <Tools>
                 <AttachmentMenu Connections="_connections"
                                 AttachedIds="@(_attached.Select(a => a.ConnectionId!.Value).ToList())"
-                                OnAttach="Attach" />
+                                OnAttach="Attach" Files="_pendingFiles"
+                                FileStorage="FileStorage" StorageOptions="StorageOptions"
+                                OnFilesChanged="OnFilesChanged" />
                 <button type="button" class="ghost" data-testid="chat-explain-schema"
                         @onclick="ExplainSchemaAsync">Explain schema</button>
                 <button type="button" class="ghost" data-testid="chat-open-scratchpad"
@@ -80,6 +84,7 @@
     private readonly Dictionary<Guid, DatabaseSchema> _diagrams = [];
     private readonly Dictionary<Guid, string> _diagramConnectionNames = [];
     private readonly List<ChatDatabaseRef> _attached = [];
+    private readonly List<PendingFileAttachment> _pendingFiles = [];
     private IReadOnlyList<DatabaseConnectionInfo> _connections = [];
     private Composer? _composer;
     private string _question = "";
@@ -89,6 +94,9 @@
     private string _scratchpadSql = "";
     private CancellationTokenSource? _cts;
     private bool _disposed;
+
+    private FileStorageService? FileStorage => Services.GetService<FileStorageService>();
+    private FileStorageOptions StorageOptions => Services.GetService<FileStorageOptions>() ?? new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -119,6 +127,7 @@
         _diagramConnectionNames.Clear();
         // Attachments are per-conversation, not per-circuit: carrying prod's chips into a brand-new chat
         // (or someone else's, reached via history) would send them somewhere the user never attached them.
+        await CleanupPendingFilesAsync();
         _attached.Clear();
         if (Id is { } id)
         {
@@ -176,6 +185,18 @@
     private void Detach(ChatDatabaseRef database) =>
         _attached.RemoveAll(a => a.ConnectionId == database.ConnectionId);
 
+    private void OnFilesChanged(IReadOnlyList<PendingFileAttachment> files)
+    {
+        _pendingFiles.Clear();
+        _pendingFiles.AddRange(files);
+    }
+
+    private async Task RemoveFileAsync(PendingFileAttachment file)
+    {
+        if (!_pendingFiles.Remove(file)) return;
+        if (FileStorage is { } storage) await storage.DeletePendingAsync(file);
+    }
+
     private async Task PrefillAsync(string suggestion)
     {
         _question = suggestion;
@@ -199,6 +220,7 @@
         var question = _question;
         _question = "";
         var databaseIds = _attached.Select(a => a.ConnectionId!.Value).ToList();
+        var files = _pendingFiles.ToList();
         // Captured up front: this component instance is reused across "/" and "/chat/{Id}" (that reuse is
         // why OnParametersSetAsync's guard exists), so _loadedChatId can change under us while the send
         // below is in flight — the user opens a stored chat, or leaves for /sql entirely. Comparing the
@@ -210,7 +232,11 @@
         try
         {
             var turn = await Runner.RunAsync<ChatTurnService, ChatTurnResult>(
-                s => s.SendAsync(startedIn, question, databaseIds, _cts.Token));
+                s => s.SendAsync(startedIn, question, databaseIds, files, _cts.Token));
+
+            // Uploads are pending storage only until the user message reaches the store. Remove just
+            // the batch this turn persisted, preserving any files selected while the send was in flight.
+            foreach (var file in files) _pendingFiles.Remove(file);
 
             // Raised before the drop check below, and unconditionally: the chat this turn created or
             // continued is on disk either way (ChatTurnService's job, not this method's), even when the
@@ -418,5 +444,20 @@
         // in-flight call instead of it running to completion in the background against a disposed page.
         _cts?.Cancel();
         State.ConnectionsChanged -= OnConnectionsChanged;
+        _ = CleanupPendingFilesAsync();
+    }
+
+    private async Task CleanupPendingFilesAsync()
+    {
+        if (_pendingFiles.Count == 0) return;
+        var files = _pendingFiles.ToList();
+        _pendingFiles.Clear();
+        var storage = FileStorage;
+        if (storage is null) return;
+        foreach (var file in files)
+        {
+            try { await storage.DeletePendingAsync(file); }
+            catch { /* best effort during route/disposal teardown */ }
+        }
     }
 }
