@@ -21,7 +21,12 @@ public class QueryExecutionService(
 {
     private readonly QueryExecutionOptions _options = options ?? QueryExecutionOptions.Default;
 
-    public async Task<QueryExecutionResult> ExecuteSqlAsync(Guid connectionId, string sql, CancellationToken ct = default)
+    public Task<QueryExecutionResult> ExecuteSqlAsync(
+        Guid connectionId, string sql, CancellationToken ct = default)
+        => ExecuteSqlAsync(connectionId, sql, confirmed: false, ct);
+
+    public async Task<QueryExecutionResult> ExecuteSqlAsync(
+        Guid connectionId, string sql, bool confirmed, CancellationToken ct = default)
     {
         var info = await connections.GetAsync(connectionId, ct);
         if (info is null)
@@ -48,12 +53,19 @@ public class QueryExecutionService(
             return QueryExecutionResult.Failure(sql, "schema_unavailable", msg);
         }
 
-        var decision = SqlPolicyValidator.Validate(sql, info.ProviderType, info.IsReadOnly, resolve);
+        var decision = SqlPolicyValidator.Validate(
+            sql, info.ProviderType, info.IsReadOnly, resolve, info.AllowedDdl, confirmed);
 
         if (!decision.Allowed)
         {
             await AuditAsync(connectionId, sql, decision.NormalizedSql, "deny", decision.Reason, null, null);
-            return QueryExecutionResult.Failure(sql, decision.DenyCode!, decision.Reason!);
+            return QueryExecutionResult.Failure(
+                sql,
+                decision.DenyCode!,
+                decision.Reason!,
+                operation: decision.DdlOperation == DdlOperation.Unsupported
+                    ? null
+                    : decision.DdlOperation);
         }
 
         var provider = providers.Get(info.ProviderType);

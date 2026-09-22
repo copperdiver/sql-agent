@@ -1,4 +1,5 @@
 using System.Data.Common;
+using SqlAgent.Core.Policy;
 
 namespace SqlAgent.Core;
 
@@ -36,14 +37,20 @@ public record QueryExecutionResult(
     IReadOnlyList<IReadOnlyList<object?>> Rows,
     int RowCount,
     bool Truncated,
-    long ElapsedMs)
+    long ElapsedMs,
+    DdlOperation? Operation = null)
 {
     public static QueryExecutionResult Ok(
         string sql, QueryResultSet set, long elapsedMs)
         => new(sql, true, null, null, set.Columns, set.Rows, set.Rows.Count, set.Truncated, elapsedMs);
 
-    public static QueryExecutionResult Failure(string sql, string errorCode, string message, long elapsedMs = 0)
-        => new(sql, false, errorCode, message, [], [], 0, false, elapsedMs);
+    public static QueryExecutionResult Failure(
+        string sql,
+        string errorCode,
+        string message,
+        long elapsedMs = 0,
+        DdlOperation? operation = null)
+        => new(sql, false, errorCode, message, [], [], 0, false, elapsedMs, operation);
 }
 
 /// <summary>

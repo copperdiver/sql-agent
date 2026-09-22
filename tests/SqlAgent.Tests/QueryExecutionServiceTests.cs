@@ -2,6 +2,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using SqlAgent.Core;
+using SqlAgent.Core.Policy;
 using SqlAgent.Storage;
 
 namespace SqlAgent.Tests;
@@ -75,11 +76,13 @@ public class QueryExecutionServiceTests
         SqlAgentDbContext db,
         IDatabaseProvider provider,
         bool isReadOnly = true,
-        QueryExecutionOptions? options = null)
+        QueryExecutionOptions? options = null,
+        AllowedDdl allowedDdl = AllowedDdl.None)
     {
         var connections = new DatabaseConnectionService(db, new InMemorySecretStore());
         var created = await connections.CreateAsync(
             new DatabaseConnectionInput("c", provider.ProviderType, isReadOnly), "conn-string");
+        await connections.SetAllowedDdlAsync(created.Id, allowedDdl);
         var registry = new DatabaseProviderRegistry([provider]);
         var schemas = new SchemaService(connections, registry, db);
         var svc = new QueryExecutionService(
@@ -124,6 +127,69 @@ public class QueryExecutionServiceTests
         Assert.Equal("policy_denied_readonly_object", r.ErrorCode);
         Assert.False(provider.WasCalled);
         Assert.Equal("deny", Assert.Single(await AuditAsync(db)).Decision);
+        conn.Dispose();
+    }
+
+    [Fact]
+    public async Task A_permitted_drop_without_confirmation_is_denied_and_never_executes()
+    {
+        var (db, conn) = NewStore();
+        var provider = new ExecFakeProvider(DatabaseProviderType.Postgres, schema: OrdersAndSummary());
+        var (svc, connId) = await SetupAsync(
+            db, provider, isReadOnly: false, allowedDdl: AllowedDdl.DropTable);
+
+        var r = await svc.ExecuteSqlAsync(connId, "DROP TABLE orders", confirmed: false);
+
+        Assert.False(r.Success);
+        Assert.Equal("ddl_confirmation_required", r.ErrorCode);
+        Assert.Equal(DdlOperation.DropTable, r.Operation);
+        Assert.False(provider.WasCalled);
+        conn.Dispose();
+    }
+
+    [Fact]
+    public async Task A_permitted_drop_with_confirmation_reaches_the_provider()
+    {
+        var (db, conn) = NewStore();
+        var provider = new ExecFakeProvider(DatabaseProviderType.Postgres, schema: OrdersAndSummary());
+        var (svc, connId) = await SetupAsync(
+            db, provider, isReadOnly: false, allowedDdl: AllowedDdl.DropTable);
+
+        var r = await svc.ExecuteSqlAsync(connId, "DROP TABLE orders", confirmed: true);
+
+        Assert.True(r.Success);
+        Assert.True(provider.WasCalled);
+        conn.Dispose();
+    }
+
+    [Fact]
+    public async Task A_drop_without_permission_is_denied_even_when_confirmed()
+    {
+        var (db, conn) = NewStore();
+        var provider = new ExecFakeProvider(DatabaseProviderType.Postgres, schema: OrdersAndSummary());
+        var (svc, connId) = await SetupAsync(db, provider, isReadOnly: false);
+
+        var r = await svc.ExecuteSqlAsync(connId, "DROP TABLE orders", confirmed: true);
+
+        Assert.False(r.Success);
+        Assert.Equal("policy_denied_ddl", r.ErrorCode);
+        Assert.False(provider.WasCalled);
+        conn.Dispose();
+    }
+
+    [Fact]
+    public async Task An_unconfirmed_dml_is_denied_and_confirmed_dml_executes()
+    {
+        var (db, conn) = NewStore();
+        var provider = new ExecFakeProvider(DatabaseProviderType.Postgres, schema: OrdersAndSummary());
+        var (svc, connId) = await SetupAsync(db, provider, isReadOnly: false);
+
+        var refused = await svc.ExecuteSqlAsync(connId, "UPDATE orders SET total = 0", confirmed: false);
+        var executed = await svc.ExecuteSqlAsync(connId, "UPDATE orders SET total = 0", confirmed: true);
+
+        Assert.Equal("ddl_confirmation_required", refused.ErrorCode);
+        Assert.True(executed.Success);
+        Assert.True(provider.WasCalled);
         conn.Dispose();
     }
 
@@ -190,7 +256,8 @@ public class QueryExecutionServiceTests
         var (svc, connId) = await SetupAsync(db, provider, isReadOnly: false);
         await SetLevelAsync(db, connId, "staging_orders", visible: true, write: false);
 
-        var r = await svc.ExecuteSqlAsync(connId, "INSERT INTO orders (id) SELECT id FROM staging_orders");
+        var r = await svc.ExecuteSqlAsync(
+            connId, "INSERT INTO orders (id) SELECT id FROM staging_orders", confirmed: true);
 
         Assert.True(r.Success);
         Assert.True(provider.WasCalled);
@@ -252,7 +319,8 @@ public class QueryExecutionServiceTests
         var provider = new ExecFakeProvider(DatabaseProviderType.Postgres, schema: OrdersAndSummary());
         var (svc, connId) = await SetupAsync(db, provider, isReadOnly: false);
 
-        var r = await svc.ExecuteSqlAsync(connId, "DELETE FROM orders WHERE id = 1");
+        var r = await svc.ExecuteSqlAsync(
+            connId, "DELETE FROM orders WHERE id = 1", confirmed: true);
 
         Assert.True(r.Success);
         conn.Dispose();

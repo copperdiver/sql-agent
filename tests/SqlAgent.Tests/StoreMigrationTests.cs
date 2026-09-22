@@ -514,35 +514,27 @@ public class StoreMigrationTests : IDisposable
 
             connectionId = Guid.NewGuid();
             policyId = Guid.NewGuid();
-            seed.DatabaseConnections.Add(new DatabaseConnection
-            {
-                Id = connectionId,
-                Name = "prod",
-                ProviderType = DatabaseProviderType.Postgres,
-                ConnectionStringSecretRef = "db:abc",
-                IsReadOnly = false,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow,
-            });
-            seed.TablePolicies.Add(new TablePolicy
-            {
-                Id = policyId,
-                DatabaseConnectionId = connectionId,
-                SchemaName = "dbo",
-                TableName = "secrets",
-                IsVisible = false,
-                CanRead = true,
-                CanWrite = false,
-            });
-            seed.SchemaCaches.Add(new SchemaCache
-            {
-                Id = Guid.NewGuid(),
-                DatabaseConnectionId = connectionId,
-                SchemaHash = "stale",
-                FilteredSchemaJson = """{"tables":[{"schema":"dbo","name":"orders","columns":[]}]}""",
-                GeneratedAt = DateTime.UtcNow,
-            });
-            await seed.SaveChangesAsync();
+            await seed.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO DatabaseConnections
+                    (Id, Name, ProviderType, ConnectionStringSecretRef, IsReadOnly, CreatedAt, UpdatedAt)
+                VALUES
+                    ({connectionId}, {"prod"}, {(int)DatabaseProviderType.Postgres}, {"db:abc"}, {false},
+                     {DateTime.UtcNow}, {DateTime.UtcNow})
+                """);
+            await seed.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO TablePolicies
+                    (Id, DatabaseConnectionId, SchemaName, TableName, IsVisible, CanRead, CanWrite)
+                VALUES
+                    ({policyId}, {connectionId}, {"dbo"}, {"secrets"}, {false}, {true}, {false})
+                """);
+            await seed.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO SchemaCaches
+                    (Id, DatabaseConnectionId, SchemaHash, FilteredSchemaJson, GeneratedAt)
+                VALUES
+                    ({Guid.NewGuid()}, {connectionId}, {"stale"},
+                     {"""{"tables":[{"schema":"dbo","name":"orders","columns":[]}]"""},
+                     {DateTime.UtcNow})
+                """);
         }
         SqliteConnection.ClearAllPools();
 

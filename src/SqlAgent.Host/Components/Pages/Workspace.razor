@@ -138,7 +138,7 @@ else
             // ExecuteSqlAsync validates policy, enforces the timeout and row cap, and writes the audit
             // row itself. Cancelling here surfaces as execution_canceled, distinct from execution_timeout.
             _result = await Runner.RunAsync<QueryExecutionService, QueryExecutionResult>(
-                s => s.ExecuteSqlAsync(id, _sql, _cts.Token));
+                s => s.ExecuteSqlAsync(id, _sql, confirmed: true, ct: _cts.Token));
         }
         finally
         {
