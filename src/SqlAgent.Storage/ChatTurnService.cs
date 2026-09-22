@@ -12,6 +12,7 @@ public record ChatTurnResult(
     Guid ChatId, ChatMessageView UserMessage, ChatMessageView AssistantMessage, NlQueryResult? Live);
 
 public record ChatConfirmationResult(ChatMessageView Message, NlQueryResult Live);
+public record ChatRegenerationResult(ChatMessageView Message, NlQueryResult? Live);
 
 public record ChatDiagramResult(Guid ChatId, ChatMessageView Message, DatabaseSchema Schema, Guid ConnectionId);
 
@@ -175,6 +176,19 @@ public class ChatTurnService(
             : NlQueryResult.Error(result.ErrorCode ?? "execution_error",
                 result.ErrorMessage ?? "The statement could not be executed.", result.Sql, result.ElapsedMs);
         return new ChatConfirmationResult(message, live);
+    }
+
+    public async Task<ChatRegenerationResult> RegenerateAsync(
+        Guid assistantMessageId, CancellationToken ct = default)
+    {
+        var target = await chats.GetRegenerationTargetAsync(assistantMessageId, ct)
+            ?? throw new InvalidOperationException("The answer cannot be regenerated without one database.");
+        var result = await nlQueries.AskAsync(target.ConnectionId, target.Question, ct);
+        var message = await chats.ReplaceOutcomeAsync(
+            target.MessageId, FromResult(target.ChatId, result), CancellationToken.None)
+            ?? throw new InvalidOperationException("The answer no longer exists.");
+        var live = result.Kind == NlResponseKind.QueryResult ? result : null;
+        return new ChatRegenerationResult(message, live);
     }
 
     /// <summary>Creates a transcript outcome whose schema is intentionally live data. Only the

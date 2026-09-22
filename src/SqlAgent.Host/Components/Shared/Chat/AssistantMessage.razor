@@ -1,4 +1,18 @@
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
+
 <div class="message assistant-message">
+    <div class="assistant-head">
+        <span class="agent-label">SQL Agent</span>
+        <div class="message-actions">
+            <button type="button" class="ghost" data-testid="assistant-copy" @onclick="CopyAsync">Copy</button>
+            @if (OnRegenerate.HasDelegate && Message.OutcomeKind != ChatOutcomeKind.SchemaDiagram)
+            {
+                <button type="button" class="ghost" data-testid="assistant-regenerate"
+                        @onclick="() => OnRegenerate.InvokeAsync(Message)">Regenerate</button>
+            }
+        </div>
+    </div>
     @if (Message.OutcomeKind == ChatOutcomeKind.SchemaDiagram)
     {
         @if (Diagram is { } schema)
@@ -36,12 +50,16 @@
     [Parameter] public EventCallback<string> OnOpenInEditor { get; set; }
     [Parameter] public EventCallback<string> OnEdit { get; set; }
     [Parameter] public EventCallback<ChatMessageView> OnConfirm { get; set; }
+    [Parameter] public EventCallback<ChatMessageView> OnRegenerate { get; set; }
     [Parameter] public DatabaseSchema? Diagram { get; set; }
     [Parameter] public string? DiagramConnectionName { get; set; }
     [Parameter] public EventCallback OnRefreshDiagram { get; set; }
     [Parameter] public DatabaseProviderType ProviderType { get; set; }
 
     private NlQueryResult? Outcome => Live ?? Restore(Message);
+
+    private Task CopyAsync() => JS.InvokeVoidAsync(
+        "navigator.clipboard.writeText", Message.GeneratedSql ?? Message.Text).AsTask();
 
     /// <summary>
     /// Rebuilds the outcome shape ChatOutcome renders from what the store keeps. Columns and rows are

@@ -48,6 +48,7 @@ public record ChatMessageInput(
 
 /// <summary>All information needed to confirm one pending assistant message.</summary>
 public record ChatConfirmationTarget(Guid MessageId, Guid ChatId, string Sql, Guid ConnectionId);
+public record ChatRegenerationTarget(Guid MessageId, Guid ChatId, string Question, Guid ConnectionId);
 
 /// <summary>
 /// The chat store: history, one conversation, and appends. Orchestrating a turn — deciding what to do
@@ -135,6 +136,43 @@ public class ChatService(SqlAgentDbContext db)
         message.RowCount = result.Success ? result.RowCount : 0;
         message.ElapsedMs = result.ElapsedMs;
         message.Truncated = result.Truncated;
+        await db.SaveChangesAsync(ct);
+        return ToView(message);
+    }
+
+    public async Task<ChatRegenerationTarget?> GetRegenerationTargetAsync(
+        Guid assistantMessageId, CancellationToken ct = default)
+    {
+        var assistant = await db.ChatMessages.AsNoTracking()
+            .FirstOrDefaultAsync(m => m.Id == assistantMessageId && m.Role == ChatRole.Assistant, ct);
+        if (assistant is null) return null;
+
+        var user = await db.ChatMessages.AsNoTracking().Include(m => m.Databases)
+            .Where(m => m.ChatId == assistant.ChatId && m.Role == ChatRole.User
+                        && m.Sequence < assistant.Sequence)
+            .OrderByDescending(m => m.Sequence).FirstOrDefaultAsync(ct);
+        var ids = user?.Databases.Select(d => d.DatabaseConnectionId).Where(id => id is not null)
+            .Select(id => id!.Value).Distinct().ToList() ?? [];
+        return ids.Count == 1
+            ? new ChatRegenerationTarget(assistant.Id, assistant.ChatId, user!.Text, ids[0])
+            : null;
+    }
+
+    public async Task<ChatMessageView?> ReplaceOutcomeAsync(
+        Guid assistantMessageId, ChatMessageInput input, CancellationToken ct = default)
+    {
+        var message = await db.ChatMessages.FirstOrDefaultAsync(
+            m => m.Id == assistantMessageId && m.ChatId == input.ChatId && m.Role == ChatRole.Assistant, ct);
+        if (message is null) return null;
+        message.Text = input.Text;
+        message.GeneratedSql = input.GeneratedSql;
+        message.OutcomeKind = input.OutcomeKind;
+        message.ErrorCode = input.ErrorCode;
+        message.ConfirmationOperation = input.ConfirmationOperation;
+        message.SchemaDiagramConnectionId = input.SchemaDiagramConnectionId;
+        message.RowCount = input.RowCount;
+        message.ElapsedMs = input.ElapsedMs;
+        message.Truncated = input.Truncated;
         await db.SaveChangesAsync(ct);
         return ToView(message);
     }

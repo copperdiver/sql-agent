@@ -181,10 +181,10 @@ The stable refusal codes are:
 - `ddl_confirmation_required` — a write or permitted DDL statement reached an unconfirmed surface.
 
 The `/sql` page is the confirmed surface: a typed statement runs with confirmation when the user
-presses Run. Chat's natural-language path and MCP `query_database` intentionally remain unconfirmed
-in this phase. They return `ddl_confirmation_required` with the generated/requested SQL and do not
-call the database provider. The Chat transcript keeps that stable outcome; a confirmation dialog for
-it belongs to Phase D.
+presses Run. Chat's natural-language path and MCP `query_database` remain unconfirmed at the service
+boundary. Chat persists `ddl_confirmation_required` with the generated SQL, and the Phase D chat dialog
+confirms it by calling the same `QueryExecutionService` with `confirmed: true`; MCP still returns the
+stable refusal without executing.
 
 ## Provider fixtures
 

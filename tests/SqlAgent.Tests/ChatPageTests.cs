@@ -256,6 +256,27 @@ public class ChatPageTests : IDisposable
     }
 
     [Fact]
+    public async Task Regenerate_replaces_the_assistant_answer_in_place()
+    {
+        await AddConnectionAsync("prod");
+        _gateway.NextResponse = LlmSqlResponse.Generated("SELECT 1");
+        _provider.NextResult = new QueryResultSet(["value"], [new object?[] { 1 }], false);
+        var page = _ctx.RenderComponent<ChatPage>();
+        await AttachAsync(page, "prod");
+        Type(page, "orders");
+        await ClickAsync(page.Find("[data-testid=send]"));
+
+        _gateway.NextResponse = LlmSqlResponse.Generated("SELECT 2");
+        _provider.NextResult = new QueryResultSet(["value"], [new object?[] { 2 }], false);
+        await ClickAsync(page.Find("[data-testid=assistant-regenerate]"));
+
+        Assert.Contains("SELECT 2", page.Markup);
+        Assert.DoesNotContain("SELECT 1", page.Markup);
+        var chat = Assert.Single(await ListChatsAsync());
+        Assert.Equal(2, (await LoadAsync(chat.Id))!.Messages.Count);
+    }
+
+    [Fact]
     public async Task A_pending_model_write_shows_a_confirmation_action_and_confirming_replaces_it_in_place()
     {
         await AddConnectionAsync("prod", readOnly: false);

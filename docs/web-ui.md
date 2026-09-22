@@ -356,6 +356,12 @@ files under `wwwroot/js/`:
 | Run a query returning more than 1000 rows | Truncation notice appears |
 | Export CSV, then JSON | Both files download and open cleanly |
 | Ask a question in Chat | "LLM is not configured" explanation, not a raw code |
+| Use Chat Tools → Explain schema | The composer is prefilled without sending; the model state says "No model configured" until a provider exists |
+| Use Chat Tools → Open scratchpad, or Edit on a SQL block | The SQL opens in CodeMirror; Run uses the same policy/audit boundary as `/sql` |
+| Ask Chat for a write/DDL statement | The pending SQL survives reload and executes only after the confirmation dialog |
+| Click Chat Tools → Schema diagram with one database attached | A policy-filtered ER diagram renders; zoom, fit, refresh, and SVG download work |
+| Hide a table, then create/reload a schema diagram | The hidden table and its relationships are absent |
+| Copy/edit a user message; copy/regenerate an assistant answer | Clipboard/edit actions work; regenerate replaces the existing answer rather than appending one |
 | Start a slow query, press Cancel | `execution_canceled` |
 | Set theme to Dark, reload | Page is dark on first paint — no white flash |
 | Set theme to System, switch the OS between light and dark | Page follows the OS without a reload |
@@ -403,11 +409,8 @@ says by which phase, rather than being deleted now that it's stale:
   data are extracted and still reach the LLM — they are just never rendered for a person to read —
   so adding that detail later is still a rendering change, not a data change, and it is still not
   scheduled.
-- **Copy SQL.** The spec listed copy-SQL alongside export CSV/JSON on the SQL page. There is no such
-  button: the editor holds the text and the browser's own selection and clipboard already do the
-  job, whereas a copy button needs clipboard interop and a permissions story of its own. The chat
-  page's "open in editor" covers the one case where the SQL is somewhere the user cannot easily
-  select it.
+- **Copy SQL on `/sql`.** The editor remains the source of truth and does not duplicate a copy action;
+  chat SQL blocks and assistant messages expose browser clipboard actions.
 
 ## Out of scope (tracked for later phases)
 

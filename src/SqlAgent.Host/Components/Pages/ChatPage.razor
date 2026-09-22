@@ -18,7 +18,8 @@
     {
         <MessageList Messages="_messages" Live="_live" Providers="_providers"
                      Diagrams="_diagrams" DiagramConnectionNames="_diagramConnectionNames"
-                     OnOpenInEditor="OpenInEditor" OnEdit="OpenScratchpad"
+                     OnOpenInEditor="OpenInEditor" OnEdit="OpenScratchpad" OnEditUser="EditUser"
+                     OnRegenerate="RegenerateAsync"
                      OnConfirm="RequestConfirmation" OnRefreshDiagram="RefreshDiagramAsync" />
     }
 
@@ -31,11 +32,14 @@
                 <AttachmentMenu Connections="_connections"
                                 AttachedIds="@(_attached.Select(a => a.ConnectionId!.Value).ToList())"
                                 OnAttach="Attach" />
+                <button type="button" class="ghost" data-testid="chat-explain-schema"
+                        @onclick="ExplainSchemaAsync">Explain schema</button>
                 <button type="button" class="ghost" data-testid="chat-open-scratchpad"
                         @onclick="OpenEmptyScratchpad">Scratchpad</button>
                 <button type="button" class="ghost" data-testid="chat-open-diagram"
                         @onclick="OpenSchemaDiagramAsync"
                         disabled="@(_attached.All(a => a.ConnectionId is null))">Schema diagram</button>
+                <span class="model-state" data-testid="chat-model-state">No model configured</span>
             </Tools>
         </Composer>
 
@@ -178,6 +182,14 @@
         if (_composer is not null) await _composer.FocusAsync();
     }
 
+    private Task ExplainSchemaAsync() => PrefillAsync("Explain this schema");
+
+    private async Task EditUser(string text)
+    {
+        _question = text;
+        if (_composer is not null) await _composer.FocusAsync();
+    }
+
     private async Task SendAsync()
     {
         // Mirrors the SQL page's guard, and for the same reason: Enter is a second entry point that does
@@ -261,6 +273,29 @@
     }
 
     private void Stop() => _cts?.Cancel();
+
+    private async Task RegenerateAsync(ChatMessageView message)
+    {
+        if (_busy) return;
+        _busy = true;
+        _cts = new CancellationTokenSource();
+        try
+        {
+            var regenerated = await Runner.RunAsync<ChatTurnService, ChatRegenerationResult>(
+                s => s.RegenerateAsync(message.Id, _cts.Token));
+            var index = _messages.FindIndex(m => m.Id == message.Id);
+            if (index >= 0) _messages[index] = regenerated.Message;
+            _live.Remove(message.Id);
+            if (regenerated.Live is { } live) _live[message.Id] = live;
+        }
+        catch (OperationCanceledException) { }
+        finally
+        {
+            _busy = false;
+            _cts.Dispose();
+            _cts = null;
+        }
+    }
 
     private void OpenInEditor(string sql)
     {

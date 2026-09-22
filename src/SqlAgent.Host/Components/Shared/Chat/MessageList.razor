@@ -3,7 +3,7 @@
     {
         @if (message.Role == ChatRole.User)
         {
-            <UserMessage @key="message.Id" Message="message" />
+            <UserMessage @key="message.Id" Message="message" OnEdit="OnEditUser" />
         }
         else
         {
@@ -14,6 +14,7 @@
                               OnOpenInEditor="OnOpenInEditor"
                               OnEdit="OnEdit"
                               OnConfirm="OnConfirm"
+                              OnRegenerate="OnRegenerate"
                               Diagram="@(Diagrams.TryGetValue(message.Id, out var diagram) ? diagram : null)"
                               DiagramConnectionName="@(DiagramConnectionNames.TryGetValue(message.Id, out var name) ? name : null)"
                               OnRefreshDiagram="() => OnRefreshDiagram.InvokeAsync(message)"
@@ -31,6 +32,8 @@
 
     [Parameter] public EventCallback<string> OnOpenInEditor { get; set; }
     [Parameter] public EventCallback<string> OnEdit { get; set; }
+    [Parameter] public EventCallback<string> OnEditUser { get; set; }
+    [Parameter] public EventCallback<ChatMessageView> OnRegenerate { get; set; }
     [Parameter] public EventCallback<ChatMessageView> OnConfirm { get; set; }
     [Parameter] public EventCallback<ChatMessageView> OnRefreshDiagram { get; set; }
     [Parameter] public IReadOnlyDictionary<Guid, DatabaseProviderType> Providers { get; set; } =

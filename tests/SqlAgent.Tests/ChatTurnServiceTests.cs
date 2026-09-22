@@ -153,6 +153,25 @@ public class ChatTurnServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Regenerating_replaces_the_existing_assistant_outcome_without_appending_messages()
+    {
+        var id = await NewConnectionAsync("prod");
+        _gateway.NextResponse = LlmSqlResponse.Generated("SELECT 1");
+        _provider.NextResult = new QueryResultSet(["value"], [new object?[] { 1 }], false);
+        var turn = await _turns.SendAsync(null, "orders", [id]);
+
+        _gateway.NextResponse = LlmSqlResponse.Generated("SELECT 2");
+        _provider.NextResult = new QueryResultSet(["value"], [new object?[] { 2 }], false);
+        var regenerated = await _turns.RegenerateAsync(turn.AssistantMessage.Id);
+
+        Assert.Equal(turn.AssistantMessage.Id, regenerated.Message.Id);
+        Assert.Equal("SELECT 2", regenerated.Message.GeneratedSql);
+        var detail = await _chats.GetChatAsync(turn.ChatId);
+        Assert.Equal(2, detail!.Messages.Count);
+        Assert.Equal("SELECT 2", detail.Messages[1].GeneratedSql);
+    }
+
+    [Fact]
     public async Task A_schema_diagram_persists_only_the_connection_and_uses_visible_schema()
     {
         var id = await NewConnectionAsync("prod");

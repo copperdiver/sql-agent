@@ -7,3 +7,5 @@
   color: var(--title-50);
   white-space: pre-wrap;
 }
+.user-message { position: relative; }
+.message-actions { display: flex; justify-content: flex-end; gap: 4px; opacity: .82; }

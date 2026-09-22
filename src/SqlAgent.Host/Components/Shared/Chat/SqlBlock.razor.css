@@ -5,6 +5,7 @@
 .sql-block-spacer { flex: 1; }
 .sql-code { margin: 0; padding: var(--space-3); overflow-x: auto; background: var(--background-50); }
 .sql-warning { padding: var(--space-2) var(--space-3); background: var(--warning-soft-100); color: var(--warning-50); }
+.clarification { padding: var(--space-3); color: var(--text-50); }
 :global(.sql-keyword) { color: var(--accent-50); font-weight: 600; }
 :global(.sql-string) { color: var(--success-50); }
 :global(.sql-number) { color: var(--warning-50); }

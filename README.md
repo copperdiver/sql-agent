@@ -32,8 +32,9 @@ startup, fixture, and troubleshooting notes are in `docs/runbook.md`.
 
 Database configuration includes per-object visibility/access controls and a Structure permissions
 panel for the six supported DDL operations. The switches default off and are saved per connection.
-Typed SQL from `/sql` is the confirmed execution surface; Chat-generated writes and MCP
-`query_database` calls fail closed with `ddl_confirmation_required` until the Phase D confirmation UI.
+Typed SQL from `/sql` is the confirmed execution surface. Chat-generated writes persist a pending
+confirmation and execute only through the Phase D dialog; MCP `query_database` calls still fail closed
+with `ddl_confirmation_required`.
 
 Setting `SqlAgent__LocalAuth__Token` on the host pins the web UI's launch token to a fixed
 value and is shared with the MCP server, which clients present through `SQLAGENT_AUTH_TOKEN`.
