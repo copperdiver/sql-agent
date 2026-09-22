@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using SqlAgent.Core;
 using SqlAgent.Host.Components.Shared.Chat;
 using SqlAgent.Host.Components.Shared.Ui;
 using SqlAgent.Host.Web;
@@ -26,6 +27,11 @@ public class SearchDialogTests : IDisposable
         _ctx.Services.AddScoped<ScopedRunner>();
         _ctx.Services.AddScoped<AppState>();
         _ctx.Services.AddScoped<ShortcutService>();
+        // Only the database-hit navigation test needs these; every other test seeds through ChatService or
+        // ProjectService instead. Registered here anyway, matching the rest of the suite's pattern, since a
+        // scoped ISecretStore would lose whatever an earlier scope wrote the moment that scope disposed.
+        _ctx.Services.AddSingleton<ISecretStore, InMemorySecretStore>();
+        _ctx.Services.AddScoped<DatabaseConnectionService>();
         _ctx.JSInterop.Mode = JSRuntimeMode.Loose;
 
         using var scope = _ctx.Services.CreateScope();
@@ -157,6 +163,33 @@ public class SearchDialogTests : IDisposable
         await dialog.FindAll("[data-testid=search-hit]").First().ClickAsync(new MouseEventArgs());
 
         Assert.Equal(projectId, _ctx.Services.GetRequiredService<AppState>().ProjectToExpand);
+    }
+
+    [Fact]
+    public async Task Opening_a_database_hit_navigates_to_its_config_page()
+    {
+        // The old destination, /connections, is gone along with the page it named -- Task 15 retired both
+        // the schema rail and that page in favor of /database/{id}, and a database hit's TargetId already
+        // carries the connection id (SearchService.cs), so the navigation can go straight to the row rather
+        // than to a list the user would have to search again.
+        var id = await SeedConnectionAsync("warehouse");
+        var dialog = _ctx.RenderComponent<SearchDialog>();
+        dialog.Find("input").Input("warehouse");
+        await WaitForHitsAsync(dialog);
+
+        await dialog.FindAll("[data-testid=search-hit]").First().ClickAsync(new MouseEventArgs());
+
+        Assert.EndsWith($"/database/{id}",
+            _ctx.Services.GetRequiredService<FakeNavigationManager>().Uri, StringComparison.Ordinal);
+    }
+
+    private async Task<Guid> SeedConnectionAsync(string name)
+    {
+        using var scope = _ctx.Services.CreateScope();
+        var connections = scope.ServiceProvider.GetRequiredService<DatabaseConnectionService>();
+        var created = await connections.CreateAsync(
+            new DatabaseConnectionInput(name, DatabaseProviderType.Postgres, true), "cs");
+        return created.Id;
     }
 
     private async Task SeedChatAsync(string title, string body)

@@ -1,15 +1,17 @@
 using System.Text;
 using SqlAgent.Core;
+using SqlAgent.Core.Policy;
 
 namespace SqlAgent.Storage;
 
 /// <summary>Which of the three ask_database outcomes (CD-51 Story 1.4) a result carries.</summary>
-public enum NlResponseKind { QueryResult, ClarificationRequired, Error }
+public enum NlResponseKind { QueryResult, ClarificationRequired, ConfirmationRequired, Error }
 
 /// <summary>
 /// The ask_database contract: exactly one outcome per result. A <see cref="NlResponseKind.QueryResult"/>
 /// carries the generated SQL plus the executed result set; <see cref="NlResponseKind.ClarificationRequired"/>
-/// carries only a clarifying question (no SQL ran); <see cref="NlResponseKind.Error"/> carries a stable
+/// carries only a clarifying question (no SQL ran); <see cref="NlResponseKind.ConfirmationRequired"/>
+/// carries generated SQL that passed policy but needs an explicit confirmation; <see cref="NlResponseKind.Error"/> carries a stable
 /// <see cref="ErrorCode"/> and a user-safe message (never a stack trace), and still echoes the generated SQL
 /// when one existed so the user can audit what was rejected.
 /// </summary>
@@ -23,7 +25,9 @@ public record NlQueryResult(
     IReadOnlyList<IReadOnlyList<object?>> Rows,
     int RowCount,
     bool Truncated,
-    long ElapsedMs)
+    long ElapsedMs,
+    string? ConfirmationOperation = null,
+    DdlOperation? ConfirmationDdlOperation = null)
 {
     public static NlQueryResult Query(QueryExecutionResult r) => new(
         NlResponseKind.QueryResult, r.Sql, null, null, null,
@@ -34,6 +38,12 @@ public record NlQueryResult(
 
     public static NlQueryResult Error(string code, string message, string? generatedSql = null, long elapsedMs = 0) => new(
         NlResponseKind.Error, generatedSql, null, code, message, [], [], 0, false, elapsedMs);
+
+    public static NlQueryResult Confirmation(string generatedSql, string operation,
+        DdlOperation? ddlOperation = null) => new(
+        NlResponseKind.ConfirmationRequired, generatedSql, null,
+        "ddl_confirmation_required", "Confirmation is required before executing this statement.",
+        [], [], 0, false, 0, operation, ddlOperation);
 }
 
 /// <summary>
@@ -51,7 +61,11 @@ public class NlQueryService(
     QueryExecutionService executor,
     ILlmSqlGateway gateway)
 {
-    public async Task<NlQueryResult> AskAsync(Guid connectionId, string question, CancellationToken ct = default)
+    // The attachment list trails the existing cancellation token so old positional calls keep their
+    // source-compatible meaning.
+    public async Task<NlQueryResult> AskAsync(
+        Guid connectionId, string question, CancellationToken ct = default,
+        IReadOnlyList<ChatFileRef>? files = null)
     {
         if (string.IsNullOrWhiteSpace(question))
             return NlQueryResult.Error("question_empty", "No question was provided.");
@@ -77,7 +91,10 @@ public class NlQueryService(
         // Dialect hints first so the model targets the right syntax (TOP vs LIMIT, GETDATE vs NOW, etc.),
         // then the policy-filtered schema. Both are plain prompt text — nothing here is executed.
         var schemaContext = $"{DialectHints.For(info.ProviderType)}\n\n{FormatSchema(schema)}";
-        var request = new LlmSqlRequest(question, info.ProviderType, schemaContext);
+        var attachments = files?.Select(file =>
+            new LlmFileAttachment(file.FileName, file.ContentType, file.Url)).ToList()
+            ?? (IReadOnlyList<LlmFileAttachment>)[];
+        var request = new LlmSqlRequest(question, info.ProviderType, schemaContext, attachments);
 
         LlmSqlResponse llm;
         try
@@ -109,22 +126,31 @@ public class NlQueryService(
 
         // Generated SQL is never trusted: it goes through the same validate-then-execute path as every other
         // surface, so read-only and hidden-table policy still apply and the run is audited.
-        var r = await executor.ExecuteSqlAsync(connectionId, llm.Sql!, ct);
+        var r = await executor.ExecuteSqlAsync(connectionId, llm.Sql!, confirmed: false, ct);
+        if (!r.Success && r.ErrorCode == "ddl_confirmation_required")
+            return NlQueryResult.Confirmation(
+                r.Sql ?? llm.Sql!, r.Operation?.ToString() ?? "write", r.Operation);
+
         return r.Success
             ? NlQueryResult.Query(r)
             : NlQueryResult.Error(r.ErrorCode!, r.ErrorMessage!, r.Sql, r.ElapsedMs);
     }
 
     /// <summary>
-    /// Compact DDL text for the LLM, built only from the already-filtered schema (hidden tables are gone
-    /// before this point). One line per table with columns/types/nullability, a PK line, and FK lines.
-    /// Types carry their declared size (<c>varchar(20)</c>, <c>decimal(10,2)</c>) via
+    /// Compact DDL text for the LLM, built only from the already-filtered schema (hidden tables and views
+    /// are gone before this point). One line per object with columns/types/nullability, plus a PK line and
+    /// FK lines for tables. Types carry their declared size (<c>varchar(20)</c>, <c>decimal(10,2)</c>) via
     /// <see cref="SchemaColumn.TypeText"/> — without it the model cannot size literals or predicates.
+    ///
+    /// Views are listed last and marked, rather than folded in among the tables. A view is queryable and
+    /// never writable — a write to one is refused outright — so a model handed one as an ordinary table
+    /// would keep generating statements that can only come back as a denial. The marker is per line, not a
+    /// section heading, because a line has to carry its own meaning once the prompt is assembled.
     /// ponytail: deliberately simple; caching and context-budget-aware compaction are CD-75's job.
     /// </summary>
     private static string FormatSchema(DatabaseSchema schema)
     {
-        if (schema.Tables.Count == 0) return "(no tables are visible)";
+        if (schema.Tables.Count == 0 && schema.ViewList.Count == 0) return "(no tables are visible)";
 
         var sb = new StringBuilder();
         foreach (var t in schema.Tables)
@@ -137,6 +163,14 @@ public class NlQueryService(
                 sb.Append("  FK: ").Append(fk.Column).Append(" -> ")
                   .Append(fk.ReferencedSchema).Append('.').Append(fk.ReferencedTable).Append('.').AppendLine(fk.ReferencedColumn);
         }
+
+        foreach (var v in schema.ViewList)
+        {
+            var cols = string.Join(", ", v.Columns.Select(c => $"{c.Name} {c.TypeText}{(c.IsNullable ? "" : " NOT NULL")}"));
+            sb.Append(v.Schema).Append('.').Append(v.Name).Append('(').Append(cols).Append(')')
+              .AppendLine(" -- VIEW: read-only, writes to it are refused");
+        }
+
         return sb.ToString();
     }
 }

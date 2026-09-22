@@ -30,6 +30,20 @@ SqlAgent__Storage__ConnectionString="Data Source=/path/to/sqlagent.db" dotnet ru
 Windows service and systemd packaging examples are in `packaging/`. Operator
 startup, fixture, and troubleshooting notes are in `docs/runbook.md`.
 
+Database configuration includes per-object visibility/access controls and a Structure permissions
+panel for the six supported DDL operations. The switches default off and are saved per connection.
+Typed SQL from `/sql` is the confirmed execution surface. Chat-generated writes persist a pending
+confirmation and execute only through the Phase D dialog; MCP `query_database` calls still fail closed
+with `ddl_confirmation_required`.
+
+Chat also supports local file attachments. The first provider is `local-disk`, rooted at `files` beside
+the SQLite store; `SqlAgent:Files:MaxBytes` defaults to 25 MiB and each message accepts at most 10
+files. Uploads are streamed and client names never determine storage paths. Sent files are authenticated
+downloads from `/files/{id}` with forced attachment disposition and active-content hardening; file
+metadata, not bytes, is handed to the LLM boundary. The URLs are loopback-only, so cloud model access
+requires a future remote storage provider. Configuration and the manual picker/download/deletion/
+restart checks are in [`docs/web-ui.md`](docs/web-ui.md) and [`docs/runbook.md`](docs/runbook.md).
+
 Setting `SqlAgent__LocalAuth__Token` on the host pins the web UI's launch token to a fixed
 value and is shared with the MCP server, which clients present through `SQLAGENT_AUTH_TOKEN`.
 Leave it unset and the web UI generates a fresh random token every start instead. Details are

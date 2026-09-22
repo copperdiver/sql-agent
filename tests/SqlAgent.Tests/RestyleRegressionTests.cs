@@ -5,18 +5,18 @@ namespace SqlAgent.Tests;
 
 /// <summary>
 /// Phase A restyles the existing screens and must not change their behavior. The component tests for
-/// those screens (ResultGridTests, SchemaRailTests, WorkspaceTests, ConnectionsPageTests) are the real
-/// guard and must stay green. These tests pin the two things those cannot see: that every class name
-/// the existing markup already uses actually has a rule somewhere, and that no restyle silently
-/// dropped a stylesheet.
+/// those screens (ResultGridTests, DatabasePageTests, WorkspaceTests) are the real guard and must stay
+/// green. These tests pin the two things those cannot see: that every class name the existing markup
+/// already uses actually has a rule somewhere, and that no restyle silently dropped a stylesheet.
 /// </summary>
 public class RestyleRegressionTests
 {
     // "tabs", "transcript" and "question" left with Phase B1: the tab strip is gone and the transcript
     // moved to Components/Shared/Chat, which brings its own stylesheets and its own assertion.
+    // "rail" and "tree" left with Task 15: SchemaRail, the only component that used them, is gone.
     private static readonly string[] ClassesUsedByExistingMarkup =
     [
-        "rail", "tree", "label", "meta", "actions", "grid-scroll",
+        "label", "meta", "actions", "grid-scroll",
         "generated-sql", "clarification", "editor",
         "outcome", "outcome-code",
     ];
@@ -26,8 +26,6 @@ public class RestyleRegressionTests
     // legitimately has nothing left to say. It stays in the sheets array below, harmlessly, since /sql
     // still needs a page to render even with no scoped rules of its own.
     [Theory]
-    [InlineData("src/SqlAgent.Host/Components/Pages/Connections.razor.css")]
-    [InlineData("src/SqlAgent.Host/Components/Layout/SchemaRail.razor.css")]
     [InlineData("src/SqlAgent.Host/Components/Shared/ChatOutcome.razor.css")]
     [InlineData("src/SqlAgent.Host/Components/Shared/OutcomeMessage.razor.css")]
     [InlineData("src/SqlAgent.Host/Components/Shared/SqlEditor.razor.css")]

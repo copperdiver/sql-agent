@@ -1,0 +1,72 @@
+@using Microsoft.JSInterop
+@using SqlAgent.Core
+@using SqlAgent.Host.Web
+@using SqlAgent.Storage
+@inject IJSRuntime JS
+
+@if (Result is { } result)
+{
+    <section class="sql-block" data-testid="sql-block">
+        <header class="sql-block-head">
+            <span class="sql-label">SQL</span>
+            <span class="dialect-badge">@DialectLabel</span>
+            <span class="sql-block-spacer"></span>
+            <button type="button" class="ghost" @onclick="CopyAsync">Copy</button>
+            @if (!string.IsNullOrWhiteSpace(result.GeneratedSql))
+            {
+                <button type="button" class="ghost" data-testid="sql-block-edit"
+                        @onclick="() => OnEdit.InvokeAsync(result.GeneratedSql)">Edit</button>
+                <button type="button" class="ghost"
+                        @onclick="() => OnOpenInEditor.InvokeAsync(result.GeneratedSql)">Open in editor</button>
+            }
+            <button type="button" class="ghost" data-testid="sql-block-run" @onclick="() => OnRun.InvokeAsync()">Run</button>
+        </header>
+
+        @if (result.Kind == NlResponseKind.ConfirmationRequired)
+        {
+            <div class="sql-warning" role="alert">
+                Confirmation required for <strong>@(result.ConfirmationOperation ?? "write")</strong>.
+                This statement will be executed only after you confirm it.
+            </div>
+        }
+
+        <pre class="sql-code"><code data-sql="@result.GeneratedSql">@((MarkupString)SqlHighlighter.Highlight(result.GeneratedSql ?? "", ProviderType))</code></pre>
+
+        @switch (result.Kind)
+        {
+            case NlResponseKind.QueryResult when Restored:
+                <p class="meta">@result.RowCount rows · @result.ElapsedMs ms @(result.Truncated ? "· results truncated" : "")</p>
+                <p class="restored-note">Rows are not stored. Run this SQL again to see them.</p>
+                break;
+            case NlResponseKind.QueryResult:
+                <DataTable Columns="result.Columns" Rows="result.Rows" TotalRowCount="result.RowCount" Truncated="result.Truncated" />
+                break;
+            case NlResponseKind.ClarificationRequired:
+                <p class="clarification">@result.ClarificationQuestion</p>
+                break;
+            case NlResponseKind.ConfirmationRequired:
+                <p class="muted">No database call has been made.</p>
+                break;
+            case NlResponseKind.Error:
+                <OutcomeMessage Code="@result.ErrorCode" Message="@result.ErrorMessage" />
+                break;
+        }
+    </section>
+}
+
+@code {
+    [Parameter] public NlQueryResult? Result { get; set; }
+    [Parameter] public DatabaseProviderType ProviderType { get; set; }
+    [Parameter] public bool Restored { get; set; }
+    [Parameter] public EventCallback OnRun { get; set; }
+    [Parameter] public EventCallback<string> OnEdit { get; set; }
+    [Parameter] public EventCallback<string> OnOpenInEditor { get; set; }
+
+    private string DialectLabel => ProviderType == DatabaseProviderType.SqlServer ? "T-SQL" : "PostgreSQL";
+
+    private async Task CopyAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(Result?.GeneratedSql))
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", Result.GeneratedSql);
+    }
+}

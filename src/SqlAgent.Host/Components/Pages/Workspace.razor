@@ -2,16 +2,42 @@
 @implements IDisposable
 @inject ScopedRunner Runner
 @inject AppState State
+@inject ILogger<Workspace> Logger
 
 @* The tab strip is gone. Conversations live on ChatPage.razor (/), and this page is what it always was
    underneath: a plain SQL editor over the same validated execution path. It is not a temporary parking
    spot — a full-screen editor is the right shape for a long query and a wide result, and Phase D's
-   ScratchPad panel on the chat page renders these same components rather than replacing them. *@
+   ScratchPad panel on the chat page renders these same components rather than replacing them.
+
+   The connection picker moved here in Phase C1 when the schema rail was retired. AppState.Connection had
+   exactly two readers, the rail and this page; with the rail gone it has one, so the state and the
+   control that sets it belong together. The Databases section in the sidebar navigates to the config
+   page and deliberately does not also select — one row with two meanings is how a click becomes a
+   guess. *@
 <h1>SQL</h1>
+
+<div class="field">
+    <label for="sql-connection">Database</label>
+    <select id="sql-connection" data-testid="sql-connection" @onchange="OnConnectionChanged">
+        <option value="">— select —</option>
+        @foreach (var c in _connections)
+        {
+            <option value="@c.Id" selected="@(c.Id == State.ConnectionId)">@c.Name</option>
+        }
+    </select>
+</div>
+
+@if (_error is not null)
+{
+    @* No code: this is "the app broke", not a deliberate refusal, so it must not look like one. Only
+       ConnectionsChanged's refresh can set this -- see OnConnectionsChanged below for why the initial
+       load on mount is deliberately left to escape into WorkArea's ErrorBoundary instead. *@
+    <OutcomeMessage Message="@_error" />
+}
 
 @if (State.ConnectionId is null)
 {
-    <p>Select a connection to start querying.</p>
+    <p>Select a database to start querying.</p>
 }
 else
 {
@@ -33,23 +59,69 @@ else
     private bool _running;
     private QueryExecutionResult? _result;
     private CancellationTokenSource? _cts;
+    private IReadOnlyList<DatabaseConnectionInfo> _connections = [];
+    private string? _error;
 
-    // SchemaRail and this page are siblings under MainLayout (not parent/child), so a connection picked
-    // from the rail's dropdown does not, by itself, cause this page to re-render — only the rail's own
-    // subtree does. Subscribing here is what makes selecting a connection update this pane immediately.
-    //
-    // TakePendingSql is the other half of "open in editor" on the chat page: the two are separate
-    // routes, so there is no parameter to pass the SQL through, and the read clears it so a later visit
-    // does not overwrite whatever the user has typed with the same stale query.
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
         State.Changed += OnStateChanged;
+        // Not a substitute for Changed: the config page can create or delete a database while this page
+        // is mounted, and only ConnectionsChanged says so.
+        State.ConnectionsChanged += OnConnectionsChanged;
+        // TakePendingSql is the other half of "open in editor" on the chat page: the two are separate
+        // routes, so there is no parameter to pass the SQL through, and the read clears it so a later
+        // visit does not overwrite whatever the user has typed with the same stale query.
         _sql = State.TakePendingSql() ?? "";
+        await ReloadConnectionsAsync();
     }
+
+    /// <summary>
+    /// Re-reads the list, then re-points AppState at the current row for whatever is selected. That
+    /// second step is what makes an edit to the selected database visible: Select compares by value, so a
+    /// fresh record replaces a stale one and notifies, and a deleted row resolves to null and clears the
+    /// selection.
+    /// </summary>
+    private async Task ReloadConnectionsAsync()
+    {
+        _connections = await Runner.RunAsync<DatabaseConnectionService, IReadOnlyList<DatabaseConnectionInfo>>(
+            s => s.ListAsync());
+        if (State.ConnectionId is { } id)
+            State.Select(_connections.FirstOrDefault(c => c.Id == id));
+    }
+
+    private void OnConnectionChanged(ChangeEventArgs e)
+    {
+        var raw = e.Value?.ToString();
+        State.Select(Guid.TryParse(raw, out var id) ? _connections.FirstOrDefault(c => c.Id == id) : null);
+    }
+
+    private void OnConnectionsChanged() => InvokeAsync(async () =>
+    {
+        // Unlike OnInitializedAsync's own call to ReloadConnectionsAsync (left to escape into WorkArea's
+        // ErrorBoundary, which offers Retry and clears on the next navigation -- a reasonable way to fail
+        // on first load), an exception from this UI-event dispatch has no render in progress to be caught
+        // by: it would take the whole circuit down instead. The rail wrapped its own read in a try/catch
+        // for the same reason; DatabaseSection.ReloadAsync follows the identical shape today.
+        try
+        {
+            await ReloadConnectionsAsync();
+            _error = null;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to refresh the connection list on /sql.");
+            _error = "The list of databases could not be refreshed. The details are in the server log.";
+        }
+        StateHasChanged();
+    });
 
     private void OnStateChanged() => InvokeAsync(StateHasChanged);
 
-    public void Dispose() => State.Changed -= OnStateChanged;
+    public void Dispose()
+    {
+        State.Changed -= OnStateChanged;
+        State.ConnectionsChanged -= OnConnectionsChanged;
+    }
 
     private async Task RunAsync()
     {
@@ -66,7 +138,7 @@ else
             // ExecuteSqlAsync validates policy, enforces the timeout and row cap, and writes the audit
             // row itself. Cancelling here surfaces as execution_canceled, distinct from execution_timeout.
             _result = await Runner.RunAsync<QueryExecutionService, QueryExecutionResult>(
-                s => s.ExecuteSqlAsync(id, _sql, _cts.Token));
+                s => s.ExecuteSqlAsync(id, _sql, confirmed: true, ct: _cts.Token));
         }
         finally
         {

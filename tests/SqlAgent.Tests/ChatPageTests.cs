@@ -1,5 +1,6 @@
 using Bunit;
 using Bunit.TestDoubles;
+using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -7,6 +8,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using SqlAgent.Core;
 using SqlAgent.Host.Components.Pages;
+using SqlAgent.Host.Components.Shared;
 using SqlAgent.Host.Components.Shared.Chat;
 using SqlAgent.Host.Web;
 using SqlAgent.Storage;
@@ -26,6 +28,7 @@ public class ChatPageTests : IDisposable
     private readonly Bunit.TestContext _ctx = new();
     private readonly ChatGatewayStub _gateway = new();
     private readonly TurnProviderStub _provider = new();
+    private readonly string _fileRoot = Path.Combine(Path.GetTempPath(), $"sqlagent-chat-page-files-{Guid.NewGuid():N}");
 
     // Read afresh every time a scope resolves SqlAgentDbContext, so a test can arm it (see
     // ThrowCanceledOnFirstSaveInterceptor's use below) after the constructor has already run.
@@ -43,6 +46,11 @@ public class ChatPageTests : IDisposable
         _ctx.Services.AddSingleton<IDatabaseProvider>(_provider);
         _ctx.Services.AddSingleton<IDatabaseProviderRegistry, DatabaseProviderRegistry>();
         _ctx.Services.AddSingleton<ILlmSqlGateway>(_gateway);
+        var fileProvider = new LocalDiskFileStorageProvider(_fileRoot);
+        _ctx.Services.AddSingleton(new FileStorageOptions());
+        _ctx.Services.AddSingleton<IFileStorageProvider>(fileProvider);
+        _ctx.Services.AddSingleton<IFileStorageProviderRegistry>(new FileStorageProviderRegistry([fileProvider]));
+        _ctx.Services.AddScoped<FileStorageService>();
         _ctx.Services.AddScoped<DatabaseConnectionService>();
         _ctx.Services.AddScoped<QueryExecutionService>();
         _ctx.Services.AddScoped<SchemaService>();
@@ -194,6 +202,113 @@ public class ChatPageTests : IDisposable
     }
 
     [Fact]
+    public async Task Sending_persists_pending_files_then_clears_the_pending_chips()
+    {
+        var page = _ctx.RenderComponent<ChatPage>();
+        await UploadFileAsync(page, "report.txt", "hello");
+        Type(page, "summarize the report");
+
+        await ClickAsync(page.Find("[data-testid=send]"));
+
+        var chat = Assert.Single(await ListChatsAsync());
+        var message = (await LoadAsync(chat.Id))!.Messages.First(m => m.Role == ChatRole.User);
+        var file = Assert.Single(message.Files!);
+        Assert.Equal("report.txt", file.FileName);
+        Assert.Empty(page.FindAll(".composer .pending-file"));
+    }
+
+    [Fact]
+    public async Task A_failed_send_keeps_pending_files_for_retry()
+    {
+        var page = _ctx.RenderComponent<ChatPage>();
+        await UploadFileAsync(page, "retry.txt", "try again");
+        Type(page, "send this later");
+        _saveInterceptor = new ThrowCanceledOnFirstSaveInterceptor();
+
+        await ClickAsync(page.Find("[data-testid=send]"));
+
+        Assert.Contains(page.FindAll(".composer .pending-file"), chip => chip.TextContent.Contains("retry.txt"));
+        Assert.Empty(await ListChatsAsync());
+    }
+
+    [Fact]
+    public async Task Removing_a_file_while_send_is_in_flight_waits_for_send_before_cleaning_storage()
+    {
+        await AddConnectionAsync("prod");
+        _gateway.Hold();
+        var page = _ctx.RenderComponent<ChatPage>();
+        await AttachAsync(page, "prod");
+        await UploadFileAsync(page, "race.txt", "do not delete yet");
+        Type(page, "send after the file is safe");
+
+        var send = ClickAsync(page.Find("[data-testid=send]"));
+        await WaitForConditionAsync(() => _gateway.CallCount == 1);
+        var remove = ClickAsync(page.Find(".pending-file-remove"));
+
+        await Task.Yield();
+        Assert.False(remove.IsCompleted);
+        Assert.NotEmpty(Directory.GetFiles(_fileRoot, "*", SearchOption.AllDirectories));
+
+        _gateway.Release(LlmSqlResponse.Generated("SELECT 1"));
+        await send;
+        await remove;
+
+        var chat = Assert.Single(await ListChatsAsync());
+        Assert.Single((await LoadAsync(chat.Id))!.Messages.First(m => m.Role == ChatRole.User).Files!);
+        Assert.NotEmpty(Directory.GetFiles(_fileRoot, "*", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public async Task Removing_a_file_while_idle_deletes_pending_storage()
+    {
+        var page = _ctx.RenderComponent<ChatPage>();
+        await UploadFileAsync(page, "remove.txt", "remove me");
+
+        await ClickAsync(page.Find(".pending-file-remove"));
+
+        Assert.Empty(page.FindAll(".pending-file"));
+        Assert.Empty(Directory.GetFiles(_fileRoot, "*", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public async Task Disposing_during_send_does_not_clean_a_file_until_send_settles()
+    {
+        await AddConnectionAsync("prod");
+        _gateway.Hold();
+        var page = _ctx.RenderComponent<ChatPage>();
+        await AttachAsync(page, "prod");
+        await UploadFileAsync(page, "dispose-race.txt", "keep until send");
+        Type(page, "send before disposal");
+
+        var send = ClickAsync(page.Find("[data-testid=send]"));
+        await WaitForConditionAsync(() => _gateway.CallCount == 1);
+
+        _ctx.DisposeComponents();
+        Assert.NotEmpty(Directory.GetFiles(_fileRoot, "*", SearchOption.AllDirectories));
+
+        _gateway.Release(LlmSqlResponse.Generated("SELECT 1"));
+        await send;
+        Assert.NotEmpty(Directory.GetFiles(_fileRoot, "*", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public void Sent_file_chips_are_read_only_authenticated_download_links()
+    {
+        var fileId = Guid.NewGuid();
+        var message = new ChatMessageView(
+            Guid.NewGuid(), 0, ChatRole.User, "with file", DateTime.UtcNow, null,
+            ChatOutcomeKind.None, null, null, null, false, [], Files:
+            [new ChatFileRef(fileId, "report.pdf", "application/pdf", 42, $"/files/{fileId}")]);
+
+        var rendered = _ctx.RenderComponent<UserMessage>(p => p.Add(c => c.Message, message));
+
+        var link = Assert.Single(rendered.FindAll(".file-chip"));
+        Assert.Equal($"/files/{fileId}", link.GetAttribute("href"));
+        Assert.Equal("report.pdf", link.QuerySelector(".chip-name")!.TextContent.Trim());
+        Assert.Empty(rendered.FindAll(".file-chip-remove"));
+    }
+
+    [Fact]
     public async Task A_second_send_while_one_is_in_flight_is_ignored()
     {
         await AddConnectionAsync("prod");
@@ -237,6 +352,97 @@ public class ChatPageTests : IDisposable
     }
 
     [Fact]
+    public async Task Editing_a_sql_block_opens_the_chat_scratchpad_with_the_same_sql()
+    {
+        await AddConnectionAsync("prod");
+        _gateway.NextResponse = LlmSqlResponse.Generated("SELECT id FROM orders");
+        _provider.NextResult = new QueryResultSet(["id"], [new object?[] { 1 }], false);
+
+        var page = _ctx.RenderComponent<ChatPage>();
+        await AttachAsync(page, "prod");
+        Type(page, "orders");
+        await ClickAsync(page.Find("[data-testid=send]"));
+
+        await ClickAsync(page.Find("[data-testid=sql-block-edit]"));
+
+        Assert.Single(page.FindAll("[data-testid=scratchpad]"));
+        Assert.Equal("SELECT id FROM orders", page.FindComponent<ScratchPad>().FindComponent<SqlEditor>().Instance.Value);
+    }
+
+    [Fact]
+    public async Task Regenerate_replaces_the_assistant_answer_in_place()
+    {
+        await AddConnectionAsync("prod");
+        _gateway.NextResponse = LlmSqlResponse.Generated("SELECT 1");
+        _provider.NextResult = new QueryResultSet(["value"], [new object?[] { 1 }], false);
+        var page = _ctx.RenderComponent<ChatPage>();
+        await AttachAsync(page, "prod");
+        Type(page, "orders");
+        await ClickAsync(page.Find("[data-testid=send]"));
+
+        _gateway.NextResponse = LlmSqlResponse.Generated("SELECT 2");
+        _provider.NextResult = new QueryResultSet(["value"], [new object?[] { 2 }], false);
+        await ClickAsync(page.Find("[data-testid=assistant-regenerate]"));
+
+        Assert.Contains("SELECT 2", page.Markup);
+        Assert.DoesNotContain("SELECT 1", page.Markup);
+        var chat = Assert.Single(await ListChatsAsync());
+        Assert.Equal(2, (await LoadAsync(chat.Id))!.Messages.Count);
+    }
+
+    [Fact]
+    public async Task A_pending_model_write_shows_a_confirmation_action_and_confirming_replaces_it_in_place()
+    {
+        await AddConnectionAsync("prod", readOnly: false);
+        _gateway.NextResponse = LlmSqlResponse.Generated("UPDATE orders SET total = 0");
+
+        var page = _ctx.RenderComponent<ChatPage>();
+        await AttachAsync(page, "prod");
+        Type(page, "zero out the orders");
+        await ClickAsync(page.Find("[data-testid=send]"));
+
+        Assert.Contains("Confirmation required", page.Markup);
+        Assert.False(_provider.Executed);
+        await ClickAsync(page.Find("[data-testid=sql-block-run]"));
+        var dialog = _ctx.Render(_ctx.Services.GetRequiredService<DialogService>().Current!);
+        await ClickAsync(dialog.Find("[data-testid=chat-confirm]"));
+
+        Assert.True(_provider.Executed);
+        Assert.DoesNotContain("[data-testid=chat-confirm]", page.Markup);
+        Assert.Contains("UPDATE orders SET total = 0", page.Markup);
+        var chat = (await ListChatsAsync()).Single();
+        var detail = await LoadAsync(chat.Id);
+        Assert.Equal(2, detail!.Messages.Count);
+        Assert.Equal(ChatOutcomeKind.QueryResult, detail.Messages[1].OutcomeKind);
+    }
+
+    [Fact]
+    public async Task Schema_diagram_is_added_to_the_chat_and_restored_from_its_connection()
+    {
+        await AddConnectionAsync("prod");
+        _provider.Schema = new DatabaseSchema(
+        [
+            new SchemaTable("public", "orders", [new SchemaColumn("id", "integer", false)], ["id"], [], []),
+        ]);
+
+        var page = _ctx.RenderComponent<ChatPage>();
+        await AttachAsync(page, "prod");
+        await ClickAsync(page.Find("[data-testid=chat-open-diagram]"));
+
+        Assert.Contains("Entity relationship diagram", page.Markup);
+        Assert.Contains("orders", page.Markup);
+        var chat = Assert.Single(await ListChatsAsync());
+        var detail = await LoadAsync(chat.Id);
+        var message = Assert.Single(detail!.Messages);
+        Assert.Equal(ChatOutcomeKind.SchemaDiagram, message.OutcomeKind);
+        Assert.NotNull(message.SchemaDiagramConnectionId);
+
+        var reloaded = _ctx.RenderComponent<ChatPage>(p => p.Add(c => c.Id, chat.Id));
+        Assert.Contains("Entity relationship diagram", reloaded.Markup);
+        Assert.Contains("orders", reloaded.Markup);
+    }
+
+    [Fact]
     public async Task The_page_tells_the_sidebar_that_history_changed()
     {
         // The history section is a sibling under MainLayout, so nothing else would ever tell it a chat
@@ -275,12 +481,14 @@ public class ChatPageTests : IDisposable
 
         var tables = page.FindAll(".grid-scroll table");
         Assert.Equal(2, tables.Count);
-        Assert.Contains("1", tables[0].TextContent);
-        Assert.DoesNotContain("2", tables[0].TextContent);
-        Assert.DoesNotContain("3", tables[0].TextContent);
-        Assert.Contains("2", tables[1].TextContent);
-        Assert.Contains("3", tables[1].TextContent);
-        Assert.DoesNotContain("1", tables[1].TextContent);
+        var firstValues = string.Join(" ", tables[0].QuerySelectorAll("td:not(.row-number)").Select(c => c.TextContent));
+        var secondValues = string.Join(" ", tables[1].QuerySelectorAll("td:not(.row-number)").Select(c => c.TextContent));
+        Assert.Contains("1", firstValues);
+        Assert.DoesNotContain("2", firstValues);
+        Assert.DoesNotContain("3", firstValues);
+        Assert.Contains("2", secondValues);
+        Assert.Contains("3", secondValues);
+        Assert.DoesNotContain("1", secondValues);
     }
 
     [Fact]
@@ -420,12 +628,12 @@ public class ChatPageTests : IDisposable
         return id;
     }
 
-    private async Task<Guid> AddConnectionAsync(string name)
+    private async Task<Guid> AddConnectionAsync(string name, bool readOnly = true)
     {
         using var scope = _ctx.Services.CreateScope();
         var connections = scope.ServiceProvider.GetRequiredService<DatabaseConnectionService>();
         var created = await connections.CreateAsync(
-            new DatabaseConnectionInput(name, DatabaseProviderType.Postgres, IsReadOnly: true), "cs");
+            new DatabaseConnectionInput(name, DatabaseProviderType.Postgres, IsReadOnly: readOnly), "cs");
         return created.Id;
     }
 
@@ -449,6 +657,13 @@ public class ChatPageTests : IDisposable
             .First(r => r.TextContent.Contains(name)));
     }
 
+    private static async Task UploadFileAsync(IRenderedComponent<ChatPage> page, string name, string text)
+    {
+        await ClickAsync(page.Find(".composer .menu-trigger"));
+        page.FindComponent<AttachmentMenu>().FindComponent<InputFile>().UploadFiles(
+            InputFileContent.CreateFromText(text, name, contentType: "text/plain"));
+    }
+
     private static void Type(IRenderedComponent<ChatPage> page, string text) =>
         page.Find("textarea").Input(text);
 
@@ -459,6 +674,7 @@ public class ChatPageTests : IDisposable
     {
         _ctx.Dispose();
         _conn.Dispose();
+        if (Directory.Exists(_fileRoot)) Directory.Delete(_fileRoot, recursive: true);
     }
 }
 

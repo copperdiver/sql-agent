@@ -22,6 +22,18 @@ builder.Services.AddWindowsService(o => o.ServiceName = "SQL Agent").AddSystemd(
 builder.Services.AddDbContext<SqlAgentDbContext>(options =>
     options.UseSqlite(builder.Configuration["SqlAgent:Storage:ConnectionString"] ?? "Data Source=sqlagent.db"));
 
+var fileStorageOptions = FileStorageConfiguration.Resolve(builder.Configuration);
+builder.Services.AddSingleton(fileStorageOptions);
+builder.Services.AddSingleton<IFileStorageProvider>(_ =>
+    new LocalDiskFileStorageProvider(
+        LaunchUrlFile.ResolveDirectory(builder.Configuration), fileStorageOptions.MaxBytes));
+builder.Services.AddSingleton<IFileStorageProviderRegistry, SqlAgent.Core.FileStorageProviderRegistry>();
+builder.Services.AddScoped<MessageAttachmentService>();
+builder.Services.AddScoped<IFileStorageReferenceReader>(services =>
+    services.GetRequiredService<MessageAttachmentService>());
+builder.Services.AddScoped<FileStorageService>();
+builder.Services.AddScoped<IAttachmentBlobCleanup, AttachmentBlobCleanup>();
+
 builder.Services.AddSingleton<IDatabaseProvider, SqlServerProvider>();
 builder.Services.AddSingleton<IDatabaseProvider, PostgresProvider>();
 builder.Services.AddSingleton<IDatabaseProviderRegistry, DatabaseProviderRegistry>();
@@ -64,6 +76,8 @@ using (var scope = app.Services.CreateScope())
     // StoreInitializer also carries the one-time baseline stamp for stores created the old way.
     var db = scope.ServiceProvider.GetRequiredService<SqlAgentDbContext>();
     await StoreInitializer.InitializeAsync(db, app.Logger);
+    var fileStorage = scope.ServiceProvider.GetRequiredService<FileStorageService>();
+    await StoreInitializer.SweepOrphansAsync(fileStorage, app.Logger);
 }
 
 // Order matters: origin checks run before anything reads the token, so a hostile page cannot even
@@ -74,6 +88,7 @@ app.UseMiddleware<TokenAuthMiddleware>();
 app.UseStaticFiles();
 app.UseAntiforgery();
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
+app.MapFileDownload();
 
 // The token is required only for the first request, which exchanges it for a session cookie. It is
 // NOT logged: with the named pipe gone, this token is the entire trust boundary around a TCP port

@@ -1,0 +1,116 @@
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
+
+@if (TotalRows > 0)
+{
+    <div class="data-table" data-testid="data-table">
+        @if (Truncated)
+        {
+            <p class="data-table-truncated">Results are truncated at the row cap.</p>
+        }
+        <div class="grid-scroll data-table-scroll">
+            <table>
+                <thead>
+                    <tr>@if (ShowRowNumbers) { <th class="row-number" aria-label="Row"></th> } @foreach (var column in Columns) { <th>@column</th> }</tr>
+                </thead>
+                <tbody>
+                    @foreach (var (row, index) in VisibleRows.Select((row, index) => (row, index)))
+                    {
+                        var absoluteRow = _page * _pageSize + index;
+                        <tr>
+                            @if (ShowRowNumbers) { <td class="row-number">@(absoluteRow + 1)</td> }
+                            @for (var column = 0; column < Columns.Count; column++)
+                            {
+                                var cellColumn = column;
+                                var value = column < row.Count ? row[column] : null;
+                                <td>
+                                    @if (value is null)
+                                    {
+                                        <span class="null-literal">NULL</span>
+                                    }
+                                    else if (IsLong(value))
+                                    {
+                                        <span>@(Expanded.Contains((absoluteRow, column)) ? value : Preview(value))</span>
+                                        <button type="button" class="ghost cell-expand"
+                                                data-testid="cell-expand-@absoluteRow-@column"
+                                                @onclick="() => ToggleExpanded(absoluteRow, cellColumn)">
+                                            @(Expanded.Contains((absoluteRow, cellColumn)) ? "Collapse" : "Expand")
+                                        </button>
+                                    }
+                                    else
+                                    {
+                                        @value
+                                    }
+                                </td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <div class="data-table-footer">
+            <span>showing @StartRow–@EndRow of @TotalRows</span>
+            <label>Rows
+                <select data-testid="data-table-page-size" value="@_pageSize" @onchange="OnPageSizeChanged">
+                    @foreach (var size in PageSizes) { <option value="@size">@size</option> }
+                </select>
+            </label>
+            <button type="button" class="ghost" data-testid="data-table-previous"
+                    @onclick="PreviousPage" disabled="@(_page == 0)">Previous</button>
+            <button type="button" class="ghost" data-testid="data-table-next"
+                    @onclick="NextPage" disabled="@EndRow >= TotalRows">Next</button>
+            <button type="button" class="ghost" data-testid="data-table-export-csv" @onclick="ExportCsvAsync">Export CSV</button>
+            <button type="button" class="ghost" data-testid="data-table-export-json" @onclick="ExportJsonAsync">Export JSON</button>
+        </div>
+    </div>
+}
+
+@code {
+    private static readonly int[] PageSizes = [25, 50, 100];
+    private readonly HashSet<(int Row, int Column)> Expanded = [];
+    private int _pageSize = 25;
+    private int _page;
+
+    [Parameter] public IReadOnlyList<string> Columns { get; set; } = [];
+    [Parameter] public IReadOnlyList<IReadOnlyList<object?>> Rows { get; set; } = [];
+    [Parameter] public int TotalRowCount { get; set; }
+    [Parameter] public bool Truncated { get; set; }
+    [Parameter] public bool ShowRowNumbers { get; set; } = true;
+    [Parameter] public string ExportName { get; set; } = "result";
+
+    private int TotalRows => TotalRowCount > 0 ? TotalRowCount : Rows.Count;
+    private int StartRow => TotalRows == 0 ? 0 : _page * _pageSize + 1;
+    private int EndRow => Math.Min((_page + 1) * _pageSize, TotalRows);
+    private IEnumerable<IReadOnlyList<object?>> VisibleRows => Rows.Skip(_page * _pageSize).Take(_pageSize);
+
+    private static bool IsLong(object value) => value.ToString()?.Length > 120;
+    private static string Preview(object value)
+    {
+        var text = value.ToString() ?? "";
+        return text.Length <= 120 ? text : text[..120] + "…";
+    }
+
+    private void OnPageSizeChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var size) && PageSizes.Contains(size))
+            _pageSize = size;
+        _page = 0;
+    }
+
+    private void PreviousPage() => _page = Math.Max(0, _page - 1);
+    private void NextPage() { if (EndRow < TotalRows) _page++; }
+    private void ToggleExpanded(int row, int column)
+    {
+        if (!Expanded.Add((row, column))) Expanded.Remove((row, column));
+    }
+
+    private Task ExportCsvAsync() => DownloadAsync("csv");
+    private Task ExportJsonAsync() => DownloadAsync("json");
+
+    private async Task DownloadAsync(string format)
+    {
+        var content = format == "csv" ? ResultExport.ToCsv(Columns, Rows) : ResultExport.ToJson(Columns, Rows);
+        var mime = format == "csv" ? "text/csv" : "application/json";
+        await JS.InvokeVoidAsync("sqlAgentDownload", $"{ExportName}.{format}", mime, content);
+    }
+}

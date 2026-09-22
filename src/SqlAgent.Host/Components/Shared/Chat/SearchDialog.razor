@@ -118,7 +118,7 @@
                 State.RequestProjectExpanded(hit.TargetId);
                 break;
             case SearchHitKind.Database:
-                Nav.NavigateTo("/connections");
+                Nav.NavigateTo($"/database/{hit.TargetId}");
                 break;
         }
     }

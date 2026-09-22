@@ -1,0 +1,22 @@
+.objects-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.objects-filter { min-width: 12rem; }
+
+.schema-group { margin-top: var(--space-3); }
+.schema-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid var(--base-100);
+}
+.schema-toggle { display: flex; align-items: center; gap: var(--space-2); }
+.schema-count { color: var(--text-100); font-size: var(--text-xs); }
+
+.object-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) 0 var(--space-2) var(--space-4);
+}
+.object-name { flex: 1; min-width: 0; }

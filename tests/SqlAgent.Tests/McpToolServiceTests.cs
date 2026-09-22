@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using SqlAgent.Api.Mcp;
 using SqlAgent.Core;
+using SqlAgent.Core.Policy;
 using SqlAgent.Storage;
 
 namespace SqlAgent.Tests;
@@ -44,7 +45,7 @@ public class McpToolServiceTests
         var connections = new DatabaseConnectionService(db, secrets);
         var registry = new DatabaseProviderRegistry([provider]);
         var schemas = new SchemaService(connections, registry, db);
-        var executor = new QueryExecutionService(connections, registry, db, NullLogger<QueryExecutionService>.Instance);
+        var executor = new QueryExecutionService(connections, registry, db, schemas, NullLogger<QueryExecutionService>.Instance);
         var authenticator = new LocalTokenAuthenticator(secrets, NullLogger<LocalTokenAuthenticator>.Instance);
         return (new McpToolService(connections, schemas, executor, authenticator, new McpClientToken(presentedToken)), connections, db);
     }
@@ -224,6 +225,21 @@ public class McpToolServiceTests
 
         Assert.False(r.Ok);
         Assert.Equal("policy_denied_readonly", r.ErrorCode);
+        conn.Dispose();
+    }
+
+    [Fact]
+    public async Task QueryDatabase_write_on_writable_connection_requires_confirmation()
+    {
+        var (db, conn) = NewStore();
+        var (tools, connections, _) = Build(db, new ToolFakeProvider());
+        var created = await connections.CreateAsync(
+            new DatabaseConnectionInput("c", DatabaseProviderType.Postgres, IsReadOnly: false), "cs");
+
+        var r = await tools.QueryDatabaseAsync(created.Id.ToString(), "UPDATE orders SET total = 0");
+
+        Assert.False(r.Ok);
+        Assert.Equal("ddl_confirmation_required", r.ErrorCode);
         conn.Dispose();
     }
 

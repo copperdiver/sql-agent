@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using SqlAgent.Core;
+using SqlAgent.Core.Policy;
 using SqlAgent.Storage;
 
 namespace SqlAgent.Tests;
@@ -35,9 +36,39 @@ public class DatabaseConnectionServiceTests
         Assert.Equal("prod", loaded!.Name);
         Assert.Equal(DatabaseProviderType.Postgres, loaded.ProviderType);
         Assert.True(loaded.IsReadOnly);
+        Assert.Equal(AllowedDdl.None, loaded.AllowedDdl);
         Assert.True(loaded.HasSecret);
         // The read DTO must not carry the secret anywhere.
         Assert.DoesNotContain("secret", System.Text.Json.JsonSerializer.Serialize(loaded));
+
+        conn.Dispose();
+    }
+
+    [Fact]
+    public async Task SetAllowedDdl_round_trips_flags_without_touching_the_secret()
+    {
+        var (db, conn) = NewStore();
+        var secrets = new InMemorySecretStore();
+        var svc = new DatabaseConnectionService(db, secrets);
+        var created = await svc.CreateAsync(
+            new DatabaseConnectionInput("c", DatabaseProviderType.Postgres, false), "keep-me");
+
+        var updated = await svc.SetAllowedDdlAsync(
+            created.Id, AllowedDdl.CreateTable | AllowedDdl.DropIndex | AllowedDdl.Truncate);
+
+        Assert.NotNull(updated);
+        Assert.Equal(AllowedDdl.CreateTable | AllowedDdl.DropIndex | AllowedDdl.Truncate, updated!.AllowedDdl);
+        Assert.Equal("keep-me", await svc.ResolveConnectionStringAsync(created.Id));
+        conn.Dispose();
+    }
+
+    [Fact]
+    public async Task SetAllowedDdl_for_an_unknown_connection_is_graceful()
+    {
+        var (db, conn) = NewStore();
+        var svc = new DatabaseConnectionService(db, new InMemorySecretStore());
+
+        Assert.Null(await svc.SetAllowedDdlAsync(Guid.NewGuid(), AllowedDdl.DropTable));
 
         conn.Dispose();
     }

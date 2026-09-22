@@ -32,7 +32,7 @@
             break;
 
         case NlResponseKind.ClarificationRequired:
-            <p class="clarification">@r.ClarificationQuestion</p>
+            <div class="clarification">@((MarkupString)MarkdownRenderer.ToHtml(r.ClarificationQuestion))</div>
             break;
 
         case NlResponseKind.Error when r.ErrorCode == "llm_not_configured":

@@ -1,0 +1,18 @@
+<Modal Title="Confirm SQL action" OnClose="OnCancel">
+    <ChildContent>
+        <p>This will execute <strong>@Operation</strong> against the attached database.</p>
+        <pre class="confirmation-sql">@Sql</pre>
+        <p class="muted">This action can change or remove data and cannot be undone automatically.</p>
+    </ChildContent>
+    <Footer>
+        <button type="button" data-testid="chat-confirm-cancel" @onclick="OnCancel">Cancel</button>
+        <button type="button" class="danger" data-testid="chat-confirm" @onclick="OnConfirm">Confirm and run</button>
+    </Footer>
+</Modal>
+
+@code {
+    [Parameter, EditorRequired] public string Sql { get; set; } = "";
+    [Parameter, EditorRequired] public string Operation { get; set; } = "write";
+    [Parameter] public EventCallback OnConfirm { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+}

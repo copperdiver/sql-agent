@@ -122,15 +122,20 @@ Common stable error codes:
 - `connection_not_found`
 - `connection_secret_missing`
 - `schema_extraction_error`
+- `schema_unavailable`
 - `policy_denied_readonly`
 - `policy_denied_hidden_table`
+- `policy_denied_view_write`
+- `policy_denied_readonly_object`
 - `execution_timeout`
 - `execution_canceled`
 - `execution_error`
 
 Core may also return narrower `policy_denied_*` validation codes for malformed,
 multi-statement, or unsupported SQL. Hosts should display the code and message
-unchanged.
+unchanged. Note that `schema_unavailable` is deliberately **not** one of them:
+it says the connection's catalog could not be read, not that anything was wrong
+with the SQL, so a host routing on the `policy_denied_` prefix will miss it.
 
 ## Security and policy boundaries
 
@@ -169,6 +174,12 @@ the IDE plugin tool surface, which should stay limited to the MCP tools above.
 - **A table is missing or denied:** expected when table visibility hides it.
   Core omits hidden tables from `describe_schema` and denies direct queries with
   `policy_denied_hidden_table`.
+- **`schema_unavailable` on a query that looks valid:** Core reads the
+  connection's catalog before every query, to tell a view from a table and
+  refuse a write to a view. A connection whose account can `SELECT` but cannot
+  read the metadata views fails that step and the query is refused rather than
+  run. The same connection cannot serve `describe_schema` either; grant the
+  account catalog read access.
 - **Every tool returns `unauthorized`:** the server has a local-access token
   configured and the host is not presenting a matching one. Add
   `SQLAGENT_AUTH_TOKEN` to the host's env block and restart the host — the token

@@ -4,11 +4,10 @@ namespace SqlAgent.Storage;
 public enum ChatRole { User, Assistant }
 
 /// <summary>
-/// What an assistant message carries. Only the values Phase B1 can produce: Phase D adds
-/// ConfirmationRequired and SchemaDiagram alongside the components that render them, so no member here
-/// is ever written by nothing.
+/// What an assistant message carries. ConfirmationRequired and SchemaDiagram are persisted outcomes
+/// whose rendering components live in Phase D.
 /// </summary>
-public enum ChatOutcomeKind { None, QueryResult, Clarification, Error }
+public enum ChatOutcomeKind { None, QueryResult, Clarification, ConfirmationRequired, Error, SchemaDiagram }
 
 /// <summary>A conversation. Databases belong to its messages, not to it.</summary>
 public class Chat
@@ -51,11 +50,19 @@ public class ChatMessage
     /// <summary>Stable code from the service layer. The user-safe message lives in <see cref="Text"/>.</summary>
     public string? ErrorCode { get; set; }
 
+    /// <summary>Operation label shown by the confirmation UI for a pending model write/DDL.</summary>
+    public string? ConfirmationOperation { get; set; }
+
+    /// <summary>Connection used to build a persisted schema diagram. The schema itself is never stored;
+    /// reopening the transcript re-reads it through the visibility policy.</summary>
+    public Guid? SchemaDiagramConnectionId { get; set; }
+
     public int? RowCount { get; set; }
     public long? ElapsedMs { get; set; }
     public bool Truncated { get; set; }
 
     public List<ChatMessageDatabase> Databases { get; set; } = [];
+    public List<MessageAttachment> Attachments { get; set; } = [];
 }
 
 /// <summary>
@@ -75,4 +82,19 @@ public class ChatMessageDatabase
     public ChatMessage? Message { get; set; }
     public Guid? DatabaseConnectionId { get; set; }
     public string DatabaseName { get; set; } = "";
+}
+
+/// <summary>Persisted metadata for one file attached to a message. File bytes live behind the provider boundary.</summary>
+public class MessageAttachment
+{
+    public Guid Id { get; set; }
+    public Guid ChatMessageId { get; set; }
+    public ChatMessage? Message { get; set; }
+    public string FileName { get; set; } = "";
+    public string ContentType { get; set; } = "application/octet-stream";
+    public long SizeBytes { get; set; }
+    public string ProviderKey { get; set; } = "";
+    public string StorageKey { get; set; } = "";
+    public string Url { get; set; } = "";
+    public DateTime CreatedAt { get; set; }
 }

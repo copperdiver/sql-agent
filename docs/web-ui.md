@@ -96,7 +96,8 @@ try a token.
 ## The shell
 
 The UI is a sidebar plus an inset main card. The sidebar carries the product mark, a collapse
-toggle, the nav rows, the schema rail, and the user card; the card holds the current page.
+toggle, the nav rows, the Databases, Projects and History sections, and the user card; the card
+holds the current page.
 
 - **Collapse** shrinks the sidebar to an icon rail. Below 1024px it leaves the layout entirely and
   becomes an overlay drawer opened from the hamburger at the top left.
@@ -157,23 +158,96 @@ nobody spends time rediscovering them:
 
 ## The screens
 
-- **Connections** (`/connections`) — create, edit, test, and delete database connections.
-  Editing a connection never shows the stored connection string back; the field starts blank,
+- **Databases** (`/database`, `/database/{id}`) — create, edit, test, and delete a database
+  connection. Editing one never shows the stored connection string back; the field starts blank,
   and leaving it blank on save keeps the existing secret. Provider type and read-only mode are
-  set here too.
+  set here too. Opening a saved database also tests it and, on success, shows every live table
+  and view with a three-level access control (hidden / read-only / full) — a view offers only
+  hidden/read-only, since a view cannot be writable. A filter box narrows the list by name, and
+  a level applies immediately, with no separate save step. The Structure permissions panel below it
+  independently controls six DDL operations: Create table, Alter table, Drop table, Create index,
+  Drop index, and Truncate table.
 - **Chat** (`/`, `/chat/{id}`) — ask a question in plain English; the generated SQL and its
   result (or an error) appear in the transcript, with a button to open the generated SQL on the
   SQL page for editing. See "Chats, and what is kept" below for what persists across a reload
   and what deliberately does not.
 - **SQL** (`/sql`) — a CodeMirror editor with SQL syntax highlighting, a result grid, CSV/JSON
-  export, and Cancel for an in-flight query.
-
-  The sidebar's schema rail, shared by both pages, lists every table for the selected connection
-  with a visibility checkbox — unchecking one hides it from both the schema the SQL policy
-  allows and the context given to the chat model. A filter box narrows the list by name.
+  export, and Cancel for an in-flight query. The page has its own database picker at the top —
+  the sidebar's Databases section links to the config page rather than selecting, so there is
+  exactly one control on screen that decides which connection a query runs against.
 - **Settings** (`/settings`) — three panels: appearance (the same theme control as the user menu),
   language-model status (whether `ILlmSqlGateway.IsConfigured` is true, with a badge), and
   environment (version, bind URL, port, store path, account — read from `HostInfo`).
+
+## Access levels
+
+Every table and view a connection can see has one of three access levels, set per object on that
+database's config page (`/database/{id}`, in the objects panel) and enforced on the execution path
+itself — `SqlPolicyValidator.Validate` checks it before a statement runs, not just before it renders:
+
+- **Not visible** (`ObjectAccess.Hidden`) — absent from the schema handed to the model and to
+  `describe_schema`. Naming it directly in SQL anyway is refused with `policy_denied_hidden_table`,
+  and that check runs before any more specific one, over every table referenced (not only written
+  ones) — a more specific refusal would concede the object exists.
+- **Read-only** (`ObjectAccess.ReadOnly`) — visible and queryable; refused as a write target with
+  `policy_denied_readonly_object`. A view can only be Not visible or Read-only, never Full — the
+  objects panel doesn't even offer a view the third segment, and `TablePolicyService.SetAccessAsync`
+  refuses a Full-access write for a view server-side too, in case a stale client tries anyway. A
+  view being written to is refused before its level is even consulted, with the more specific
+  `policy_denied_view_write` — the two codes can't both fire for the same statement.
+- **Full access** (`ObjectAccess.Full`) — visible, queryable, and (tables only) writable.
+
+## Structure permissions and confirmation
+
+The Structure permissions panel is a per-connection allow-list. All six DDL switches default to off,
+including on connections created before C2. The master switch selects or clears all six. Changing a
+switch is saved immediately; it does not execute SQL and it does not bypass the connection's
+read-only setting or per-object access levels.
+
+The supported DDL operations are `CREATE TABLE`, `ALTER TABLE`, `DROP TABLE`, `CREATE INDEX`,
+`DROP INDEX`, and `TRUNCATE`. A supported operation whose switch is off is refused with
+`policy_denied_ddl`. Statements outside this closed set — including `CREATE VIEW`, routines,
+`EXEC`, and `GRANT` — remain refused with `policy_denied_unsupported`.
+
+Every write and permitted DDL statement also needs explicit confirmation at the execution boundary.
+Typed SQL from `/sql` supplies that confirmation after the user presses Run. Natural-language Chat
+and `query_database` MCP calls deliberately run unconfirmed: they return `ddl_confirmation_required`,
+echo the generated SQL and operation, and do not call the provider. The chat transcript stores this
+as a stable error-shaped outcome until the Phase D confirmation UI exists. Reads do not need this
+extra confirmation.
+
+**An object with no policy row is Full access — not Hidden, not Read-only.** This is the rule every
+layer applies (see the resolver contract on `SqlPolicyValidator.Validate` and
+`TablePolicyService.AccessOf`), and it is the one most likely to be misread, because the stored
+`TablePolicy` entity's own `CanWrite` column **defaults to `false`** — which reads as "a new table
+starts locked down." It means the opposite: a row in `TablePolicies` only exists once somebody has
+set a level for that object from the config page, and until then the object is fully open. An empty
+`TablePolicies` table for a connection is not "nothing configured yet, deny by default" — it is
+"every table and view on this connection is unrestricted." Setting a schema's header control applies
+a level to every object under it at once, clamping a view in the batch to Read-only rather than
+failing the whole call if one member can't take the level requested.
+
+**Upgrading from a store written before access levels existed.** The old schema rail could only hide
+and un-hide an object, and its toggle wrote `IsVisible` alone — leaving `CanWrite` at the entity's
+`false` default. Nothing read that column back then, so it did not matter. It does now: a row saying
+"visible, not writable" is exactly Read-only. So an object you hid under the old rail and later
+un-hid comes back as **Read-only**, not Full access, and a write to it is refused with
+`policy_denied_readonly_object` until you say otherwise. One click on that object's Full access
+segment in the Objects panel fixes it for good.
+
+There is deliberately no migration for this. A legacy row and a Read-only level a user chose on
+purpose in the new panel are the same two column values — the store cannot tell them apart — so any
+migration that "restored" the legacy rows would silently unlock objects somebody had chosen to
+protect. Refusing a write that should have been allowed is recoverable in one click; allowing a
+write that should have been refused is not.
+
+**`schema_unavailable`.** Telling a table from a view — which decides whether
+`policy_denied_view_write` applies to a given write — needs the live schema, so a connection that can
+run a query but cannot read its own catalog (a role granted `SELECT` but not the metadata views, for
+instance) is now refused with `schema_unavailable` rather than executed, even when the query itself
+would have been fine. Such a connection was already unusable for `describe_schema` and the whole
+natural-language path, so this closes a gap rather than opening one — the alternative is a write to
+what turns out to be a view slipping through because the policy check couldn't tell.
 
 ## Export
 
@@ -206,6 +280,19 @@ untrusted spreadsheet.
 - **Zero or several attached databases** answer with `no_database_attached` and
   `multiple_databases_unsupported`. The second is a limit of today's gateway, which takes one schema and
   returns one SQL string; querying the first attachment silently would misreport what was asked.
+- **Files attach to a message** from the same composer menu. Selecting a file uploads it immediately
+  into provider storage and shows a removable pending chip; the chip remains pending until the
+  message is successfully persisted. Sent messages show read-only download chips with the original
+  display name and size. File bytes are never put in SQLite, the chat transcript, or the LLM prompt.
+  The server enforces a 25 MiB maximum per file and 10 files per message, regardless of picker
+  attributes. The stable browser-facing failures are `file_too_large` and `file_rejected`; provider
+  exception text is logged only on the host.
+- **File downloads are authenticated and forced to download.** `GET /files/{id}` requires the
+  existing session and resolves only the persisted attachment id. It sends
+  `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`, and
+  `Content-Security-Policy: sandbox`; HTML, XHTML, and SVG metadata is served as
+  `application/octet-stream`, never inline. A missing id, missing blob, unauthenticated request, or
+  provider failure does not disclose storage paths or exception details.
 - **Result rows are never stored.** A reloaded answer shows its row count, duration and truncation flag
   with a note saying so; open the SQL in the editor and run it again to see the rows. This keeps the
   local store from becoming a shadow copy of production data.
@@ -240,7 +327,7 @@ else: not SQL text, query results, table or column names, or connection details.
 opens, Escape closes.
 
 A message match shows the text around it, and opens the chat at the top — matches are not scrolled to.
-A project match opens that project in the sidebar; a database match goes to Connections.
+A project match opens that project in the sidebar; a database match opens that database's config page.
 
 Wildcards are searched for literally: `50%` finds a percent sign, and `a_b` does not match `axb`.
 
@@ -250,6 +337,38 @@ The SQLite store is versioned with EF Core migrations. A store created before th
 original tables and no `__EFMigrationsHistory`; startup stamps the initial migration as applied and then
 migrates, so an existing store keeps its data. A migration that fails stops the host rather than running
 against a half-migrated store — the log names the store path.
+
+## File storage and model handoff
+
+Phase E keeps file bytes behind `IFileStorageProvider`; SQLite stores only the message attachment
+metadata needed to render a chip and resolve an authenticated download. The first provider is
+`local-disk`, selected by `SqlAgent:Files:Provider` (environment form
+`SqlAgent__Files__Provider`). Its root is a `files` directory beside the SQLite database: for the
+default `Data Source=sqlagent.db`, that is `<current working directory>/files`; for an absolute
+`SqlAgent:Storage:ConnectionString` data source, it is `<database directory>/files`. Each blob is
+written under `yyyy/MM/{guid}{safe-extension}`. The client filename is display data only and never
+chooses a directory or blob identity.
+
+`SqlAgent:Files:MaxBytes` (`SqlAgent__Files__MaxBytes`) defaults to **25 MiB** (`26214400` bytes).
+The message limit is 10 attachments (`FileStorageOptions.MaxAttachmentsPerMessage`). The picker is
+only a convenience: the service streams and enforces the byte limit server-side, and the message
+binding enforces the count limit. The host resolves `SqlAgent:Files:Provider` and
+`SqlAgent:Files:MaxBytes` from configuration, using the documented defaults when they are unset. Only
+the `local-disk` provider is registered in this release; changing the provider requires a provider
+implementation and DI registration as described by
+[`ADR 0006`](adr/0006-file-storage-provider-boundary.md).
+
+The LLM boundary receives filename, content type, and authenticated URL metadata without opening or
+copying file bytes into `LlmSqlRequest`. Those URLs are loopback-relative (`/files/{id}`), so a future
+model hosted on this machine can fetch them through the same session, while a cloud model cannot reach
+`127.0.0.1`; a remote/provider-backed URL and its own access-token design are required before cloud
+file analysis is supported. The build intentionally has no real LLM provider yet.
+
+Deleting a chat, or deleting a project with **Delete chats**, removes attachment metadata and asks the
+owning provider to delete each blob best-effort. **Keep chats** leaves both metadata and blobs intact.
+The host also runs an orphan sweep after migrations at startup: it only considers local-disk blobs
+older than 24 hours with no matching metadata, so an abandoned upload newer than that age floor is not
+removed while a live circuit could still be finishing its send.
 
 ## Manual regression checklist
 
@@ -267,18 +386,27 @@ files under `wwwroot/js/`:
 | Check | Expected |
 |---|---|
 | Open the URL from `launch-url.txt` | Chat loads |
-| Navigate Chat → Connections → Chat via the sidebar nav | Both pages render and stay interactive; no full page reload |
-| Create a connection while Chat is open | It appears in the rail's picker without reloading the page |
+| Navigate Chat → a database's config page → Chat via the sidebar nav | Both pages render and stay interactive; no full page reload |
+| Create a database while Chat is open | It appears in the sidebar's Databases section without reloading the page |
 | Open `http://127.0.0.1:5099/` with no token in a private window | 401 |
-| Create a connection, then test it | Version and elapsed time reported |
-| Reopen the connection for editing | Connection-string field is empty |
-| Select the connection | Rail lists tables with checkboxes |
-| Uncheck a table, run `SELECT` against it | `policy_denied_hidden_table` |
-| Set read-only, run an `UPDATE` | `policy_denied_readonly` |
+| Create a database, then test it | Version and elapsed time reported |
+| Reopen the database for editing | Connection-string field is empty |
+| Open a database's config page | Objects panel lists tables and views grouped by schema, each with a Not visible / Read-only / Full access control |
+| Open a database's config page | Structure permissions shows six unchecked DDL operations by default, and the master switch selects/clears all six |
+| Set a table to Not visible, run `SELECT` against it | `policy_denied_hidden_table` |
+| Set the connection to read-only, run an `UPDATE` | `policy_denied_readonly` |
+| Enable Drop table, ask Chat to drop a table | `ddl_confirmation_required`; no provider call is made |
+| Run a typed UPDATE or permitted DDL from `/sql` | It runs only after the explicit Run action supplies confirmation |
 | Type SQL, press Ctrl+Enter | Query runs, syntax is highlighted |
 | Run a query returning more than 1000 rows | Truncation notice appears |
 | Export CSV, then JSON | Both files download and open cleanly |
 | Ask a question in Chat | "LLM is not configured" explanation, not a raw code |
+| Use Chat Tools → Explain schema | The composer is prefilled without sending; the model state says "No model configured" until a provider exists |
+| Use Chat Tools → Open scratchpad, or Edit on a SQL block | The SQL opens in CodeMirror; Run uses the same policy/audit boundary as `/sql` |
+| Ask Chat for a write/DDL statement | The pending SQL survives reload and executes only after the confirmation dialog |
+| Click Chat Tools → Schema diagram with one database attached | A policy-filtered ER diagram renders; zoom, fit, refresh, and SVG download work |
+| Hide a table, then create/reload a schema diagram | The hidden table and its relationships are absent |
+| Copy/edit a user message; copy/regenerate an assistant answer | Clipboard/edit actions work; regenerate replaces the existing answer rather than appending one |
 | Start a slow query, press Cancel | `execution_canceled` |
 | Set theme to Dark, reload | Page is dark on first paint — no white flash |
 | Set theme to System, switch the OS between light and dark | Page follows the OS without a reload |
@@ -294,6 +422,16 @@ files under `wwwroot/js/`:
 | Send with no database attached, then with two | Both explain themselves; both survive a reload |
 | Attach a database, send twice | The chip is still there for the second question |
 | Delete a connection that an old message used | The old message still shows the name it was sent with |
+| Open the composer attachment menu → Files, pick a small file, then cancel the picker | The file picker opens; a selected file shows a pending chip; canceling leaves no chip and no sent message attachment |
+| Pick an unreadable/failed upload or force a provider failure | The UI shows stable `file_rejected` copy without provider exception text; no unusable chip is persisted |
+| Pick a file exactly 25 MiB, then one byte over 25 MiB | The exact-limit file uploads; the larger file is rejected with `file_too_large` |
+| Attach 10 files, then try an 11th before sending | Ten files are accepted; the 11th is rejected with `file_rejected` and the existing pending chips remain usable |
+| Send a message with a file, reload the chat, and click its file chip | The read-only chip persists with name/size; the authenticated link downloads the blob and does not navigate to its contents |
+| Request an HTML or SVG attachment download | Response is `Content-Disposition: attachment`, `application/octet-stream`, `nosniff`, and CSP `sandbox`; no markup renders inline |
+| Open a file link in a private/unauthenticated browser window | The existing session/auth boundary rejects it (401), and no blob details are disclosed |
+| Delete a chat containing an attachment; repeat with a project and choose Delete chats | Attachment metadata disappears and the provider blob is deleted best-effort; provider cleanup failure does not block metadata deletion |
+| Delete a project and choose Keep chats | Chat, attachment metadata, and blob remain available |
+| Start an upload, abandon the send, restart the host, and inspect the files root | Pending state is gone after the circuit ends; startup cleanup removes only orphan blobs older than 24 hours, leaving newer files for the age-gated retry path |
 | Rename and delete a chat from its `⋮` menu | Rename updates the row; delete asks first and names the chat |
 | Do the same from inside the drawer below 1024px | The dialog centres on the viewport, not on the drawer, and survives the drawer closing |
 | Tab through the page below 1024px with the drawer closed | Focus never enters the drawer |
@@ -311,21 +449,23 @@ files under `wwwroot/js/`:
 
 ## Approved scope that was consciously dropped
 
-Two items the design spec described are **not** in this build. Both were left out on purpose, not
-missed, and neither is scheduled:
+Two items the design spec described were left out of the build this note originally described.
+One remains dropped and unscheduled; the other was partially delivered later and the record below
+says by which phase, rather than being deleted now that it's stale:
 
-- **Schema detail in the rail.** The spec called for a schema → table → column tree showing each
-  column's declared type in full (`total numeric(10,2)`), PK/FK markers, and the table's indexes.
-  What shipped is a flat list of `schema.table` entries, each with the visibility checkbox and the
-  name filter. The rail's job here is configuration — deciding what the agent may see — and the
-  checkbox is what does that; column detail is a browsing feature that the SQL page already covers by
-  querying. `SchemaColumn.TypeText` and the key/index data are all still extracted and still reach
-  the LLM, so adding the detail later is a rendering change, not a data change.
-- **Copy SQL.** The spec listed copy-SQL alongside export CSV/JSON on the SQL page. There is no such
-  button: the editor holds the text and the browser's own selection and clipboard already do the
-  job, whereas a copy button needs clipboard interop and a permissions story of its own. The chat
-  page's "open in editor" covers the one case where the SQL is somewhere the user cannot easily
-  select it.
+- **Schema detail in the rail** *(the rail this note describes is gone — see **Databases** above
+  for what replaced it)*. The spec called for a schema → table → column tree showing each column's
+  declared type in full (`total numeric(10,2)`), PK/FK markers, and the table's indexes. What
+  shipped at the time was a flat list of `schema.table` entries with a visibility checkbox and a
+  name filter — no grouping by schema at all. **Phase C1's objects panel** (`/database/{id}`, which
+  replaced the rail) delivered the schema grouping and marks each view with a badge, so the list is
+  a schema → table tree today rather than a flat one. Column-level detail is still missing, though:
+  no type, PK/FK marker, or index shows anywhere in the UI. `SchemaColumn.TypeText` and the key/index
+  data are extracted and still reach the LLM — they are just never rendered for a person to read —
+  so adding that detail later is still a rendering change, not a data change, and it is still not
+  scheduled.
+- **Copy SQL on `/sql`.** The editor remains the source of truth and does not duplicate a copy action;
+  chat SQL blocks and assistant messages expose browser clipboard actions.
 
 ## Out of scope (tracked for later phases)
 

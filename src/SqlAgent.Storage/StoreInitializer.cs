@@ -23,6 +23,27 @@ public static class StoreInitializer
     /// a missing history table, is what identifies an EnsureCreated store.</summary>
     private const string LegacyMarkerTable = "DatabaseConnections";
 
+    /// <summary>Runs the startup blob sweep without making an otherwise healthy store unavailable.</summary>
+    public static async Task SweepOrphansAsync(
+        FileStorageService storage,
+        ILogger logger,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            await storage.SweepOrphansAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "The startup file attachment orphan sweep failed; continuing with the store available.");
+        }
+    }
+
     public static async Task InitializeAsync(
         SqlAgentDbContext db, ILogger logger, CancellationToken ct = default)
     {
@@ -44,6 +65,14 @@ public static class StoreInitializer
                 logger.LogInformation(
                     "Store predates migrations; stamping {Migration} as applied before migrating.", baseline);
                 await StampAsync(db, baseline, ct);
+            }
+
+            var pending = await db.Database.GetPendingMigrationsAsync(ct);
+            if (pending.Any())
+            {
+                logger.LogInformation(
+                    "Applying {Count} pending migration(s): {Migrations}.", pending.Count(), string.Join(", ", pending));
+                BackUp(db, logger);
             }
 
             await db.Database.MigrateAsync(ct);
@@ -96,5 +125,41 @@ public static class StoreInitializer
         await db.Database.ExecuteSqlRawAsync(history.GetCreateIfNotExistsScript(), ct);
         await db.Database.ExecuteSqlRawAsync(
             history.GetInsertScript(new HistoryRow(migrationId, version)), ct);
+    }
+
+    /// <summary>
+    /// Copies the store to "&lt;store&gt;.bak" before a migration runs. The case this exists for is the
+    /// migration that succeeds and is wrong: the store is left readable and plausible, no test can catch
+    /// it, and without a copy the only recovery is retyping every connection. With one, it is a rename.
+    ///
+    /// Best-effort by design. A read-only directory or a locked .bak must not be the reason the host
+    /// cannot start — that turns a safety net into a new outage — so every failure here is logged and
+    /// swallowed. It is deliberately NOT inside the caller's try/catch, which rethrows.
+    ///
+    /// The connection is closed first. SQLite may hold the tail of a write in -wal, and copying the main
+    /// file alone while that is outstanding yields a backup missing the most recent commits. Closing
+    /// checkpoints and removes the journal, so the single file copied is the whole store.
+    /// </summary>
+    private static void BackUp(SqlAgentDbContext db, ILogger logger)
+    {
+        try
+        {
+            var connection = (SqliteConnection)db.Database.GetDbConnection();
+            var path = connection.DataSource;
+            if (string.IsNullOrEmpty(path) || !File.Exists(path)) return;
+
+            db.Database.CloseConnection();
+            SqliteConnection.ClearPool(connection);
+
+            File.Copy(path, path + ".bak", overwrite: true);
+            logger.LogInformation("Copied the store to {Backup} before migrating.", path + ".bak");
+        }
+        catch (Exception ex)
+        {
+            // Warning, not Error: nothing is broken and the migration is about to proceed, but a start
+            // that migrated without a usable backup is exactly what someone will want to know about
+            // afterwards. Only the message, never the path's directory contents.
+            logger.LogWarning(ex, "The store could not be copied before migrating; continuing without a backup.");
+        }
     }
 }

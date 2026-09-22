@@ -2,6 +2,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using SqlAgent.Core;
+using SqlAgent.Core.Policy;
 using SqlAgent.Storage;
 
 namespace SqlAgent.Tests;
@@ -62,8 +63,9 @@ public class NlQueryServiceTests
     {
         var connections = new DatabaseConnectionService(db, new InMemorySecretStore());
         var registry = new DatabaseProviderRegistry([provider]);
-        var svc = new NlQueryService(connections, new SchemaService(connections, registry, db),
-            new QueryExecutionService(connections, registry, db, NullLogger<QueryExecutionService>.Instance),
+        var schemas = new SchemaService(connections, registry, db);
+        var svc = new NlQueryService(connections, schemas,
+            new QueryExecutionService(connections, registry, db, schemas, NullLogger<QueryExecutionService>.Instance),
             gateway);
         return (svc, connections);
     }
@@ -156,6 +158,45 @@ public class NlQueryServiceTests
     }
 
     [Fact]
+    public async Task Generated_write_requires_confirmation_for_nl()
+    {
+        var (db, conn) = NewStore();
+        var provider = new NlFakeProvider(Schema);
+        var (svc, connections) = Build(db, provider,
+            new FakeGateway(LlmSqlResponse.Generated("UPDATE orders SET total = 0")));
+        var id = await AddConnectionAsync(connections, readOnly: false);
+
+        var r = await svc.AskAsync(id, "zero out the orders");
+
+        Assert.Equal(NlResponseKind.ConfirmationRequired, r.Kind);
+        Assert.Equal("ddl_confirmation_required", r.ErrorCode);
+        Assert.Equal("write", r.ConfirmationOperation);
+        Assert.Equal("UPDATE orders SET total = 0", r.GeneratedSql);
+        Assert.False(provider.Executed);
+        conn.Dispose();
+    }
+
+    [Fact]
+    public async Task Permitted_ddl_still_requires_confirmation_and_preserves_operation()
+    {
+        var (db, conn) = NewStore();
+        var provider = new NlFakeProvider(Schema);
+        var (svc, connections) = Build(db, provider,
+            new FakeGateway(LlmSqlResponse.Generated("DROP TABLE orders")));
+        var id = await AddConnectionAsync(connections, readOnly: false);
+        await connections.SetAllowedDdlAsync(id, AllowedDdl.DropTable);
+
+        var r = await svc.AskAsync(id, "drop orders");
+
+        Assert.Equal(NlResponseKind.ConfirmationRequired, r.Kind);
+        Assert.Equal("ddl_confirmation_required", r.ErrorCode);
+        Assert.Equal("DropTable", r.ConfirmationOperation);
+        Assert.Equal("DROP TABLE orders", r.GeneratedSql);
+        Assert.False(provider.Executed);
+        conn.Dispose();
+    }
+
+    [Fact]
     public async Task Gateway_failure_returns_stable_llm_error_without_leaking_exception()
     {
         var (db, conn) = NewStore();
@@ -208,6 +249,42 @@ public class NlQueryServiceTests
     }
 
     [Fact]
+    public async Task Existing_nl_requests_have_no_file_attachments()
+    {
+        var (db, conn) = NewStore();
+        var gateway = new FakeGateway(LlmSqlResponse.Clarify("?"));
+        var (svc, connections) = Build(db, new NlFakeProvider(Schema), gateway);
+        var id = await AddConnectionAsync(connections);
+
+        await svc.AskAsync(id, "anything");
+
+        Assert.Empty(gateway.LastRequest!.Attachments);
+        conn.Dispose();
+    }
+
+    [Fact]
+    public async Task Message_file_refs_are_forwarded_as_metadata_only()
+    {
+        var (db, conn) = NewStore();
+        var gateway = new FakeGateway(LlmSqlResponse.Clarify("Which report?"));
+        var (svc, connections) = Build(db, new NlFakeProvider(Schema), gateway);
+        var id = await AddConnectionAsync(connections);
+        var fileId = Guid.NewGuid();
+        var files = new[]
+        {
+            new ChatFileRef(fileId, "report.pdf", "application/pdf", 42, $"/files/{fileId}"),
+        };
+
+        await svc.AskAsync(id, "anything", CancellationToken.None, files);
+
+        var attachment = Assert.Single(gateway.LastRequest!.Attachments);
+        Assert.Equal("report.pdf", attachment.FileName);
+        Assert.Equal("application/pdf", attachment.ContentType);
+        Assert.Equal($"/files/{fileId}", attachment.Url);
+        conn.Dispose();
+    }
+
+    [Fact]
     public async Task Prompt_context_includes_dialect_hints()
     {
         var (db, conn) = NewStore();
@@ -220,6 +297,27 @@ public class NlQueryServiceTests
         // The schema text must be preceded by the target-dialect guidance so the model emits portable SQL.
         Assert.Contains("LIMIT", gateway.LastRequest!.SchemaContext);
         Assert.Contains("RETURNING", gateway.LastRequest.SchemaContext);
+        conn.Dispose();
+    }
+
+    [Fact]
+    public async Task Prompt_context_includes_views_marked_as_read_only()
+    {
+        var (db, conn) = NewStore();
+        var withView = new DatabaseSchema(
+            [new SchemaTable("public", "orders", [new SchemaColumn("id", "int", false)], ["id"], [], [])],
+            [new SchemaView("public", "order_summary", [new SchemaColumn("total", "numeric", true)])]);
+        var gateway = new FakeGateway(LlmSqlResponse.Clarify("?"));
+        var (svc, connections) = Build(db, new NlFakeProvider(withView), gateway);
+        var id = await AddConnectionAsync(connections);
+
+        await svc.AskAsync(id, "anything");
+
+        // A view the user made visible is queryable, so withholding it from the prompt hides half the
+        // schema from the model; handing it over unmarked invites an UPDATE that can only be refused.
+        var context = gateway.LastRequest!.SchemaContext;
+        Assert.Contains("public.order_summary(total numeric)", context);
+        Assert.Contains("VIEW", context);
         conn.Dispose();
     }
 

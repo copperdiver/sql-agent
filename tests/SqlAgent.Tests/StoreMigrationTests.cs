@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using SqlAgent.Core;
+using SqlAgent.Core.Policy;
 using SqlAgent.Storage;
 
 namespace SqlAgent.Tests;
@@ -65,6 +66,7 @@ public class StoreMigrationTests : IDisposable
         var kept = await db.DatabaseConnections.SingleAsync();
         Assert.Equal(connectionId, kept.Id);
         Assert.Equal("prod", kept.Name);
+        Assert.Equal(AllowedDdl.None, kept.AllowedDdl);
         // ...and the store now knows it is migrated, so the next start is an ordinary no-op migration.
         Assert.NotEmpty(await db.Database.GetAppliedMigrationsAsync());
     }
@@ -253,6 +255,40 @@ public class StoreMigrationTests : IDisposable
     }
 
     [Fact]
+    public async Task A_pre_attachment_store_keeps_chats_and_messages_when_file_metadata_is_added()
+    {
+        var chatId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+        await using (var db = NewContext())
+        {
+            await db.GetService<IMigrator>().MigrateAsync("20260922020121_SchemaDiagramOutcome");
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO Chats (Id, Title, CreatedAt, UpdatedAt, LastMessageAt, ProjectId)
+                VALUES ({chatId}, {"before attachments"}, {DateTime.UtcNow}, {DateTime.UtcNow}, {DateTime.UtcNow}, NULL)
+                """);
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO ChatMessages
+                    (Id, ChatId, Sequence, Role, Text, CreatedAt, GeneratedSql, OutcomeKind,
+                     ErrorCode, ConfirmationOperation, SchemaDiagramConnectionId, RowCount, ElapsedMs, Truncated)
+                VALUES
+                    ({messageId}, {chatId}, {0}, {"User"}, {"existing question"}, {DateTime.UtcNow}, NULL,
+                     {"None"}, NULL, NULL, NULL, NULL, NULL, {false})
+                """);
+        }
+        SqliteConnection.ClearAllPools();
+
+        await using var migrated = NewContext();
+        await StoreInitializer.InitializeAsync(migrated, NullLogger.Instance);
+
+        Assert.Equal(chatId, (await migrated.Chats.SingleAsync()).Id);
+        Assert.Equal(messageId, (await migrated.ChatMessages.SingleAsync()).Id);
+        var tables = await migrated.Database
+            .SqlQueryRaw<string>("SELECT name AS Value FROM sqlite_master WHERE type = 'table'")
+            .ToListAsync();
+        Assert.Contains("MessageAttachments", tables);
+    }
+
+    [Fact]
     public async Task A_migration_failure_is_logged_with_the_file_path_not_the_full_connection_string()
     {
         // Regression test: the catch block used to log GetDbConnection().ConnectionString, which echoes
@@ -417,6 +453,137 @@ public class StoreMigrationTests : IDisposable
         return fingerprint;
     }
 
+    [Fact]
+    public async Task A_store_with_pending_migrations_is_copied_before_they_are_applied()
+    {
+        // The backup exists for the migration that succeeds and is wrong — the case no test can catch,
+        // because the store is left readable and plausible. Recovering from it is a file rename only if
+        // the copy was taken before the migrator touched anything.
+        await using (var legacy = NewLegacyContext())
+        {
+            await legacy.Database.EnsureCreatedAsync();
+            legacy.Set<DatabaseConnection>().Add(new DatabaseConnection
+            {
+                Id = Guid.NewGuid(),
+                Name = "prod",
+                ProviderType = DatabaseProviderType.Postgres,
+                ConnectionStringSecretRef = "db:abc",
+                IsReadOnly = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+            await legacy.SaveChangesAsync();
+        }
+        SqliteConnection.ClearAllPools();
+
+        await using var db = NewContext();
+        await StoreInitializer.InitializeAsync(db, NullLogger.Instance);
+
+        var backup = DbPath + ".bak";
+        Assert.True(File.Exists(backup), $"Expected a backup at {backup}.");
+
+        // The copy must be the store as it was BEFORE the migration, not after: opened through the
+        // pre-B1 model it still reads, and it must not have the tables the migration went on to add.
+        SqliteConnection.ClearAllPools();
+        await using var restored = new SqlAgentDbContext(
+            new DbContextOptionsBuilder<SqlAgentDbContext>()
+                .UseSqlite($"Data Source={backup}").Options);
+        var tables = await restored.Database
+            .SqlQueryRaw<string>("SELECT name AS Value FROM sqlite_master WHERE type = 'table'")
+            .ToListAsync();
+        Assert.Contains("DatabaseConnections", tables);
+        Assert.DoesNotContain("Chats", tables);
+    }
+
+    [Fact]
+    public async Task A_store_with_nothing_pending_is_not_copied()
+    {
+        // Every host start runs InitializeAsync. Writing a copy of the whole store on each one would
+        // grow a file nobody asked for and overwrite the one backup that mattered.
+        await using (var first = NewContext())
+            await StoreInitializer.InitializeAsync(first, NullLogger.Instance);
+        SqliteConnection.ClearAllPools();
+
+        var backup = DbPath + ".bak";
+        if (File.Exists(backup)) File.Delete(backup);
+
+        await using var db = NewContext();
+        await StoreInitializer.InitializeAsync(db, NullLogger.Instance);
+
+        Assert.False(File.Exists(backup), "A store with no pending migrations must not be copied.");
+    }
+
+    [Fact]
+    public async Task A_failed_backup_does_not_stop_the_migration()
+    {
+        // The backup is insurance, not a precondition. A read-only directory or a locked .bak must not
+        // be the reason a host cannot start — that would turn a safety net into a new outage.
+        await using (var legacy = NewLegacyContext())
+            await legacy.Database.EnsureCreatedAsync();
+        SqliteConnection.ClearAllPools();
+
+        // A directory where the .bak file needs to go: File.Copy cannot overwrite it, so the copy throws
+        // and the migration must proceed regardless.
+        Directory.CreateDirectory(DbPath + ".bak");
+
+        var provider = new RecordingLoggerProvider();
+        await using var db = NewContext();
+        await StoreInitializer.InitializeAsync(db, provider.CreateLogger("StoreInitializer"));
+
+        Assert.NotEmpty(await db.Database.GetAppliedMigrationsAsync());
+        Assert.Contains(provider.Records, r => r.Level == LogLevel.Warning);
+    }
+
+    [Fact]
+    public async Task The_schema_cache_is_cleared_by_the_migration_and_policy_rows_are_not()
+    {
+        // A cache row written before views existed describes a database that appears to have none. The
+        // model would go on being told that until something unrelated invalidated it — so the migration
+        // that introduces views is what has to drop it. Policy rows in the same store must survive
+        // untouched: this migration changes no schema and owns no user decision.
+        Guid connectionId, policyId;
+        await using (var seed = NewContext())
+        {
+            await seed.GetService<IMigrator>().MigrateAsync("20260813161818_Projects");
+
+            connectionId = Guid.NewGuid();
+            policyId = Guid.NewGuid();
+            await seed.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO DatabaseConnections
+                    (Id, Name, ProviderType, ConnectionStringSecretRef, IsReadOnly, CreatedAt, UpdatedAt)
+                VALUES
+                    ({connectionId}, {"prod"}, {(int)DatabaseProviderType.Postgres}, {"db:abc"}, {false},
+                     {DateTime.UtcNow}, {DateTime.UtcNow})
+                """);
+            await seed.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO TablePolicies
+                    (Id, DatabaseConnectionId, SchemaName, TableName, IsVisible, CanRead, CanWrite)
+                VALUES
+                    ({policyId}, {connectionId}, {"dbo"}, {"secrets"}, {false}, {true}, {false})
+                """);
+            await seed.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO SchemaCaches
+                    (Id, DatabaseConnectionId, SchemaHash, FilteredSchemaJson, GeneratedAt)
+                VALUES
+                    ({Guid.NewGuid()}, {connectionId}, {"stale"},
+                     {"""{"tables":[{"schema":"dbo","name":"orders","columns":[]}]"""},
+                     {DateTime.UtcNow})
+                """);
+        }
+        SqliteConnection.ClearAllPools();
+
+        await using var db = NewContext();
+        await StoreInitializer.InitializeAsync(db, NullLogger.Instance);
+
+        Assert.Empty(await db.SchemaCaches.ToListAsync());
+
+        var policy = await db.TablePolicies.SingleAsync();
+        Assert.Equal(policyId, policy.Id);
+        Assert.False(policy.IsVisible);
+        Assert.Equal("secrets", policy.TableName);
+        Assert.Equal(connectionId, (await db.DatabaseConnections.SingleAsync()).Id);
+    }
+
     private LegacyStoreDbContext NewLegacyContext() => new(
         new DbContextOptionsBuilder<LegacyStoreDbContext>().UseSqlite(ConnectionString).Options);
 
@@ -452,6 +619,7 @@ public sealed class LegacyStoreDbContext(DbContextOptions<LegacyStoreDbContext> 
         {
             e.HasKey(x => x.Id);
             e.HasIndex(x => x.Name).IsUnique();
+            e.Ignore(x => x.AllowedDdl);
         });
         b.Entity<TablePolicy>(e =>
         {
@@ -492,6 +660,8 @@ public sealed class ChatOnlyDbContext(DbContextOptions<ChatOnlyDbContext> option
                 .HasForeignKey(x => x.ChatId).OnDelete(DeleteBehavior.Cascade);
             e.Property(x => x.Role).HasConversion<string>().HasMaxLength(16);
             e.Property(x => x.OutcomeKind).HasConversion<string>().HasMaxLength(32);
+            e.Ignore(x => x.ConfirmationOperation);
+            e.Ignore(x => x.SchemaDiagramConnectionId);
         });
     }
 }

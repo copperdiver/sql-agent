@@ -1,6 +1,9 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using SqlAgent.Core;
 using SqlAgent.Storage;
 
 namespace SqlAgent.Tests;
@@ -66,6 +69,44 @@ public class ChatServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task File_metadata_round_trips_without_exposing_provider_storage_keys()
+    {
+        var chat = await _chats.CreateChatAsync("t");
+        var fileId = Guid.NewGuid();
+
+        await _chats.AppendMessageAsync(new ChatMessageInput(
+            chat, ChatRole.User, "q", [],
+            Files: [new ChatFileRef(fileId, "report.pdf", "application/pdf", 42, $"/files/{fileId}")]));
+
+        var detail = await _chats.GetChatAsync(chat);
+        Assert.NotNull(detail);
+        var message = detail.Messages.Single();
+        var file = Assert.Single(message.Files!);
+        Assert.Equal(fileId, file.Id);
+        Assert.Equal("report.pdf", file.FileName);
+        Assert.Equal("application/pdf", file.ContentType);
+        Assert.Equal(42, file.SizeBytes);
+        Assert.Equal($"/files/{fileId}", file.Url);
+        Assert.DoesNotContain(typeof(ChatMessageView).GetProperties(),
+            p => p.Name is "ProviderKey" or "StorageKey");
+    }
+
+    [Fact]
+    public async Task A_message_accepts_ten_files_but_rejects_an_eleventh_with_file_rejected()
+    {
+        var chat = await _chats.CreateChatAsync("t");
+        static ChatFileRef File(int index) => new(Guid.NewGuid(), $"file-{index}.txt", "text/plain", index, $"/files/{index}");
+
+        var accepted = await _chats.AppendMessageAsync(new ChatMessageInput(
+            chat, ChatRole.User, "q", [], Files: Enumerable.Range(1, 10).Select(File).ToArray()));
+        Assert.Equal(10, accepted.Files!.Count);
+
+        var exception = await Assert.ThrowsAsync<FileRejectedException>(() => _chats.AppendMessageAsync(
+            new ChatMessageInput(chat, ChatRole.User, "too many", [], Files: Enumerable.Range(1, 11).Select(File).ToArray())));
+        Assert.Equal("file_rejected", exception.ErrorCode);
+    }
+
+    [Fact]
     public async Task Deleting_a_chat_takes_its_messages_and_their_attachments_with_it()
     {
         var chat = await _chats.CreateChatAsync("t");
@@ -77,6 +118,57 @@ public class ChatServiceTests : IDisposable
         Assert.Null(await _chats.GetChatAsync(chat));
         Assert.Empty(await _db.ChatMessages.ToListAsync());
         Assert.Empty(await _db.ChatMessageDatabases.ToListAsync());
+        Assert.Empty(await _db.MessageAttachments.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Deleting_a_chat_requests_provider_deletion_before_attachment_metadata_cascade()
+    {
+        var provider = new RecordingFileStorageProvider();
+        var cleanup = new AttachmentBlobCleanup(
+            new FileStorageProviderRegistry([provider]),
+            NullLogger<AttachmentBlobCleanup>.Instance);
+        var chats = new ChatService(_db, null, cleanup);
+        var chat = await chats.CreateChatAsync("t");
+        await chats.AppendMessageAsync(new ChatMessageInput(
+            chat, ChatRole.User, "q", [],
+            Files: [new ChatFileRef(Guid.NewGuid(), "report.pdf", "application/pdf", 42, "/files/report") ]));
+        var metadata = await _db.MessageAttachments.SingleAsync();
+        metadata.ProviderKey = provider.Key;
+        metadata.StorageKey = "storage/report.pdf";
+        await _db.SaveChangesAsync();
+
+        Assert.True(await chats.DeleteChatAsync(chat));
+
+        Assert.Equal(["storage/report.pdf"], provider.DeletedKeys);
+        Assert.Empty(await _db.MessageAttachments.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Provider_deletion_failure_does_not_fail_chat_metadata_deletion()
+    {
+        var provider = new RecordingFileStorageProvider { ThrowOnDelete = true };
+        var logs = new RecordingLoggerProvider();
+        var cleanup = new AttachmentBlobCleanup(
+            new FileStorageProviderRegistry([provider]),
+            LoggerFactory.Create(builder => builder.AddProvider(logs))
+                .CreateLogger<AttachmentBlobCleanup>());
+        var chats = new ChatService(_db, null, cleanup);
+        var chat = await chats.CreateChatAsync("t");
+        await chats.AppendMessageAsync(new ChatMessageInput(
+            chat, ChatRole.User, "q", [],
+            Files: [new ChatFileRef(Guid.NewGuid(), "report.pdf", "application/pdf", 42, "/files/report") ]));
+        var metadata = await _db.MessageAttachments.SingleAsync();
+        metadata.ProviderKey = provider.Key;
+        metadata.StorageKey = "storage/report.pdf";
+        await _db.SaveChangesAsync();
+
+        Assert.True(await chats.DeleteChatAsync(chat));
+
+        Assert.Empty(await _db.MessageAttachments.ToListAsync());
+        var warning = Assert.Single(logs.Records, record => record.Level == LogLevel.Warning);
+        Assert.Null(warning.Exception);
+        Assert.DoesNotContain("sensitive provider details", warning.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -219,6 +311,26 @@ public class ChatServiceTests : IDisposable
     {
         _db.Dispose();
         _conn.Dispose();
+    }
+}
+
+file sealed class RecordingFileStorageProvider : IFileStorageProvider
+{
+    public string Key => "test-provider";
+    public bool ThrowOnDelete { get; set; }
+    public List<string> DeletedKeys { get; } = [];
+
+    public Task<StoredFile> SaveAsync(FileUpload upload, CancellationToken ct = default) =>
+        throw new NotSupportedException();
+
+    public Task<Stream?> OpenReadAsync(string storageKey, CancellationToken ct = default) =>
+        Task.FromResult<Stream?>(null);
+
+    public Task<bool> DeleteAsync(string storageKey, CancellationToken ct = default)
+    {
+        if (ThrowOnDelete) throw new IOException("sensitive provider details");
+        DeletedKeys.Add(storageKey);
+        return Task.FromResult(true);
     }
 }
 

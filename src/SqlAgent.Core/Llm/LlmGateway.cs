@@ -5,7 +5,25 @@ namespace SqlAgent.Core;
 /// already policy-filtered schema text (hidden tables removed upstream — see CD-50 T4). The gateway sees
 /// no connection strings, no secrets, and no hidden tables (CD-51 Story 1.4).
 /// </summary>
-public record LlmSqlRequest(string Question, DatabaseProviderType Provider, string SchemaContext);
+public record LlmSqlRequest
+{
+    public LlmSqlRequest(
+        string question,
+        DatabaseProviderType provider,
+        string schemaContext,
+        IReadOnlyList<LlmFileAttachment>? attachments = null)
+    {
+        Question = question;
+        Provider = provider;
+        SchemaContext = schemaContext;
+        Attachments = attachments ?? [];
+    }
+
+    public string Question { get; init; }
+    public DatabaseProviderType Provider { get; init; }
+    public string SchemaContext { get; init; }
+    public IReadOnlyList<LlmFileAttachment> Attachments { get; init; }
+}
 
 /// <summary>
 /// The model's answer: either SQL to validate-and-run, or a clarifying question when the request is too

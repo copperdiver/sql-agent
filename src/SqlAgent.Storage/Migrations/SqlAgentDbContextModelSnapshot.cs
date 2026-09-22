@@ -71,6 +71,9 @@ namespace SqlAgent.Storage.Migrations
                     b.Property<Guid>("ChatId")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ConfirmationOperation")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
@@ -95,6 +98,9 @@ namespace SqlAgent.Storage.Migrations
 
                     b.Property<int?>("RowCount")
                         .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("SchemaDiagramConnectionId")
+                        .HasColumnType("TEXT");
 
                     b.Property<int>("Sequence")
                         .HasColumnType("INTEGER");
@@ -146,6 +152,11 @@ namespace SqlAgent.Storage.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("AllowedDdl")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(0);
+
                     b.Property<string>("ConnectionStringSecretRef")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -172,6 +183,48 @@ namespace SqlAgent.Storage.Migrations
                         .IsUnique();
 
                     b.ToTable("DatabaseConnections");
+                });
+
+            modelBuilder.Entity("SqlAgent.Storage.MessageAttachment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ChatMessageId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProviderKey")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("StorageKey")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Url")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChatMessageId");
+
+                    b.ToTable("MessageAttachments");
                 });
 
             modelBuilder.Entity("SqlAgent.Storage.Project", b =>
@@ -342,6 +395,17 @@ namespace SqlAgent.Storage.Migrations
                     b.Navigation("Message");
                 });
 
+            modelBuilder.Entity("SqlAgent.Storage.MessageAttachment", b =>
+                {
+                    b.HasOne("SqlAgent.Storage.ChatMessage", "Message")
+                        .WithMany("Attachments")
+                        .HasForeignKey("ChatMessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Message");
+                });
+
             modelBuilder.Entity("SqlAgent.Storage.Chat", b =>
                 {
                     b.Navigation("Messages");
@@ -349,6 +413,8 @@ namespace SqlAgent.Storage.Migrations
 
             modelBuilder.Entity("SqlAgent.Storage.ChatMessage", b =>
                 {
+                    b.Navigation("Attachments");
+
                     b.Navigation("Databases");
                 });
 

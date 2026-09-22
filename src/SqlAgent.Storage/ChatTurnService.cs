@@ -1,3 +1,5 @@
+using SqlAgent.Core;
+
 namespace SqlAgent.Storage;
 
 /// <summary>
@@ -9,6 +11,11 @@ namespace SqlAgent.Storage;
 public record ChatTurnResult(
     Guid ChatId, ChatMessageView UserMessage, ChatMessageView AssistantMessage, NlQueryResult? Live);
 
+public record ChatConfirmationResult(ChatMessageView Message, NlQueryResult Live);
+public record ChatRegenerationResult(ChatMessageView Message, NlQueryResult? Live);
+
+public record ChatDiagramResult(Guid ChatId, ChatMessageView Message, DatabaseSchema Schema, Guid ConnectionId);
+
 /// <summary>
 /// Runs one chat turn: persist the question, decide what the attached databases allow, ask, persist the
 /// answer. Split out of <see cref="ChatService"/> so a whole turn is unit-testable without bUnit and the
@@ -19,7 +26,8 @@ public record ChatTurnResult(
 /// Losing a typed question to any of those is the one outcome this design refuses.
 /// </summary>
 public class ChatTurnService(
-    ChatService chats, NlQueryService nlQueries, DatabaseConnectionService connections)
+    ChatService chats, NlQueryService nlQueries, DatabaseConnectionService connections,
+    QueryExecutionService executor, SchemaService schemas)
 {
     public const string NoDatabaseAttached = "no_database_attached";
     public const string MultipleDatabasesUnsupported = "multiple_databases_unsupported";
@@ -29,11 +37,24 @@ public class ChatTurnService(
     /// inventing one would be worse than admitting the gap.</summary>
     private const string DeletedDatabaseName = "(deleted database)";
 
+    // Kept as a source-compatible bridge for callers that supplied the cancellation token as the
+    // fourth positional argument before file attachments were added.
+    public Task<ChatTurnResult> SendAsync(
+        Guid? chatId, string question, IReadOnlyList<Guid> databaseIds, CancellationToken ct) =>
+        SendAsync(chatId, question, databaseIds, files: null, ct);
+
     public async Task<ChatTurnResult> SendAsync(
-        Guid? chatId, string question, IReadOnlyList<Guid> databaseIds, CancellationToken ct = default)
+        Guid? chatId, string question, IReadOnlyList<Guid> databaseIds,
+        IReadOnlyList<PendingFileAttachment>? files = null, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(question))
             throw new ArgumentException("A question is required.", nameof(question));
+
+        // Pending records cross the storage boundary here. The public message ref keeps only display
+        // metadata and the authenticated URL, while the binding seam retains provider/storage identity
+        // for later lifecycle and download work. No file bytes or streams enter the turn or NL layers.
+        var fileRefs = files?.Select(MessageAttachmentService.CreateReference).ToList()
+            ?? (IReadOnlyList<ChatFileRef>)[];
 
         // Names are resolved now, not at render time: this is the moment the snapshot is true.
         var attachments = new List<ChatDatabaseRef>(databaseIds.Count);
@@ -51,14 +72,15 @@ public class ChatTurnService(
         // it too, independently, for the same reason.
         var chat = chatId ?? await chats.CreateChatAsync(question, ct);
         var userMessage = await chats.AppendMessageAsync(
-            new ChatMessageInput(chat, ChatRole.User, question.Trim(), attachments), ct);
+            new ChatMessageInput(chat, ChatRole.User, question.Trim(), attachments, Files: fileRefs), ct);
 
-        var (live, answer) = await AnswerAsync(chat, question, databaseIds, ct);
+        var (live, answer) = await AnswerAsync(chat, question, databaseIds, fileRefs, ct);
         return new ChatTurnResult(chat, userMessage, answer, live);
     }
 
     private async Task<(NlQueryResult? Live, ChatMessageView Answer)> AnswerAsync(
-        Guid chat, string question, IReadOnlyList<Guid> databaseIds, CancellationToken ct)
+        Guid chat, string question, IReadOnlyList<Guid> databaseIds,
+        IReadOnlyList<ChatFileRef> files, CancellationToken ct)
     {
         switch (databaseIds.Count)
         {
@@ -78,7 +100,7 @@ public class ChatTurnService(
                 NlQueryResult result;
                 try
                 {
-                    result = await nlQueries.AskAsync(databaseIds[0], question, ct);
+                    result = await nlQueries.AskAsync(databaseIds[0], question, ct, files);
                 }
                 catch (OperationCanceledException)
                 {
@@ -136,8 +158,65 @@ public class ChatTurnService(
             chat, ChatRole.Assistant, r.ClarificationQuestion ?? "", [],
             OutcomeKind: ChatOutcomeKind.Clarification),
 
+        NlResponseKind.ConfirmationRequired => new ChatMessageInput(
+            chat, ChatRole.Assistant, r.ErrorMessage ?? "", [], r.GeneratedSql,
+            ChatOutcomeKind.ConfirmationRequired, ErrorCode: r.ErrorCode,
+            ElapsedMs: r.ElapsedMs == 0 ? null : r.ElapsedMs,
+            ConfirmationOperation: r.ConfirmationOperation),
+
         _ => new ChatMessageInput(
             chat, ChatRole.Assistant, r.ErrorMessage ?? "", [], r.GeneratedSql, ChatOutcomeKind.Error,
             ErrorCode: r.ErrorCode, ElapsedMs: r.ElapsedMs == 0 ? null : r.ElapsedMs),
     };
+
+    /// <summary>
+    /// Confirms and executes a pending model-generated write/DDL through the same service boundary as
+    /// the SQL page, then replaces that assistant message in place. The caller supplies only the message
+    /// id; the database attachment is recovered from the persisted transcript to prevent a stale or
+    /// changed composer attachment from redirecting the action.
+    /// </summary>
+    public async Task<ChatConfirmationResult> ConfirmAsync(
+        Guid assistantMessageId, CancellationToken ct = default)
+    {
+        var target = await chats.GetConfirmationTargetAsync(assistantMessageId, ct)
+            ?? throw new InvalidOperationException("The pending confirmation is no longer available.");
+        var result = await executor.ExecuteSqlAsync(
+            target.ConnectionId, target.Sql, confirmed: true, ct);
+
+        var message = await chats.UpdateOutcomeAsync(target.MessageId, result, CancellationToken.None)
+            ?? throw new InvalidOperationException("The pending confirmation message no longer exists.");
+        var live = result.Success
+            ? NlQueryResult.Query(result)
+            : NlQueryResult.Error(result.ErrorCode ?? "execution_error",
+                result.ErrorMessage ?? "The statement could not be executed.", result.Sql, result.ElapsedMs);
+        return new ChatConfirmationResult(message, live);
+    }
+
+    public async Task<ChatRegenerationResult> RegenerateAsync(
+        Guid assistantMessageId, CancellationToken ct = default)
+    {
+        var target = await chats.GetRegenerationTargetAsync(assistantMessageId, ct)
+            ?? throw new InvalidOperationException("The answer cannot be regenerated without one database.");
+        var result = await nlQueries.AskAsync(target.ConnectionId, target.Question, ct);
+        var message = await chats.ReplaceOutcomeAsync(
+            target.MessageId, FromResult(target.ChatId, result), CancellationToken.None)
+            ?? throw new InvalidOperationException("The answer no longer exists.");
+        var live = result.Kind == NlResponseKind.QueryResult ? result : null;
+        return new ChatRegenerationResult(message, live);
+    }
+
+    /// <summary>Creates a transcript outcome whose schema is intentionally live data. Only the
+    /// connection id is persisted; both this path and reload go through SchemaService so hidden objects
+    /// cannot leak into the diagram.</summary>
+    public async Task<ChatDiagramResult> CreateSchemaDiagramAsync(
+        Guid? chatId, Guid connectionId, CancellationToken ct = default)
+    {
+        var schema = await schemas.GetVisibleSchemaAsync(connectionId, ct)
+            ?? throw new InvalidOperationException("The selected database is no longer available.");
+        var chat = chatId ?? await chats.CreateChatAsync("Schema diagram", ct);
+        var message = await chats.AppendMessageAsync(new ChatMessageInput(
+            chat, ChatRole.Assistant, "", [], OutcomeKind: ChatOutcomeKind.SchemaDiagram,
+            SchemaDiagramConnectionId: connectionId), ct);
+        return new ChatDiagramResult(chat, message, schema, connectionId);
+    }
 }

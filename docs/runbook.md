@@ -65,6 +65,44 @@ defaults to **5099**. The bind address is fixed at `127.0.0.1` and is not config
 `docs/web-ui.md` for why. Full screen-by-screen coverage, the manual regression checklist, and
 the export/chat behavior are in [`docs/web-ui.md`](web-ui.md).
 
+### File storage
+
+File attachments use the provider boundary described in
+[`ADR 0006`](adr/0006-file-storage-provider-boundary.md). The Phase E host ships one provider,
+`local-disk`, and the effective defaults are:
+
+| Setting | Environment form | Default | Meaning |
+|---|---|---:|---|
+| `SqlAgent:Files:Provider` | `SqlAgent__Files__Provider` | `local-disk` | Provider key resolved by `IFileStorageProviderRegistry` |
+| `SqlAgent:Files:MaxBytes` | `SqlAgent__Files__MaxBytes` | `26214400` | Maximum size of one upload (25 MiB) |
+| message attachment count | — | `10` | Maximum files persisted on one message |
+
+The host resolves `SqlAgent:Files:Provider` and `SqlAgent:Files:MaxBytes` from configuration, using
+the documented defaults when they are unset. No cloud or object-storage provider is registered in
+this release. Treat the two `SqlAgent:Files:*` names as the provider configuration contract:
+selecting a different provider requires implementing it and registering it with the host, and the
+current local-disk registration remains the safe default.
+
+Local-disk stores bytes under `<SQLite store directory>/files/yyyy/MM/{guid}{safe-extension}`. With
+the default `Data Source=sqlagent.db`, this is `files` under the process working directory; with an
+absolute SQLite data source, it is `files` beside that database. Client filenames are display-only and
+never become a path or storage identity. The host streams uploads and enforces the 25 MiB limit
+server-side; ten files per message is also enforced server-side. Provider errors are logged but stable
+`file_too_large` / `file_rejected` outcomes are returned to the browser instead of provider text.
+
+`GET /files/{id}` is behind the same loopback/origin and session middleware as the UI. It resolves only
+the attachment id, returns a download (`Content-Disposition: attachment`), disables sniffing with
+`X-Content-Type-Options: nosniff`, adds `Content-Security-Policy: sandbox`, and neutralizes HTML,
+XHTML, and SVG as `application/octet-stream`. A missing id/blob or provider failure is a non-
+disclosing 404. File metadata reaches `LlmSqlRequest` without reading bytes. The URL is reachable
+only on the host's loopback HTTP service, so a cloud model cannot fetch it; cloud attachment analysis
+needs a remote storage provider and an explicit remote access design.
+
+Chat deletion and project deletion with **Delete chats** remove attachment metadata and best-effort
+delete provider blobs. **Keep chats** leaves attachments with the chats. A startup sweep runs after
+migrations and removes only local-disk orphan blobs older than 24 hours; this age floor protects a
+pending upload that is still completing after a circuit interruption or restart.
+
 ### The launch token
 
 #### Where to read it
@@ -165,6 +203,26 @@ There is no configuration key here to set for the language model — `SqlAgent:L
 defines, and none of them wires an LLM provider. Connecting a real vendor behind
 `ILlmSqlGateway` is planned for a later phase; when it lands, its own configuration keys and
 setup steps belong in this section.
+
+## DDL permissions and confirmation
+
+On a database's configuration page, **Structure permissions** controls the per-connection allow-list
+for `CREATE TABLE`, `ALTER TABLE`, `DROP TABLE`, `CREATE INDEX`, `DROP INDEX`, and `TRUNCATE`.
+Every switch is off by default, including for migrated stores; the master switch selects or clears all
+six. These settings are saved immediately and only authorize a statement shape — they never execute a
+statement themselves. `CREATE VIEW`, routines, `EXEC`, and `GRANT` remain unsupported and fail closed.
+
+The stable refusal codes are:
+
+- `policy_denied_ddl` — the DDL shape is supported but its connection switch is off.
+- `policy_denied_unsupported` — the SQL shape is outside the supported closed set.
+- `ddl_confirmation_required` — a write or permitted DDL statement reached an unconfirmed surface.
+
+The `/sql` page is the confirmed surface: a typed statement runs with confirmation when the user
+presses Run. Chat's natural-language path and MCP `query_database` remain unconfirmed at the service
+boundary. Chat persists `ddl_confirmation_required` with the generated SQL, and the Phase D chat dialog
+confirms it by calling the same `QueryExecutionService` with `confirmed: true`; MCP still returns the
+stable refusal without executing.
 
 ## Provider fixtures
 

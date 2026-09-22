@@ -5,19 +5,61 @@ namespace SqlAgent.Tests;
 
 public class SqlPolicyValidatorTests
 {
-    // Default: every table visible. Individual tests override with a hidden set.
-    private static Func<SqlTableReference, bool> Visible(params string[] hidden)
+    // Default: every object fully accessible. Individual tests override.
+    private static Func<SqlTableReference, ObjectPolicy> Policy(
+        string[]? hidden = null, string[]? readOnly = null, string[]? views = null)
     {
-        var hiddenSet = hidden.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return t => !hiddenSet.Contains(t.Name) && !hiddenSet.Contains(t.ToString());
+        var hiddenSet = (hidden ?? []).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var readOnlySet = (readOnly ?? []).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var viewSet = (views ?? []).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return t =>
+        {
+            bool Match(HashSet<string> set) => set.Contains(t.Name) || set.Contains(t.ToString());
+            var access = Match(hiddenSet) ? ObjectAccess.Hidden
+                : Match(readOnlySet) ? ObjectAccess.ReadOnly
+                : ObjectAccess.Full;
+            return new ObjectPolicy(access, Match(viewSet));
+        };
     }
 
     private static PolicyDecision Validate(
         string sql,
         bool isReadOnly = false,
         DatabaseProviderType provider = DatabaseProviderType.Postgres,
-        Func<SqlTableReference, bool>? isVisible = null)
-        => SqlPolicyValidator.Validate(sql, provider, isReadOnly, isVisible ?? Visible());
+        Func<SqlTableReference, ObjectPolicy>? resolve = null,
+        AllowedDdl allowedDdl = AllowedDdl.None,
+        bool confirmed = true)
+        => SqlPolicyValidator.Validate(sql, provider, isReadOnly, resolve ?? Policy(), allowedDdl, confirmed);
+
+    [Theory]
+    [InlineData("CREATE TABLE archive (id int)", DatabaseProviderType.Postgres, DdlOperation.CreateTable)]
+    [InlineData("ALTER TABLE archive ADD COLUMN note text", DatabaseProviderType.Postgres, DdlOperation.AlterTable)]
+    [InlineData("ALTER TABLE archive ADD note int", DatabaseProviderType.SqlServer, DdlOperation.AlterTable)]
+    [InlineData("DROP TABLE archive", DatabaseProviderType.Postgres, DdlOperation.DropTable)]
+    [InlineData("CREATE INDEX ix_archive_id ON archive (id)", DatabaseProviderType.Postgres, DdlOperation.CreateIndex)]
+    [InlineData("DROP INDEX ix_archive_id", DatabaseProviderType.Postgres, DdlOperation.DropIndex)]
+    [InlineData("TRUNCATE TABLE archive", DatabaseProviderType.Postgres, DdlOperation.Truncate)]
+    public void Supported_ddl_gets_a_specific_operation(
+        string sql, DatabaseProviderType provider, DdlOperation operation)
+    {
+        var parsed = Assert.Single(SqlAnalyzer.Analyze(sql, provider));
+
+        Assert.Equal(SqlStatementKind.Ddl, parsed.Kind);
+        Assert.Equal(operation, parsed.DdlOperation);
+    }
+
+    [Theory]
+    [InlineData("CREATE VIEW report AS SELECT 1")]
+    [InlineData("GRANT SELECT ON orders TO app")]
+    [InlineData("EXEC report")]
+    public void Unsupported_statement_shapes_remain_other_and_fail_closed(string sql)
+    {
+        var parsed = Assert.Single(SqlAnalyzer.Analyze(sql, DatabaseProviderType.Postgres));
+
+        Assert.Equal(SqlStatementKind.Other, parsed.Kind);
+        Assert.Equal(DdlOperation.Unsupported, parsed.DdlOperation);
+    }
 
     // --- Read-only enforcement -------------------------------------------------
 
@@ -32,7 +74,34 @@ public class SqlPolicyValidatorTests
     {
         var d = Validate(sql, isReadOnly: true);
         Assert.False(d.Allowed);
-        Assert.Contains(d.DenyCode, new[] { "policy_denied_readonly", "policy_denied_unsupported" });
+        Assert.Contains(d.DenyCode, new[] { "policy_denied_readonly", "policy_denied_unsupported", "policy_denied_ddl" });
+    }
+
+    [Fact]
+    public void ReadOnly_denies_a_write_wrapped_in_a_cte()
+    {
+        // WITH cte AS (...) INSERT ... parses as a top-level Statement.Select, so without the write-set
+        // upgrade to Kind this would slip past the read-only gate as an ordinary read. This is the layer
+        // that proves the gate is actually closed, not just that WrittenTables is populated correctly.
+        var d = Validate(
+            "WITH recent AS (SELECT id FROM orders) INSERT INTO archive SELECT id FROM recent",
+            isReadOnly: true);
+
+        Assert.False(d.Allowed);
+        Assert.Equal("policy_denied_readonly", d.DenyCode);
+    }
+
+    [Fact]
+    public void ReadOnly_denies_a_write_wrapped_in_a_cte_shadowing_its_own_target()
+    {
+        // WITH orders AS (...) INSERT INTO orders ... names a CTE the same as its own write target. An
+        // INSERT target resolves against the catalog, not the WITH list, so this still writes the real
+        // orders table — the CTE short-circuit that drops a shadowed read source must not swallow the
+        // write target too, or this would pass the read-only gate as a no-op read of nothing.
+        var d = Validate("WITH orders AS (SELECT 1) INSERT INTO orders SELECT 1", isReadOnly: true);
+
+        Assert.False(d.Allowed);
+        Assert.Equal("policy_denied_readonly", d.DenyCode);
     }
 
     [Fact]
@@ -59,7 +128,74 @@ public class SqlPolicyValidatorTests
     {
         var d = Validate(sql, isReadOnly: false);
         Assert.False(d.Allowed);
+        Assert.Equal("policy_denied_ddl", d.DenyCode);
+    }
+
+    [Fact]
+    public void Ddl_without_the_connection_permission_is_denied()
+    {
+        var d = Validate("DROP TABLE orders");
+
+        Assert.False(d.Allowed);
+        Assert.Equal("policy_denied_ddl", d.DenyCode);
+        Assert.Equal(DdlOperation.DropTable, d.DdlOperation);
+        Assert.Contains("DropTable", d.Reason);
+    }
+
+    [Fact]
+    public void Permitted_ddl_requires_confirmation()
+    {
+        var d = Validate(
+            "DROP TABLE orders",
+            allowedDdl: AllowedDdl.DropTable,
+            confirmed: false);
+
+        Assert.False(d.Allowed);
+        Assert.Equal("ddl_confirmation_required", d.DenyCode);
+        Assert.Equal(DdlOperation.DropTable, d.DdlOperation);
+    }
+
+    [Fact]
+    public void Permitted_and_confirmed_ddl_is_allowed()
+    {
+        var d = Validate(
+            "DROP TABLE orders",
+            allowedDdl: AllowedDdl.DropTable,
+            confirmed: true);
+
+        Assert.True(d.Allowed);
+        Assert.Equal(DdlOperation.DropTable, d.DdlOperation);
+    }
+
+    [Fact]
+    public void Unsupported_shapes_remain_denied_even_with_every_supported_permission()
+    {
+        var all = AllowedDdl.CreateTable | AllowedDdl.AlterTable | AllowedDdl.DropTable |
+                  AllowedDdl.CreateIndex | AllowedDdl.DropIndex | AllowedDdl.Truncate;
+        var d = Validate("GRANT SELECT ON orders TO app", allowedDdl: all, confirmed: true);
+
+        Assert.False(d.Allowed);
         Assert.Equal("policy_denied_unsupported", d.DenyCode);
+        Assert.Equal(DdlOperation.Unsupported, d.DdlOperation);
+    }
+
+    [Fact]
+    public void Unconfirmed_dml_is_denied_before_execution()
+    {
+        var d = Validate("UPDATE orders SET total = 0", confirmed: false);
+
+        Assert.False(d.Allowed);
+        Assert.Equal("ddl_confirmation_required", d.DenyCode);
+        Assert.Equal(DdlOperation.Unsupported, d.DdlOperation);
+    }
+
+    [Fact]
+    public void Read_only_connection_denial_wins_over_missing_confirmation()
+    {
+        var d = Validate("UPDATE orders SET total = 0", isReadOnly: true, confirmed: false);
+
+        Assert.False(d.Allowed);
+        Assert.Equal("policy_denied_readonly", d.DenyCode);
     }
 
     // --- Multi-statement batches -----------------------------------------------
@@ -86,7 +222,7 @@ public class SqlPolicyValidatorTests
     [Fact]
     public void Hidden_table_via_alias_is_denied()
     {
-        var d = Validate("SELECT s.x FROM secrets s", isVisible: Visible("secrets"));
+        var d = Validate("SELECT s.x FROM secrets s", resolve: Policy(hidden: ["secrets"]));
         Assert.False(d.Allowed);
         Assert.Equal("policy_denied_hidden_table", d.DenyCode);
     }
@@ -96,7 +232,7 @@ public class SqlPolicyValidatorTests
     {
         var d = Validate(
             "SELECT o.id FROM orders o JOIN secrets s ON s.id = o.sid",
-            isVisible: Visible("secrets"));
+            resolve: Policy(hidden: ["secrets"]));
         Assert.False(d.Allowed);
         Assert.Equal("policy_denied_hidden_table", d.DenyCode);
     }
@@ -107,7 +243,7 @@ public class SqlPolicyValidatorTests
         // The CTE name `t` is visible-by-default, but the real `secrets` table inside it must be caught.
         var d = Validate(
             "WITH t AS (SELECT * FROM secrets) SELECT * FROM t",
-            isVisible: Visible("secrets"));
+            resolve: Policy(hidden: ["secrets"]));
         Assert.False(d.Allowed);
         Assert.Equal("policy_denied_hidden_table", d.DenyCode);
     }
@@ -119,7 +255,7 @@ public class SqlPolicyValidatorTests
         // The query only reads the visible `orders`, so it must be allowed.
         var d = Validate(
             "WITH secrets AS (SELECT * FROM orders) SELECT * FROM secrets",
-            isVisible: Visible("secrets"));
+            resolve: Policy(hidden: ["secrets"]));
         Assert.True(d.Allowed);
         Assert.DoesNotContain(d.ReferencedTables, t => t.Name == "secrets");
         Assert.Contains(d.ReferencedTables, t => t.Name == "orders");
@@ -132,7 +268,7 @@ public class SqlPolicyValidatorTests
         // so it must NOT mask the outer real `secrets` reference. The outer hidden table must be denied.
         var d = Validate(
             "SELECT * FROM secrets WHERE EXISTS (WITH secrets AS (SELECT 1) SELECT 1 FROM secrets)",
-            isVisible: Visible("secrets"));
+            resolve: Policy(hidden: ["secrets"]));
         Assert.False(d.Allowed);
         Assert.Equal("policy_denied_hidden_table", d.DenyCode);
         Assert.Contains(d.ReferencedTables, t => t.Name == "secrets");
@@ -145,7 +281,7 @@ public class SqlPolicyValidatorTests
         // inside the body is the real hidden base table and must be denied — not masked by the CTE alias.
         var d = Validate(
             "WITH secrets AS (SELECT * FROM secrets) SELECT * FROM secrets",
-            isVisible: Visible("secrets"));
+            resolve: Policy(hidden: ["secrets"]));
         Assert.False(d.Allowed);
         Assert.Equal("policy_denied_hidden_table", d.DenyCode);
     }
@@ -156,7 +292,7 @@ public class SqlPolicyValidatorTests
         // A WITH RECURSIVE CTE may reference itself; that self-reference is the CTE, not a base table.
         var d = Validate(
             "WITH RECURSIVE t AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM t WHERE n < 5) SELECT * FROM t",
-            isVisible: Visible("t"));
+            resolve: Policy(hidden: ["t"]));
         Assert.True(d.Allowed);
         Assert.Empty(d.ReferencedTables);
     }
@@ -167,7 +303,7 @@ public class SqlPolicyValidatorTests
         // The CTE alias is dropped, but the hidden `secrets` read inside the body is still caught.
         var d = Validate(
             "WITH v AS (SELECT * FROM secrets) SELECT * FROM v",
-            isVisible: Visible("secrets"));
+            resolve: Policy(hidden: ["secrets"]));
         Assert.False(d.Allowed);
         Assert.Equal("policy_denied_hidden_table", d.DenyCode);
     }
@@ -178,7 +314,7 @@ public class SqlPolicyValidatorTests
         // private.secrets is schema-qualified, so it can never be the CTE — it must still be denied.
         var d = Validate(
             "WITH secrets AS (SELECT 1) SELECT * FROM private.secrets",
-            isVisible: Visible("private.secrets"));
+            resolve: Policy(hidden: ["private.secrets"]));
         Assert.False(d.Allowed);
         Assert.Equal("policy_denied_hidden_table", d.DenyCode);
     }
@@ -188,7 +324,7 @@ public class SqlPolicyValidatorTests
     {
         var d = Validate(
             "SELECT * FROM orders WHERE sid IN (SELECT id FROM secrets)",
-            isVisible: Visible("secrets"));
+            resolve: Policy(hidden: ["secrets"]));
         Assert.False(d.Allowed);
         Assert.Equal("policy_denied_hidden_table", d.DenyCode);
     }
@@ -197,7 +333,7 @@ public class SqlPolicyValidatorTests
     public void Hidden_table_as_insert_target_is_denied()
     {
         // Visitor skips the INSERT target — proves the explicit target extraction works.
-        var d = Validate("INSERT INTO secrets (id) VALUES (1)", isVisible: Visible("secrets"));
+        var d = Validate("INSERT INTO secrets (id) VALUES (1)", resolve: Policy(hidden: ["secrets"]));
         Assert.False(d.Allowed);
         Assert.Equal("policy_denied_hidden_table", d.DenyCode);
     }
@@ -206,7 +342,7 @@ public class SqlPolicyValidatorTests
     public void Hidden_table_as_delete_target_is_denied()
     {
         // Visitor skips DELETE entirely — proves the From/Selection re-visit works.
-        var d = Validate("DELETE FROM secrets WHERE id = 1", isVisible: Visible("secrets"));
+        var d = Validate("DELETE FROM secrets WHERE id = 1", resolve: Policy(hidden: ["secrets"]));
         Assert.False(d.Allowed);
         Assert.Equal("policy_denied_hidden_table", d.DenyCode);
     }
@@ -214,7 +350,7 @@ public class SqlPolicyValidatorTests
     [Fact]
     public void Schema_qualified_hidden_table_is_denied()
     {
-        var d = Validate("SELECT * FROM private.secrets", isVisible: Visible("private.secrets"));
+        var d = Validate("SELECT * FROM private.secrets", resolve: Policy(hidden: ["private.secrets"]));
         Assert.False(d.Allowed);
         Assert.Equal("policy_denied_hidden_table", d.DenyCode);
     }
@@ -237,7 +373,7 @@ public class SqlPolicyValidatorTests
         var d = Validate(
             "SELECT TOP 10 * FROM [dbo].[secrets]",
             provider: DatabaseProviderType.SqlServer,
-            isVisible: Visible("secrets"));
+            resolve: Policy(hidden: ["secrets"]));
         Assert.False(d.Allowed);
         Assert.Equal("policy_denied_hidden_table", d.DenyCode);
     }
@@ -261,7 +397,7 @@ public class SqlPolicyValidatorTests
     [Fact]
     public void Postgres_limit_does_not_mask_a_hidden_table()
     {
-        var d = Validate("SELECT * FROM secrets LIMIT 10", isVisible: Visible("secrets"));
+        var d = Validate("SELECT * FROM secrets LIMIT 10", resolve: Policy(hidden: ["secrets"]));
         Assert.False(d.Allowed);
         Assert.Equal("policy_denied_hidden_table", d.DenyCode);
     }
@@ -285,5 +421,105 @@ public class SqlPolicyValidatorTests
         var d = Validate(sql);
         Assert.False(d.Allowed);
         Assert.Equal("policy_denied_empty", d.DenyCode);
+    }
+
+    // --- Per-object access (Phase C1) ------------------------------------------
+
+    [Fact]
+    public void A_write_to_a_read_only_object_is_denied()
+    {
+        var d = Validate("UPDATE orders SET total = 0", resolve: Policy(readOnly: ["orders"]));
+
+        Assert.False(d.Allowed);
+        Assert.Equal("policy_denied_readonly_object", d.DenyCode);
+        Assert.Contains("orders", d.Reason);
+    }
+
+    [Fact]
+    public void A_read_from_a_read_only_object_is_allowed()
+    {
+        var d = Validate("SELECT id FROM orders", resolve: Policy(readOnly: ["orders"]));
+
+        Assert.True(d.Allowed);
+    }
+
+    [Fact]
+    public void Reading_a_read_only_object_inside_a_write_is_allowed()
+    {
+        // The reason write targets had to be separated at all. A lookup table nobody may modify is still
+        // a lookup table: copying out of it into a writable target is an ordinary thing to want.
+        var d = Validate(
+            "INSERT INTO orders (id) SELECT id FROM staging_orders",
+            resolve: Policy(readOnly: ["staging_orders"]));
+
+        Assert.True(d.Allowed);
+    }
+
+    [Fact]
+    public void A_write_to_a_view_is_denied_as_a_view_write_not_as_a_level()
+    {
+        // Ordering, asserted directly. A view can only be Not visible or Read-only, so if the level check
+        // ran first this code would be unreachable and the message would tell the user to change a level
+        // that cannot be changed.
+        var d = Validate(
+            "UPDATE order_summary SET total = 0",
+            resolve: Policy(readOnly: ["order_summary"], views: ["order_summary"]));
+
+        Assert.False(d.Allowed);
+        Assert.Equal("policy_denied_view_write", d.DenyCode);
+    }
+
+    [Fact]
+    public void A_read_from_a_view_is_allowed()
+    {
+        var d = Validate("SELECT id FROM order_summary", resolve: Policy(views: ["order_summary"]));
+
+        Assert.True(d.Allowed);
+    }
+
+    [Fact]
+    public void A_hidden_object_is_still_denied_as_hidden_even_when_it_is_written_to()
+    {
+        // Visibility outranks both new checks: a hidden object's very name must not leak, and
+        // "you may not write to it" concedes that it exists.
+        var d = Validate(
+            "UPDATE orders SET total = 0",
+            resolve: Policy(hidden: ["orders"], readOnly: ["orders"], views: ["orders"]));
+
+        Assert.False(d.Allowed);
+        Assert.Equal("policy_denied_hidden_table", d.DenyCode);
+    }
+
+    [Fact]
+    public void The_connection_read_only_flag_still_outranks_per_object_access()
+    {
+        var d = Validate("UPDATE orders SET total = 0", isReadOnly: true, resolve: Policy());
+
+        Assert.False(d.Allowed);
+        Assert.Equal("policy_denied_readonly", d.DenyCode);
+    }
+
+    [Fact]
+    public void An_object_with_default_policy_is_writable()
+    {
+        // The phase's central decision, pinned where it is enforced: absence means full access.
+        var d = Validate("DELETE FROM orders WHERE id = 1", resolve: Policy());
+
+        Assert.True(d.Allowed);
+    }
+
+    [Fact]
+    public void An_unqualified_name_takes_the_most_restrictive_level_of_its_matches()
+    {
+        // Same fail-closed rule the hidden check has always used, now over three levels: a bare name that
+        // matches a read-only object in some schema is treated as read-only.
+        var resolve = (SqlTableReference t) => t.Schema is null
+            ? new ObjectPolicy(ObjectAccess.ReadOnly, false)
+            : new ObjectPolicy(ObjectAccess.Full, false);
+
+        var d = Validate("UPDATE orders SET total = 0", resolve: resolve);
+
+        Assert.False(d.Allowed);
+        Assert.Equal("policy_denied_readonly_object", d.DenyCode);
     }
 }

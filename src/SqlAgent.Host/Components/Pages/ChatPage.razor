@@ -4,6 +4,8 @@
 @inject ScopedRunner Runner
 @inject AppState State
 @inject NavigationManager Nav
+@inject DialogService Dialogs
+@inject IServiceProvider Services
 
 <div class="chat">
     @if (_messages.Count == 0)
@@ -15,20 +17,41 @@
     }
     else
     {
-        <MessageList Messages="_messages" Live="_live" OnOpenInEditor="OpenInEditor" />
+        <MessageList Messages="_messages" Live="_live" Providers="_providers"
+                     Diagrams="_diagrams" DiagramConnectionNames="_diagramConnectionNames"
+                     OnOpenInEditor="OpenInEditor" OnEdit="OpenScratchpad" OnEditUser="EditUser"
+                     OnRegenerate="RegenerateAsync"
+                     OnConfirm="RequestConfirmation" OnRefreshDiagram="RefreshDiagramAsync" />
     }
 
     <div class="chat-composer">
         <Composer @ref="_composer"
                   Value="@_question" ValueChanged="v => _question = v"
                   Attached="_attached" OnRemoveAttachment="Detach"
+                  Files="_pendingFiles" OnRemoveFile="RemoveFileAsync"
                   Busy="_busy" OnSend="SendAsync" OnStop="Stop">
             <Tools>
                 <AttachmentMenu Connections="_connections"
                                 AttachedIds="@(_attached.Select(a => a.ConnectionId!.Value).ToList())"
-                                OnAttach="Attach" />
+                                OnAttach="Attach" Files="_pendingFiles"
+                                FileStorage="FileStorage" StorageOptions="StorageOptions"
+                                OnFilesChanged="OnFilesChanged" />
+                <button type="button" class="ghost" data-testid="chat-explain-schema"
+                        @onclick="ExplainSchemaAsync">Explain schema</button>
+                <button type="button" class="ghost" data-testid="chat-open-scratchpad"
+                        @onclick="OpenEmptyScratchpad">Scratchpad</button>
+                <button type="button" class="ghost" data-testid="chat-open-diagram"
+                        @onclick="OpenSchemaDiagramAsync"
+                        disabled="@(_attached.All(a => a.ConnectionId is null))">Schema diagram</button>
+                <span class="model-state" data-testid="chat-model-state">No model configured</span>
             </Tools>
         </Composer>
+
+        @if (_scratchpadOpen)
+        {
+            <ScratchPad ConnectionId="@_scratchpadConnectionId" InitialSql="@_scratchpadSql"
+                        OnClose="CloseScratchpad" />
+        }
 
         @if (_messages.Count == 0)
         {
@@ -57,18 +80,30 @@
 
     private readonly List<ChatMessageView> _messages = [];
     private readonly Dictionary<Guid, NlQueryResult> _live = [];
+    private readonly Dictionary<Guid, DatabaseProviderType> _providers = [];
+    private readonly Dictionary<Guid, DatabaseSchema> _diagrams = [];
+    private readonly Dictionary<Guid, string> _diagramConnectionNames = [];
     private readonly List<ChatDatabaseRef> _attached = [];
+    private readonly List<PendingFileAttachment> _pendingFiles = [];
     private IReadOnlyList<DatabaseConnectionInfo> _connections = [];
     private Composer? _composer;
     private string _question = "";
     private bool _busy;
+    private Task? _sendInFlight;
+    private bool _scratchpadOpen;
+    private Guid? _scratchpadConnectionId;
+    private string _scratchpadSql = "";
     private CancellationTokenSource? _cts;
     private bool _disposed;
 
+    private FileStorageService? FileStorage => Services.GetService<FileStorageService>();
+    private FileStorageOptions StorageOptions => Services.GetService<FileStorageOptions>() ?? new();
+
     protected override async Task OnInitializedAsync()
     {
-        // Connections change from the Connections page, which is a sibling route in the same circuit —
-        // the same reason SchemaRail subscribes to this event rather than reading its list once.
+        // Connections change from the /database config page, which is a sibling route in the same
+        // circuit — the same reason DatabaseSection and Workspace subscribe to this event rather than
+        // reading their list once.
         State.ConnectionsChanged += OnConnectionsChanged;
         await ReloadConnectionsAsync();
     }
@@ -88,8 +123,12 @@
         _loadedChatId = Id;
         _messages.Clear();
         _live.Clear();
+        _providers.Clear();
+        _diagrams.Clear();
+        _diagramConnectionNames.Clear();
         // Attachments are per-conversation, not per-circuit: carrying prod's chips into a brand-new chat
         // (or someone else's, reached via history) would send them somewhere the user never attached them.
+        await CleanupPendingFilesAsync();
         _attached.Clear();
         if (Id is { } id)
         {
@@ -112,6 +151,8 @@
                 return;
             }
             _messages.AddRange(detail.Messages);
+            IndexProviders(detail.Messages);
+            await LoadDiagramsAsync(detail.Messages);
         }
         State.SetActiveChat(Id);
     }
@@ -145,9 +186,34 @@
     private void Detach(ChatDatabaseRef database) =>
         _attached.RemoveAll(a => a.ConnectionId == database.ConnectionId);
 
+    private void OnFilesChanged(IReadOnlyList<PendingFileAttachment> files)
+    {
+        _pendingFiles.Clear();
+        _pendingFiles.AddRange(files);
+    }
+
+    private async Task RemoveFileAsync(PendingFileAttachment file)
+    {
+        // A send snapshots the pending files before resolving and persisting their refs. Defer an
+        // explicit remove until that send settles so it cannot delete a blob that the turn is still
+        // about to persist (and so a failed send still retains its pending files until the user removes
+        // them after the failure).
+        if (_sendInFlight is { } send) await send;
+        if (!_pendingFiles.Remove(file)) return;
+        if (FileStorage is { } storage) await storage.DeletePendingAsync(file);
+    }
+
     private async Task PrefillAsync(string suggestion)
     {
         _question = suggestion;
+        if (_composer is not null) await _composer.FocusAsync();
+    }
+
+    private Task ExplainSchemaAsync() => PrefillAsync("Explain this schema");
+
+    private async Task EditUser(string text)
+    {
+        _question = text;
         if (_composer is not null) await _composer.FocusAsync();
     }
 
@@ -160,6 +226,10 @@
         var question = _question;
         _question = "";
         var databaseIds = _attached.Select(a => a.ConnectionId!.Value).ToList();
+        var files = _pendingFiles.ToList();
+        var sendCompletion = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        _sendInFlight = sendCompletion.Task;
         // Captured up front: this component instance is reused across "/" and "/chat/{Id}" (that reuse is
         // why OnParametersSetAsync's guard exists), so _loadedChatId can change under us while the send
         // below is in flight — the user opens a stored chat, or leaves for /sql entirely. Comparing the
@@ -171,7 +241,11 @@
         try
         {
             var turn = await Runner.RunAsync<ChatTurnService, ChatTurnResult>(
-                s => s.SendAsync(startedIn, question, databaseIds, _cts.Token));
+                s => s.SendAsync(startedIn, question, databaseIds, files, _cts.Token));
+
+            // Uploads are pending storage only until the user message reaches the store. Remove just
+            // the batch this turn persisted, preserving any files selected while the send was in flight.
+            foreach (var file in files) _pendingFiles.Remove(file);
 
             // Raised before the drop check below, and unconditionally: the chat this turn created or
             // continued is on disk either way (ChatTurnService's job, not this method's), even when the
@@ -197,6 +271,7 @@
 
             _messages.Add(turn.UserMessage);
             _messages.Add(turn.AssistantMessage);
+            IndexProvider(turn.UserMessage, turn.AssistantMessage);
             if (turn.Live is { } live) _live[turn.AssistantMessage.Id] = live;
 
             // The chips deliberately stay: attachments are per message, but re-attaching every turn
@@ -229,16 +304,146 @@
             _busy = false;
             _cts?.Dispose();
             _cts = null;
+            sendCompletion.TrySetResult(null);
+            _sendInFlight = null;
         }
     }
 
     private void Stop() => _cts?.Cancel();
+
+    private async Task RegenerateAsync(ChatMessageView message)
+    {
+        if (_busy) return;
+        _busy = true;
+        _cts = new CancellationTokenSource();
+        try
+        {
+            var regenerated = await Runner.RunAsync<ChatTurnService, ChatRegenerationResult>(
+                s => s.RegenerateAsync(message.Id, _cts.Token));
+            var index = _messages.FindIndex(m => m.Id == message.Id);
+            if (index >= 0) _messages[index] = regenerated.Message;
+            _live.Remove(message.Id);
+            if (regenerated.Live is { } live) _live[message.Id] = live;
+        }
+        catch (OperationCanceledException) { }
+        finally
+        {
+            _busy = false;
+            _cts.Dispose();
+            _cts = null;
+        }
+    }
 
     private void OpenInEditor(string sql)
     {
         // The editor is a separate route now, so the SQL travels through AppState rather than a tab flip.
         State.HandOffSql(sql);
         Nav.NavigateTo("/sql");
+    }
+
+    private void OpenScratchpad(string sql)
+    {
+        _scratchpadSql = sql;
+        _scratchpadConnectionId = _attached.Select(a => a.ConnectionId).FirstOrDefault(id => id is not null);
+        _scratchpadOpen = true;
+    }
+
+    private void OpenEmptyScratchpad() => OpenScratchpad("");
+
+    private void CloseScratchpad() => _scratchpadOpen = false;
+
+    private void IndexProviders(IEnumerable<ChatMessageView> messages)
+    {
+        ChatMessageView? user = null;
+        foreach (var message in messages.OrderBy(m => m.Sequence))
+        {
+            if (message.Role == ChatRole.User) user = message;
+            else if (user is not null) IndexProvider(user, message);
+        }
+    }
+
+    private void IndexProvider(ChatMessageView user, ChatMessageView assistant)
+    {
+        var id = user.Databases.Select(d => d.ConnectionId).FirstOrDefault(id => id is not null);
+        if (id is { } connection)
+        {
+            var info = _connections.FirstOrDefault(c => c.Id == connection);
+            if (info is not null) _providers[assistant.Id] = info.ProviderType;
+        }
+    }
+
+    private async Task OpenSchemaDiagramAsync()
+    {
+        var connectionId = _attached.Select(a => a.ConnectionId).FirstOrDefault(id => id is not null);
+        if (connectionId is not { } id) return;
+
+        var startedIn = _loadedChatId;
+        var result = await Runner.RunAsync<ChatTurnService, ChatDiagramResult>(
+            s => s.CreateSchemaDiagramAsync(startedIn, id));
+        if (_disposed || _loadedChatId != startedIn) return;
+
+        _messages.Add(result.Message);
+        _diagrams[result.Message.Id] = result.Schema;
+        var info = _connections.FirstOrDefault(c => c.Id == id);
+        if (info is not null) _diagramConnectionNames[result.Message.Id] = info.Name;
+        State.NotifyChatsChanged();
+        if (_loadedChatId != result.ChatId)
+        {
+            _loadedChatId = result.ChatId;
+            Nav.NavigateTo($"/chat/{result.ChatId}", replace: true);
+            State.SetActiveChat(result.ChatId);
+        }
+    }
+
+    private async Task LoadDiagramsAsync(IEnumerable<ChatMessageView> messages)
+    {
+        foreach (var message in messages.Where(m => m.OutcomeKind == ChatOutcomeKind.SchemaDiagram
+                                                   && m.SchemaDiagramConnectionId is not null))
+        {
+            var id = message.SchemaDiagramConnectionId!.Value;
+            var schema = await Runner.RunAsync<SchemaService, DatabaseSchema?>(
+                s => s.GetVisibleSchemaAsync(id));
+            if (schema is not null) _diagrams[message.Id] = schema;
+            var info = _connections.FirstOrDefault(c => c.Id == id);
+            if (info is not null) _diagramConnectionNames[message.Id] = info.Name;
+        }
+    }
+
+    private async Task RefreshDiagramAsync(ChatMessageView message)
+    {
+        if (message.SchemaDiagramConnectionId is not { } id) return;
+        var schema = await Runner.RunAsync<SchemaService, DatabaseSchema?>(
+            s => s.GetVisibleSchemaAsync(id));
+        if (schema is null) return;
+        _diagrams[message.Id] = schema;
+    }
+
+    private void RequestConfirmation(ChatMessageView message)
+    {
+        if (string.IsNullOrWhiteSpace(message.GeneratedSql)) return;
+        Dialogs.Show(@<ConfirmDialog Sql="@message.GeneratedSql"
+                                  Operation="@(message.ConfirmationOperation ?? "write")"
+                                  OnCancel="Dialogs.Close"
+                                  OnConfirm="() => ConfirmAsync(message.Id)" />);
+    }
+
+    private async Task ConfirmAsync(Guid messageId)
+    {
+        Dialogs.Close();
+        try
+        {
+            var confirmed = await Runner.RunAsync<ChatTurnService, ChatConfirmationResult>(
+                s => s.ConfirmAsync(messageId));
+            var index = _messages.FindIndex(m => m.Id == messageId);
+            if (index >= 0) _messages[index] = confirmed.Message;
+            _live[messageId] = confirmed.Live;
+            State.NotifyChatsChanged();
+        }
+        catch (Exception)
+        {
+            // The pending row remains visible and confirmable. The service already converts provider
+            // failures into stable outcomes; this catch only covers a stale/deleted message target.
+        }
     }
 
     public void Dispose()
@@ -250,5 +455,24 @@
         // in-flight call instead of it running to completion in the background against a disposed page.
         _cts?.Cancel();
         State.ConnectionsChanged -= OnConnectionsChanged;
+        _ = CleanupPendingFilesAsync();
+    }
+
+    private async Task CleanupPendingFilesAsync()
+    {
+        if (_pendingFiles.Count == 0) return;
+        // Route changes and disposal can begin while SendAsync is still resolving the attachment refs.
+        // Waiting here keeps cleanup from deleting a blob before that send has either persisted it or
+        // failed and left it pending for cleanup.
+        if (_sendInFlight is { } send) await send;
+        var files = _pendingFiles.ToList();
+        _pendingFiles.Clear();
+        var storage = FileStorage;
+        if (storage is null) return;
+        foreach (var file in files)
+        {
+            try { await storage.DeletePendingAsync(file); }
+            catch { /* best effort during route/disposal teardown */ }
+        }
     }
 }

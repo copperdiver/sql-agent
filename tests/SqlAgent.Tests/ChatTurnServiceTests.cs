@@ -32,11 +32,11 @@ public class ChatTurnServiceTests : IDisposable
         var registry = new DatabaseProviderRegistry([_provider]);
         _connections = new DatabaseConnectionService(_db, new InMemorySecretStore());
         _chats = new ChatService(_db);
-        var executor = new QueryExecutionService(
-            _connections, registry, _db, NullLogger<QueryExecutionService>.Instance);
         var schemas = new SchemaService(_connections, registry, _db);
+        var executor = new QueryExecutionService(
+            _connections, registry, _db, schemas, NullLogger<QueryExecutionService>.Instance);
         _turns = new ChatTurnService(
-            _chats, new NlQueryService(_connections, schemas, executor, _gateway), _connections);
+            _chats, new NlQueryService(_connections, schemas, executor, _gateway), _connections, executor, schemas);
     }
 
     [Fact]
@@ -99,6 +99,31 @@ public class ChatTurnServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Pending_files_are_persisted_with_their_storage_identity()
+    {
+        var id = await NewConnectionAsync("prod");
+        _gateway.NextResponse = LlmSqlResponse.Clarify("Which report?");
+        var pending = new PendingFileAttachment(
+            "report.pdf", "application/pdf", 42, "local-disk", "storage/report.pdf", "/stored/report.pdf");
+
+        var turn = await _turns.SendAsync(null, "orders", [id], [pending]);
+
+        var user = (await _chats.GetChatAsync(turn.ChatId))!.Messages.Single(m => m.Role == ChatRole.User);
+        var file = Assert.Single(user.Files!);
+        Assert.Equal("report.pdf", file.FileName);
+        Assert.Equal("application/pdf", file.ContentType);
+        Assert.Equal(42, file.SizeBytes);
+        Assert.Equal($"/files/{file.Id}", file.Url);
+        var llmFile = Assert.Single(_gateway.LastRequest!.Attachments);
+        Assert.Equal(file.FileName, llmFile.FileName);
+        Assert.Equal(file.ContentType, llmFile.ContentType);
+        Assert.Equal(file.Url, llmFile.Url);
+        var stored = Assert.Single(_db.MessageAttachments);
+        Assert.Equal("local-disk", stored.ProviderKey);
+        Assert.Equal("storage/report.pdf", stored.StorageKey);
+    }
+
+    [Fact]
     public async Task A_gateway_that_is_not_configured_still_leaves_a_question_and_an_answer_on_disk()
     {
         // Until the model service exists this is the ONLY path a real user takes, so it is the path that
@@ -114,6 +139,93 @@ public class ChatTurnServiceTests : IDisposable
         Assert.Equal(2, reloaded!.Messages.Count);
         Assert.Equal("orders", reloaded.Messages[0].Text);
         Assert.Equal("llm_not_configured", reloaded.Messages[1].ErrorCode);
+    }
+
+    [Fact]
+    public async Task A_model_write_is_persisted_as_confirmation_required_without_execution()
+    {
+        var id = await NewConnectionAsync("prod", readOnly: false);
+        _gateway.NextResponse = LlmSqlResponse.Generated("UPDATE orders SET total = 0");
+
+        var turn = await _turns.SendAsync(null, "zero out the orders", [id]);
+
+        Assert.Equal(ChatOutcomeKind.ConfirmationRequired, turn.AssistantMessage.OutcomeKind);
+        Assert.Equal("ddl_confirmation_required", turn.AssistantMessage.ErrorCode);
+        Assert.Equal("write", turn.AssistantMessage.ConfirmationOperation);
+        Assert.Equal("UPDATE orders SET total = 0", turn.AssistantMessage.GeneratedSql);
+        Assert.False(_provider.Executed);
+    }
+
+    [Fact]
+    public async Task Confirming_a_pending_model_write_executes_and_updates_the_same_assistant_message()
+    {
+        var id = await NewConnectionAsync("prod", readOnly: false);
+        _gateway.NextResponse = LlmSqlResponse.Generated("UPDATE orders SET total = 0");
+
+        var turn = await _turns.SendAsync(null, "zero out the orders", [id]);
+        var confirmed = await _turns.ConfirmAsync(turn.AssistantMessage.Id);
+
+        Assert.Equal(turn.AssistantMessage.Id, confirmed.Message.Id);
+        Assert.Equal(ChatOutcomeKind.QueryResult, confirmed.Message.OutcomeKind);
+        Assert.Null(confirmed.Message.ErrorCode);
+        Assert.Equal("UPDATE orders SET total = 0", confirmed.Message.GeneratedSql);
+        Assert.Equal(NlResponseKind.QueryResult, confirmed.Live!.Kind);
+        Assert.True(_provider.Executed);
+
+        var reloaded = await _chats.GetChatAsync(turn.ChatId);
+        Assert.Equal(2, reloaded!.Messages.Count);
+        Assert.Equal(ChatOutcomeKind.QueryResult, reloaded.Messages[1].OutcomeKind);
+    }
+
+    [Fact]
+    public async Task Regenerating_replaces_the_existing_assistant_outcome_without_appending_messages()
+    {
+        var id = await NewConnectionAsync("prod");
+        _gateway.NextResponse = LlmSqlResponse.Generated("SELECT 1");
+        _provider.NextResult = new QueryResultSet(["value"], [new object?[] { 1 }], false);
+        var turn = await _turns.SendAsync(null, "orders", [id]);
+
+        _gateway.NextResponse = LlmSqlResponse.Generated("SELECT 2");
+        _provider.NextResult = new QueryResultSet(["value"], [new object?[] { 2 }], false);
+        var regenerated = await _turns.RegenerateAsync(turn.AssistantMessage.Id);
+
+        Assert.Equal(turn.AssistantMessage.Id, regenerated.Message.Id);
+        Assert.Equal("SELECT 2", regenerated.Message.GeneratedSql);
+        var detail = await _chats.GetChatAsync(turn.ChatId);
+        Assert.Equal(2, detail!.Messages.Count);
+        Assert.Equal("SELECT 2", detail.Messages[1].GeneratedSql);
+    }
+
+    [Fact]
+    public async Task A_schema_diagram_persists_only_the_connection_and_uses_visible_schema()
+    {
+        var id = await NewConnectionAsync("prod");
+        _provider.Schema = new DatabaseSchema(
+        [
+            new SchemaTable("public", "orders", [new SchemaColumn("id", "integer", false)], ["id"],
+                [new ForeignKey("customer_id", "public", "customers", "id")], []),
+            new SchemaTable("public", "customers", [new SchemaColumn("id", "integer", false)], ["id"], [], []),
+        ]);
+        await _db.TablePolicies.AddAsync(new TablePolicy
+        {
+            Id = Guid.NewGuid(), DatabaseConnectionId = id, SchemaName = "public", TableName = "customers",
+            IsVisible = false,
+        });
+        await _db.SaveChangesAsync();
+
+        var diagram = await _turns.CreateSchemaDiagramAsync(null, id);
+
+        Assert.Equal(ChatOutcomeKind.SchemaDiagram, diagram.Message.OutcomeKind);
+        Assert.Equal(id, diagram.Message.SchemaDiagramConnectionId);
+        Assert.Single(diagram.Schema.Tables);
+        Assert.Equal("orders", diagram.Schema.Tables[0].Name);
+        Assert.Empty(diagram.Schema.Tables[0].ForeignKeys);
+
+        var reloaded = (await _chats.GetChatAsync(diagram.Message is { } m
+            ? (await _db.ChatMessages.FindAsync(m.Id))!.ChatId
+            : Guid.Empty))!;
+        Assert.Equal(ChatOutcomeKind.SchemaDiagram, reloaded.Messages.Single().OutcomeKind);
+        Assert.Equal(id, reloaded.Messages.Single().SchemaDiagramConnectionId);
     }
 
     [Fact]
@@ -265,15 +377,15 @@ public class ChatTurnServiceTests : IDisposable
     private ChatTurnService NewTurnServiceOver(ChatService chats)
     {
         var registry = new DatabaseProviderRegistry([_provider]);
-        var executor = new QueryExecutionService(
-            _connections, registry, _db, NullLogger<QueryExecutionService>.Instance);
         var schemas = new SchemaService(_connections, registry, _db);
-        return new ChatTurnService(chats, new NlQueryService(_connections, schemas, executor, _gateway), _connections);
+        var executor = new QueryExecutionService(
+            _connections, registry, _db, schemas, NullLogger<QueryExecutionService>.Instance);
+        return new ChatTurnService(chats, new NlQueryService(_connections, schemas, executor, _gateway), _connections, executor, schemas);
     }
 
-    private async Task<Guid> NewConnectionAsync(string name) =>
+    private async Task<Guid> NewConnectionAsync(string name, bool readOnly = true) =>
         (await _connections.CreateAsync(
-            new DatabaseConnectionInput(name, DatabaseProviderType.Postgres, IsReadOnly: true), "cs")).Id;
+            new DatabaseConnectionInput(name, DatabaseProviderType.Postgres, IsReadOnly: readOnly), "cs")).Id;
 
     public void Dispose()
     {
@@ -291,10 +403,12 @@ sealed class TurnGatewayStub : ILlmSqlGateway
     public Exception? Throw { get; set; }
     public bool Block { get; set; }
     public int CallCount { get; private set; }
+    public LlmSqlRequest? LastRequest { get; private set; }
 
     public async Task<LlmSqlResponse> GenerateSqlAsync(LlmSqlRequest request, CancellationToken ct = default)
     {
         CallCount++;
+        LastRequest = request;
         if (Block) await Task.Delay(Timeout.Infinite, ct);
         if (Throw is { } ex) throw ex;
         return NextResponse ?? LlmSqlResponse.Generated("SELECT 1");
@@ -323,18 +437,21 @@ sealed class CancelOnNthSaveInterceptor(int n, CancellationTokenSource cts) : Sa
 sealed class TurnProviderStub : IDatabaseProvider
 {
     public QueryResultSet NextResult { get; set; } = new([], [], false);
+    public DatabaseSchema Schema { get; set; } = new([]);
     public bool Block { get; set; }
+    public bool Executed { get; private set; }
     public DatabaseProviderType ProviderType => DatabaseProviderType.Postgres;
 
     public Task<ConnectionTestResult> TestConnectionAsync(string cs, CancellationToken ct = default)
         => Task.FromResult(ConnectionTestResult.Ok(null, 0));
 
     public Task<DatabaseSchema> GetSchemaAsync(string cs, CancellationToken ct = default)
-        => Task.FromResult(new DatabaseSchema([]));
+        => Task.FromResult(Schema);
 
     public async Task<QueryResultSet> ExecuteQueryAsync(
         string cs, string sql, QueryExecutionOptions o, CancellationToken ct = default)
     {
+        Executed = true;
         if (Block) await Task.Delay(Timeout.Infinite, ct);
         return NextResult;
     }

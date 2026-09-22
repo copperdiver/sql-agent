@@ -4,7 +4,8 @@
 @inject ILogger<Composer> Logger
 
 <div class="composer">
-    <AttachmentChips Databases="Attached" OnRemove="OnRemoveAttachment" />
+    <AttachmentChips Databases="Attached" OnRemove="OnRemoveAttachment"
+                     Files="Files" OnRemoveFile="OnRemoveFile" />
 
     <textarea @ref="_textarea" class="composer-input custom-scroll" rows="1"
               placeholder="Ask a question about your data"
@@ -37,6 +38,8 @@
     [Parameter] public EventCallback<string> ValueChanged { get; set; }
     [Parameter] public IReadOnlyList<ChatDatabaseRef> Attached { get; set; } = [];
     [Parameter] public EventCallback<ChatDatabaseRef> OnRemoveAttachment { get; set; }
+    [Parameter] public IReadOnlyList<PendingFileAttachment> Files { get; set; } = [];
+    [Parameter] public EventCallback<PendingFileAttachment> OnRemoveFile { get; set; }
 
     /// <summary>The attachment menu, supplied by the page. The composer does not read connections
     /// itself: it is a leaf component with no service dependencies, which is what keeps it testable

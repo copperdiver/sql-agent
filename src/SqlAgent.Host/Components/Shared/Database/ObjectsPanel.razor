@@ -1,0 +1,191 @@
+@using SqlAgent.Core.Policy
+@inject ScopedRunner Runner
+@inject ILogger<ObjectsPanel> Logger
+
+<section class="panel">
+    <div class="objects-head">
+        <h2>Objects</h2>
+        @* @oninput rather than @onchange: this is a round trip per keystroke, which is the same one B2
+           accepted deliberately for search, and here it only filters a list already in memory. A filter
+           that applies on blur is a filter people stop using. *@
+        <input type="search" class="objects-filter" data-testid="objects-filter"
+               placeholder="Filter by name" value="@_filter" @oninput="OnFilterChanged" />
+    </div>
+
+    @if (_error is not null)
+    {
+        <OutcomeMessage Message="@_error" />
+    }
+    else if (_objects.Count == 0)
+    {
+        <p class="muted">This database has no tables or views.</p>
+    }
+    else if (Groups().Count == 0)
+    {
+        <p class="muted">No objects match that filter.</p>
+    }
+    else
+    {
+        @foreach (var group in Groups())
+        {
+            <div class="schema-group" @key="group.Key">
+                <div class="schema-header">
+                    <button type="button" class="ghost schema-toggle"
+                            data-testid="@($"schema-toggle-{group.Key}")"
+                            aria-expanded="@IsOpen(group.Key)"
+                            @onclick="() => Toggle(group.Key)">
+                        @if (IsOpen(group.Key))
+                        {
+                            <Icon Name="chevron-down" Size="14" />
+                        }
+                        else
+                        {
+                            <Icon Name="chevron-right" Size="14" />
+                        }
+                        <span>@group.Key</span>
+                        <span class="schema-count">@group.Count()</span>
+                    </button>
+                    <div data-testid="@($"schema-set-{group.Key}")">
+                        <Segmented Options="TableLevels" Value=""
+                                   AriaLabel="@($"Set every object in {group.Key}")"
+                                   ValueChanged="v => SetSchemaAsync(group.Key, v)" />
+                    </div>
+                </div>
+
+                @if (IsOpen(group.Key))
+                {
+                    @foreach (var o in group)
+                    {
+                        <div class="object-row" @key="@($"{o.Schema}.{o.Name}")"
+                             data-testid="@($"object-row-{o.Schema}-{o.Name}")">
+                            <span class="object-name truncate">@o.Name</span>
+                            @if (o.Kind == DatabaseObjectKind.View)
+                            {
+                                <Badge Tone="BadgeTone.Neutral">View</Badge>
+                            }
+                            <Segmented Options="@(o.Kind == DatabaseObjectKind.View ? ViewLevels : TableLevels)"
+                                       Value="@o.Access.ToString()"
+                                       AriaLabel="@($"Access for {o.Schema}.{o.Name}")"
+                                       ValueChanged="v => SetAsync(o, v)" />
+                        </div>
+                    }
+                }
+            </div>
+        }
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public Guid ConnectionId { get; set; }
+
+    private IReadOnlyList<DatabaseObjectPolicy> _objects = [];
+    private readonly HashSet<string> _open = new(StringComparer.OrdinalIgnoreCase);
+    private string _filter = "";
+    private string? _error;
+    private Guid _loaded;
+
+    // A view can be hidden or read-only and nothing else, so it is offered two segments rather than three
+    // greyed out — a control that shows a choice it will refuse is worse than one that does not show it.
+    private static readonly IReadOnlyList<SegmentedOption> TableLevels =
+    [
+        new(nameof(ObjectAccess.Hidden), "Not visible"),
+        new(nameof(ObjectAccess.ReadOnly), "Read-only"),
+        new(nameof(ObjectAccess.Full), "Full access"),
+    ];
+
+    private static readonly IReadOnlyList<SegmentedOption> ViewLevels =
+    [
+        new(nameof(ObjectAccess.Hidden), "Not visible"),
+        new(nameof(ObjectAccess.ReadOnly), "Read-only"),
+    ];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // The panel is reused across a navigation from one database to another, so identity has to be
+        // re-read rather than initialized once.
+        if (_loaded == ConnectionId) return;
+        _loaded = ConnectionId;
+        _filter = "";
+        _open.Clear();
+        await ReloadAsync();
+    }
+
+    /// <summary>Re-reads the object list. Public because the level writes call it, and because the page
+    /// re-tests the connection on arrival and may want the list refreshed with it.</summary>
+    public async Task ReloadAsync()
+    {
+        try
+        {
+            _objects = await Runner.RunAsync<TablePolicyService, IReadOnlyList<DatabaseObjectPolicy>?>(
+                s => s.ListObjectsAsync(ConnectionId)) ?? [];
+            _error = null;
+
+            // One schema is not a choice, so opening it saves the user a click they would always make.
+            var schemas = _objects.Select(o => o.Schema).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (schemas.Count == 1) _open.Add(schemas[0]);
+        }
+        catch (Exception ex)
+        {
+            // An unreachable database is ordinary for a tool pointed at arbitrary servers. The provider's
+            // text is never rendered — it can echo the connection string.
+            Logger.LogError(ex, "Failed to list objects for connection {ConnectionId}.", ConnectionId);
+            _objects = [];
+            _error = "The object list could not be read. The details are in the server log.";
+        }
+    }
+
+    private void OnFilterChanged(ChangeEventArgs e) => _filter = e.Value?.ToString() ?? "";
+
+    private List<IGrouping<string, DatabaseObjectPolicy>> Groups() =>
+        _objects
+            .Where(o => string.IsNullOrWhiteSpace(_filter)
+                        || o.Name.Contains(_filter, StringComparison.OrdinalIgnoreCase))
+            .GroupBy(o => o.Schema, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    // A filter that leaves every group shut shows nothing and reads as "no results", so a search opens
+    // whatever still matches. Collapsed-by-default only applies to the unfiltered list.
+    private bool IsOpen(string schema) => !string.IsNullOrWhiteSpace(_filter) || _open.Contains(schema);
+
+    private void Toggle(string schema)
+    {
+        if (!_open.Remove(schema)) _open.Add(schema);
+    }
+
+    private async Task SetAsync(DatabaseObjectPolicy o, string level)
+    {
+        if (!Enum.TryParse<ObjectAccess>(level, out var access)) return;
+        await WriteAsync(s => s.SetAccessAsync(ConnectionId, o.Schema, o.Name, o.Kind, access));
+    }
+
+    private async Task SetSchemaAsync(string schema, string level)
+    {
+        if (!Enum.TryParse<ObjectAccess>(level, out var access)) return;
+        await WriteAsync(s => s.SetSchemaAccessAsync(ConnectionId, schema, access));
+    }
+
+    private async Task WriteAsync(Func<TablePolicyService, Task<SetAccessOutcome>> write)
+    {
+        try
+        {
+            var outcome = await Runner.RunAsync<TablePolicyService, SetAccessOutcome>(write);
+            _error = outcome switch
+            {
+                SetAccessOutcome.ConnectionMissing => "That database is no longer configured.",
+                SetAccessOutcome.ViewCannotBeWritable => "A view cannot be made writable.",
+                _ => null,
+            };
+        }
+        catch (Exception ex)
+        {
+            // Without this the control just snapped back on the next read with no explanation, and the
+            // user would believe the level had been applied — the exact defect the rail's toggle had.
+            Logger.LogError(ex, "Failed to set access for connection {ConnectionId}.", ConnectionId);
+            _error = "The access level could not be saved. The details are in the server log.";
+        }
+
+        // Re-read either way: the store is the truth, and a failed write must not leave the control
+        // showing what the user clicked.
+        await ReloadAsync();
+    }
+}

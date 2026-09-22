@@ -1,11 +1,20 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using SqlAgent.Core;
 
 namespace SqlAgent.Storage;
 
 /// <summary>A database attached to a message: the live connection id when it still exists, and always
 /// the name it had when the message was sent.</summary>
 public record ChatDatabaseRef(Guid? ConnectionId, string Name);
+public record ChatFileRef(Guid Id, string FileName, string ContentType, long SizeBytes, string Url)
+{
+    // Provider/storage locators stay behind the storage seam. They are carried only while binding a
+    // pending upload and are never projected by ChatMessageView.
+    internal string ProviderKey { get; init; } = "";
+    internal string StorageKey { get; init; } = "";
+}
 
 /// <summary>A history row. Deliberately without messages — the sidebar lists hundreds of these.</summary>
 public record ChatSummary(Guid Id, string Title, DateTime LastMessageAt);
@@ -23,7 +32,10 @@ public record ChatMessageView(
     int? RowCount,
     long? ElapsedMs,
     bool Truncated,
-    IReadOnlyList<ChatDatabaseRef> Databases);
+    IReadOnlyList<ChatDatabaseRef> Databases,
+    string? ConfirmationOperation = null,
+    Guid? SchemaDiagramConnectionId = null,
+    IReadOnlyList<ChatFileRef>? Files = null);
 
 /// <summary>A whole conversation, messages in order.</summary>
 public record ChatDetail(Guid Id, string Title, IReadOnlyList<ChatMessageView> Messages);
@@ -39,15 +51,70 @@ public record ChatMessageInput(
     string? ErrorCode = null,
     int? RowCount = null,
     long? ElapsedMs = null,
-    bool Truncated = false);
+    bool Truncated = false,
+    string? ConfirmationOperation = null,
+    Guid? SchemaDiagramConnectionId = null,
+    IReadOnlyList<ChatFileRef>? Files = null);
+
+/// <summary>All information needed to confirm one pending assistant message.</summary>
+public record ChatConfirmationTarget(Guid MessageId, Guid ChatId, string Sql, Guid ConnectionId);
+public record ChatRegenerationTarget(Guid MessageId, Guid ChatId, string Question, Guid ConnectionId);
+
+public sealed record AttachmentStorageReference(string ProviderKey, string StorageKey);
+
+public interface IAttachmentBlobCleanup
+{
+    Task DeleteAsync(IReadOnlyList<AttachmentStorageReference> attachments, CancellationToken ct = default);
+}
+
+/// <summary>Deletes provider blobs after their metadata has been removed from the local store.</summary>
+public sealed class AttachmentBlobCleanup(
+    IFileStorageProviderRegistry providers,
+    ILogger<AttachmentBlobCleanup> logger) : IAttachmentBlobCleanup
+{
+    public async Task DeleteAsync(
+        IReadOnlyList<AttachmentStorageReference> attachments,
+        CancellationToken ct = default)
+    {
+        foreach (var attachment in attachments)
+        {
+            try
+            {
+                var provider = providers.Get(attachment.ProviderKey);
+                if (!await provider.DeleteAsync(attachment.StorageKey, ct))
+                    logger.LogWarning(
+                        "File storage provider {ProviderKey} did not delete an attachment blob.",
+                        attachment.ProviderKey);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                // Provider errors must not turn a successful metadata deletion into a failed chat or
+                // project deletion. Keep storage locators out of the log message and log only the
+                // provider identity needed to diagnose configuration or availability failures; do not
+                // attach the provider exception because its text may contain sensitive details.
+                logger.LogWarning(
+                    "File storage provider {ProviderKey} failed while deleting an attachment blob; "
+                    + "metadata deletion has completed.", attachment.ProviderKey);
+            }
+        }
+    }
+}
 
 /// <summary>
 /// The chat store: history, one conversation, and appends. Orchestrating a turn — deciding what to do
 /// with the attached databases and calling the model — is <see cref="ChatTurnService"/>'s job, kept
 /// separate so this stays a store with no opinion about language models.
 /// </summary>
-public class ChatService(SqlAgentDbContext db)
+public class ChatService(
+    SqlAgentDbContext db,
+    MessageAttachmentService? attachmentService = null,
+    IAttachmentBlobCleanup? attachmentCleanup = null)
 {
+    private readonly MessageAttachmentService attachmentMetadata = attachmentService ?? new(db);
     /// <summary>SQLite's constraint-violation result code. Raised here by the unique (ChatId, Sequence)
     /// index when two circuits append to one chat at the same moment.</summary>
     private const int SqliteConstraint = 19;
@@ -70,11 +137,103 @@ public class ChatService(SqlAgentDbContext db)
         var chat = await db.Chats
             .AsNoTracking()
             .Include(c => c.Messages).ThenInclude(m => m.Databases)
+            .Include(c => c.Messages).ThenInclude(m => m.Attachments)
             .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (chat is null) return null;
 
         return new ChatDetail(chat.Id, chat.Title,
             chat.Messages.OrderBy(m => m.Sequence).Select(ToView).ToList());
+    }
+
+    /// <summary>
+    /// Resolves a pending assistant message to the one live database attached to the user message that
+    /// preceded it. The attachment is read from the transcript, not from current circuit state, so a
+    /// later chip edit cannot make a confirmation execute against a different connection.
+    /// </summary>
+    public async Task<ChatConfirmationTarget?> GetConfirmationTargetAsync(
+        Guid assistantMessageId, CancellationToken ct = default)
+    {
+        var assistant = await db.ChatMessages
+            .AsNoTracking()
+            .Include(m => m.Databases)
+            .FirstOrDefaultAsync(m => m.Id == assistantMessageId, ct);
+        if (assistant is null || assistant.Role != ChatRole.Assistant
+            || assistant.OutcomeKind != ChatOutcomeKind.ConfirmationRequired
+            || string.IsNullOrWhiteSpace(assistant.GeneratedSql))
+            return null;
+
+        var user = await db.ChatMessages
+            .AsNoTracking()
+            .Include(m => m.Databases)
+            .Where(m => m.ChatId == assistant.ChatId && m.Role == ChatRole.User
+                        && m.Sequence < assistant.Sequence)
+            .OrderByDescending(m => m.Sequence)
+            .FirstOrDefaultAsync(ct);
+        var connectionIds = user?.Databases
+            .Select(d => d.DatabaseConnectionId)
+            .Where(id => id is not null)
+            .Select(id => id!.Value)
+            .Distinct()
+            .ToList() ?? [];
+        return connectionIds.Count == 1
+            ? new ChatConfirmationTarget(assistant.Id, assistant.ChatId, assistant.GeneratedSql!, connectionIds[0])
+            : null;
+    }
+
+    /// <summary>Replaces a pending outcome in place after the shared executor has finished.</summary>
+    public async Task<ChatMessageView?> UpdateOutcomeAsync(
+        Guid assistantMessageId, QueryExecutionResult result, CancellationToken ct = default)
+    {
+        var message = await db.ChatMessages.FirstOrDefaultAsync(m => m.Id == assistantMessageId, ct);
+        if (message is null) return null;
+
+        message.Text = result.Success ? "" : result.ErrorMessage ?? "";
+        message.GeneratedSql = result.Sql;
+        message.OutcomeKind = result.Success ? ChatOutcomeKind.QueryResult : ChatOutcomeKind.Error;
+        message.ErrorCode = result.Success ? null : result.ErrorCode;
+        message.ConfirmationOperation = result.Operation?.ToString();
+        message.RowCount = result.Success ? result.RowCount : 0;
+        message.ElapsedMs = result.ElapsedMs;
+        message.Truncated = result.Truncated;
+        await db.SaveChangesAsync(ct);
+        return ToView(message);
+    }
+
+    public async Task<ChatRegenerationTarget?> GetRegenerationTargetAsync(
+        Guid assistantMessageId, CancellationToken ct = default)
+    {
+        var assistant = await db.ChatMessages.AsNoTracking()
+            .FirstOrDefaultAsync(m => m.Id == assistantMessageId && m.Role == ChatRole.Assistant, ct);
+        if (assistant is null) return null;
+
+        var user = await db.ChatMessages.AsNoTracking().Include(m => m.Databases)
+            .Where(m => m.ChatId == assistant.ChatId && m.Role == ChatRole.User
+                        && m.Sequence < assistant.Sequence)
+            .OrderByDescending(m => m.Sequence).FirstOrDefaultAsync(ct);
+        var ids = user?.Databases.Select(d => d.DatabaseConnectionId).Where(id => id is not null)
+            .Select(id => id!.Value).Distinct().ToList() ?? [];
+        return ids.Count == 1
+            ? new ChatRegenerationTarget(assistant.Id, assistant.ChatId, user!.Text, ids[0])
+            : null;
+    }
+
+    public async Task<ChatMessageView?> ReplaceOutcomeAsync(
+        Guid assistantMessageId, ChatMessageInput input, CancellationToken ct = default)
+    {
+        var message = await db.ChatMessages.FirstOrDefaultAsync(
+            m => m.Id == assistantMessageId && m.ChatId == input.ChatId && m.Role == ChatRole.Assistant, ct);
+        if (message is null) return null;
+        message.Text = input.Text;
+        message.GeneratedSql = input.GeneratedSql;
+        message.OutcomeKind = input.OutcomeKind;
+        message.ErrorCode = input.ErrorCode;
+        message.ConfirmationOperation = input.ConfirmationOperation;
+        message.SchemaDiagramConnectionId = input.SchemaDiagramConnectionId;
+        message.RowCount = input.RowCount;
+        message.ElapsedMs = input.ElapsedMs;
+        message.Truncated = input.Truncated;
+        await db.SaveChangesAsync(ct);
+        return ToView(message);
     }
 
     public async Task<Guid> CreateChatAsync(string title, CancellationToken ct = default)
@@ -142,6 +301,8 @@ public class ChatService(SqlAgentDbContext db)
             GeneratedSql = input.GeneratedSql,
             OutcomeKind = input.OutcomeKind,
             ErrorCode = input.ErrorCode,
+            ConfirmationOperation = input.ConfirmationOperation,
+            SchemaDiagramConnectionId = input.SchemaDiagramConnectionId,
             RowCount = input.RowCount,
             ElapsedMs = input.ElapsedMs,
             Truncated = input.Truncated,
@@ -155,7 +316,10 @@ public class ChatService(SqlAgentDbContext db)
                 DatabaseConnectionId = d.ConnectionId,
                 DatabaseName = d.Name,
             }).ToList(),
+            Attachments = attachmentMetadata.Bind(Guid.Empty, input.Files, now).ToList(),
         };
+        foreach (var attachment in message.Attachments)
+            attachment.ChatMessageId = message.Id;
 
         db.ChatMessages.Add(message);
         chat.LastMessageAt = now;
@@ -175,6 +339,8 @@ public class ChatService(SqlAgentDbContext db)
             db.Entry(chat).State = EntityState.Detached;
             foreach (var database in message.Databases)
                 db.Entry(database).State = EntityState.Detached;
+            foreach (var attachment in message.Attachments)
+                db.Entry(attachment).State = EntityState.Detached;
             db.Entry(message).State = EntityState.Detached;
             throw;
         }
@@ -196,9 +362,17 @@ public class ChatService(SqlAgentDbContext db)
     {
         var chat = await db.Chats.FirstOrDefaultAsync(c => c.Id == id, ct);
         if (chat is null) return false;
+        var attachments = attachmentCleanup is null
+            ? []
+            : await db.MessageAttachments.AsNoTracking()
+                .Where(a => a.Message!.ChatId == id)
+                .Select(a => new AttachmentStorageReference(a.ProviderKey, a.StorageKey))
+                .ToListAsync(ct);
         // Messages and their attachment rows go with it through the cascade configured on the context.
         db.Chats.Remove(chat);
         await db.SaveChangesAsync(ct);
+        if (attachmentCleanup is not null)
+            await attachmentCleanup.DeleteAsync(attachments, ct);
         return true;
     }
 
@@ -214,5 +388,7 @@ public class ChatService(SqlAgentDbContext db)
     private static ChatMessageView ToView(ChatMessage m) => new(
         m.Id, m.Sequence, m.Role, m.Text, m.CreatedAt, m.GeneratedSql, m.OutcomeKind,
         m.ErrorCode, m.RowCount, m.ElapsedMs, m.Truncated,
-        m.Databases.Select(d => new ChatDatabaseRef(d.DatabaseConnectionId, d.DatabaseName)).ToList());
+        m.Databases.Select(d => new ChatDatabaseRef(d.DatabaseConnectionId, d.DatabaseName)).ToList(),
+        m.ConfirmationOperation, m.SchemaDiagramConnectionId,
+        m.Attachments.Select(a => new ChatFileRef(a.Id, a.FileName, a.ContentType, a.SizeBytes, a.Url)).ToList());
 }
