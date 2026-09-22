@@ -1,5 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
+using SqlAgent.Core;
 using SqlAgent.Storage;
 
 namespace SqlAgent.Tests;
@@ -129,6 +131,56 @@ public class ProjectServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Deleting_a_project_with_its_chats_requests_provider_deletion_for_attachment_blobs()
+    {
+        var provider = new ProjectRecordingFileStorageProvider();
+        var cleanup = new AttachmentBlobCleanup(
+            new FileStorageProviderRegistry([provider]),
+            NullLogger<AttachmentBlobCleanup>.Instance);
+        var projects = new ProjectService(_db, cleanup);
+        var id = await NewProjectAsync("quarterly");
+        var chat = await _chats.CreateChatAsync("doomed");
+        await _chats.AppendMessageAsync(new ChatMessageInput(
+            chat, ChatRole.User, "q", [],
+            Files: [new ChatFileRef(Guid.NewGuid(), "report.pdf", "application/pdf", 42, "/files/report") ]));
+        var metadata = await _db.MessageAttachments.SingleAsync();
+        metadata.ProviderKey = provider.Key;
+        metadata.StorageKey = "storage/report.pdf";
+        await _db.SaveChangesAsync();
+        Assert.True(await _projects.MoveChatAsync(chat, id));
+
+        Assert.True(await projects.DeleteProjectAsync(id, ProjectDeleteMode.DeleteChats));
+
+        Assert.Equal(["storage/report.pdf"], provider.DeletedKeys);
+        Assert.Empty(await _db.MessageAttachments.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Keeping_a_projects_chats_does_not_delete_their_attachment_blobs_or_metadata()
+    {
+        var provider = new ProjectRecordingFileStorageProvider();
+        var cleanup = new AttachmentBlobCleanup(
+            new FileStorageProviderRegistry([provider]),
+            NullLogger<AttachmentBlobCleanup>.Instance);
+        var projects = new ProjectService(_db, cleanup);
+        var id = await NewProjectAsync("quarterly");
+        var chat = await _chats.CreateChatAsync("kept");
+        await _chats.AppendMessageAsync(new ChatMessageInput(
+            chat, ChatRole.User, "q", [],
+            Files: [new ChatFileRef(Guid.NewGuid(), "report.pdf", "application/pdf", 42, "/files/report") ]));
+        var metadata = await _db.MessageAttachments.SingleAsync();
+        metadata.ProviderKey = provider.Key;
+        metadata.StorageKey = "storage/report.pdf";
+        await _db.SaveChangesAsync();
+        Assert.True(await _projects.MoveChatAsync(chat, id));
+
+        Assert.True(await projects.DeleteProjectAsync(id, ProjectDeleteMode.KeepChats));
+
+        Assert.Empty(provider.DeletedKeys);
+        Assert.Single(await _db.MessageAttachments.ToListAsync());
+    }
+
+    [Fact]
     public async Task Deleting_a_project_that_is_gone_reports_it_rather_than_throwing()
     {
         Assert.False(await _projects.DeleteProjectAsync(Guid.NewGuid(), ProjectDeleteMode.KeepChats));
@@ -187,5 +239,23 @@ public class ProjectServiceTests : IDisposable
     {
         _db.Dispose();
         _conn.Dispose();
+    }
+}
+
+file sealed class ProjectRecordingFileStorageProvider : IFileStorageProvider
+{
+    public string Key => "test-provider";
+    public List<string> DeletedKeys { get; } = [];
+
+    public Task<StoredFile> SaveAsync(FileUpload upload, CancellationToken ct = default) =>
+        throw new NotSupportedException();
+
+    public Task<Stream?> OpenReadAsync(string storageKey, CancellationToken ct = default) =>
+        Task.FromResult<Stream?>(null);
+
+    public Task<bool> DeleteAsync(string storageKey, CancellationToken ct = default)
+    {
+        DeletedKeys.Add(storageKey);
+        return Task.FromResult(true);
     }
 }

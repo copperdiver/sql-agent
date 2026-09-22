@@ -29,6 +29,10 @@ builder.Services.AddSingleton<IFileStorageProvider>(_ =>
         LaunchUrlFile.ResolveDirectory(builder.Configuration), fileStorageOptions.MaxBytes));
 builder.Services.AddSingleton<IFileStorageProviderRegistry, SqlAgent.Core.FileStorageProviderRegistry>();
 builder.Services.AddScoped<MessageAttachmentService>();
+builder.Services.AddScoped<IFileStorageReferenceReader>(services =>
+    services.GetRequiredService<MessageAttachmentService>());
+builder.Services.AddScoped<FileStorageService>();
+builder.Services.AddScoped<IAttachmentBlobCleanup, AttachmentBlobCleanup>();
 
 builder.Services.AddSingleton<IDatabaseProvider, SqlServerProvider>();
 builder.Services.AddSingleton<IDatabaseProvider, PostgresProvider>();
@@ -72,6 +76,8 @@ using (var scope = app.Services.CreateScope())
     // StoreInitializer also carries the one-time baseline stamp for stores created the old way.
     var db = scope.ServiceProvider.GetRequiredService<SqlAgentDbContext>();
     await StoreInitializer.InitializeAsync(db, app.Logger);
+    var fileStorage = scope.ServiceProvider.GetRequiredService<FileStorageService>();
+    await StoreInitializer.SweepOrphansAsync(fileStorage, app.Logger);
 }
 
 // Order matters: origin checks run before anything reads the token, so a hostile page cannot even

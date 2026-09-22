@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using SqlAgent.Core;
 
 namespace SqlAgent.Storage;
@@ -59,12 +60,58 @@ public record ChatMessageInput(
 public record ChatConfirmationTarget(Guid MessageId, Guid ChatId, string Sql, Guid ConnectionId);
 public record ChatRegenerationTarget(Guid MessageId, Guid ChatId, string Question, Guid ConnectionId);
 
+public sealed record AttachmentStorageReference(string ProviderKey, string StorageKey);
+
+public interface IAttachmentBlobCleanup
+{
+    Task DeleteAsync(IReadOnlyList<AttachmentStorageReference> attachments, CancellationToken ct = default);
+}
+
+/// <summary>Deletes provider blobs after their metadata has been removed from the local store.</summary>
+public sealed class AttachmentBlobCleanup(
+    IFileStorageProviderRegistry providers,
+    ILogger<AttachmentBlobCleanup> logger) : IAttachmentBlobCleanup
+{
+    public async Task DeleteAsync(
+        IReadOnlyList<AttachmentStorageReference> attachments,
+        CancellationToken ct = default)
+    {
+        foreach (var attachment in attachments)
+        {
+            try
+            {
+                var provider = providers.Get(attachment.ProviderKey);
+                if (!await provider.DeleteAsync(attachment.StorageKey, ct))
+                    logger.LogWarning(
+                        "File storage provider {ProviderKey} did not delete an attachment blob.",
+                        attachment.ProviderKey);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // Provider errors must not turn a successful metadata deletion into a failed chat or
+                // project deletion. Keep storage locators out of the log message and log only the
+                // provider identity needed to diagnose configuration or availability failures.
+                logger.LogWarning(ex,
+                    "File storage provider {ProviderKey} failed while deleting an attachment blob; "
+                    + "metadata deletion has completed.", attachment.ProviderKey);
+            }
+        }
+    }
+}
+
 /// <summary>
 /// The chat store: history, one conversation, and appends. Orchestrating a turn — deciding what to do
 /// with the attached databases and calling the model — is <see cref="ChatTurnService"/>'s job, kept
 /// separate so this stays a store with no opinion about language models.
 /// </summary>
-public class ChatService(SqlAgentDbContext db, MessageAttachmentService? attachmentService = null)
+public class ChatService(
+    SqlAgentDbContext db,
+    MessageAttachmentService? attachmentService = null,
+    IAttachmentBlobCleanup? attachmentCleanup = null)
 {
     private readonly MessageAttachmentService attachmentMetadata = attachmentService ?? new(db);
     /// <summary>SQLite's constraint-violation result code. Raised here by the unique (ChatId, Sequence)
@@ -314,9 +361,17 @@ public class ChatService(SqlAgentDbContext db, MessageAttachmentService? attachm
     {
         var chat = await db.Chats.FirstOrDefaultAsync(c => c.Id == id, ct);
         if (chat is null) return false;
+        var attachments = attachmentCleanup is null
+            ? []
+            : await db.MessageAttachments.AsNoTracking()
+                .Where(a => a.Message!.ChatId == id)
+                .Select(a => new AttachmentStorageReference(a.ProviderKey, a.StorageKey))
+                .ToListAsync(ct);
         // Messages and their attachment rows go with it through the cascade configured on the context.
         db.Chats.Remove(chat);
         await db.SaveChangesAsync(ct);
+        if (attachmentCleanup is not null)
+            await attachmentCleanup.DeleteAsync(attachments, ct);
         return true;
     }
 

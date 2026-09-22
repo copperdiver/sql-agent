@@ -19,7 +19,7 @@ public enum ProjectDeleteMode { KeepChats, DeleteChats }
 /// Projects and which chats are in them. The store only: the dialogs that ask "keep or delete?" live in
 /// the sidebar, and this class never decides that on the caller's behalf.
 /// </summary>
-public class ProjectService(SqlAgentDbContext db)
+public class ProjectService(SqlAgentDbContext db, IAttachmentBlobCleanup? attachmentCleanup = null)
 {
     /// <summary>SQLite's constraint-violation result code, as <see cref="ChatService"/> uses it.</summary>
     private const int SqliteConstraint = 19;
@@ -100,6 +100,13 @@ public class ProjectService(SqlAgentDbContext db)
             .FirstOrDefaultAsync(p => p.Id == id, ct);
         if (project is null) return false;
 
+        var attachments = mode == ProjectDeleteMode.DeleteChats && attachmentCleanup is not null
+            ? await db.MessageAttachments.AsNoTracking()
+                .Where(a => project.Chats.Select(c => c.Id).Contains(a.Message!.ChatId))
+                .Select(a => new AttachmentStorageReference(a.ProviderKey, a.StorageKey))
+                .ToListAsync(ct)
+            : [];
+
         // The chats have to be dealt with first: the foreign key is Restrict, so removing the project
         // while anything still points at it fails rather than deciding for the user.
         if (mode == ProjectDeleteMode.DeleteChats)
@@ -109,6 +116,8 @@ public class ProjectService(SqlAgentDbContext db)
 
         db.Projects.Remove(project);
         await db.SaveChangesAsync(ct);
+        if (mode == ProjectDeleteMode.DeleteChats && attachmentCleanup is not null)
+            await attachmentCleanup.DeleteAsync(attachments, ct);
         return true;
     }
 

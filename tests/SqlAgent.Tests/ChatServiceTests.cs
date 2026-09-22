@@ -1,6 +1,9 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using SqlAgent.Core;
 using SqlAgent.Storage;
 
 namespace SqlAgent.Tests;
@@ -116,6 +119,54 @@ public class ChatServiceTests : IDisposable
         Assert.Empty(await _db.ChatMessages.ToListAsync());
         Assert.Empty(await _db.ChatMessageDatabases.ToListAsync());
         Assert.Empty(await _db.MessageAttachments.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Deleting_a_chat_requests_provider_deletion_before_attachment_metadata_cascade()
+    {
+        var provider = new RecordingFileStorageProvider();
+        var cleanup = new AttachmentBlobCleanup(
+            new FileStorageProviderRegistry([provider]),
+            NullLogger<AttachmentBlobCleanup>.Instance);
+        var chats = new ChatService(_db, null, cleanup);
+        var chat = await chats.CreateChatAsync("t");
+        await chats.AppendMessageAsync(new ChatMessageInput(
+            chat, ChatRole.User, "q", [],
+            Files: [new ChatFileRef(Guid.NewGuid(), "report.pdf", "application/pdf", 42, "/files/report") ]));
+        var metadata = await _db.MessageAttachments.SingleAsync();
+        metadata.ProviderKey = provider.Key;
+        metadata.StorageKey = "storage/report.pdf";
+        await _db.SaveChangesAsync();
+
+        Assert.True(await chats.DeleteChatAsync(chat));
+
+        Assert.Equal(["storage/report.pdf"], provider.DeletedKeys);
+        Assert.Empty(await _db.MessageAttachments.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Provider_deletion_failure_does_not_fail_chat_metadata_deletion()
+    {
+        var provider = new RecordingFileStorageProvider { ThrowOnDelete = true };
+        var logs = new RecordingLoggerProvider();
+        var cleanup = new AttachmentBlobCleanup(
+            new FileStorageProviderRegistry([provider]),
+            LoggerFactory.Create(builder => builder.AddProvider(logs))
+                .CreateLogger<AttachmentBlobCleanup>());
+        var chats = new ChatService(_db, null, cleanup);
+        var chat = await chats.CreateChatAsync("t");
+        await chats.AppendMessageAsync(new ChatMessageInput(
+            chat, ChatRole.User, "q", [],
+            Files: [new ChatFileRef(Guid.NewGuid(), "report.pdf", "application/pdf", 42, "/files/report") ]));
+        var metadata = await _db.MessageAttachments.SingleAsync();
+        metadata.ProviderKey = provider.Key;
+        metadata.StorageKey = "storage/report.pdf";
+        await _db.SaveChangesAsync();
+
+        Assert.True(await chats.DeleteChatAsync(chat));
+
+        Assert.Empty(await _db.MessageAttachments.ToListAsync());
+        Assert.Contains(logs.Records, record => record.Level == LogLevel.Warning);
     }
 
     [Fact]
@@ -258,6 +309,26 @@ public class ChatServiceTests : IDisposable
     {
         _db.Dispose();
         _conn.Dispose();
+    }
+}
+
+file sealed class RecordingFileStorageProvider : IFileStorageProvider
+{
+    public string Key => "test-provider";
+    public bool ThrowOnDelete { get; set; }
+    public List<string> DeletedKeys { get; } = [];
+
+    public Task<StoredFile> SaveAsync(FileUpload upload, CancellationToken ct = default) =>
+        throw new NotSupportedException();
+
+    public Task<Stream?> OpenReadAsync(string storageKey, CancellationToken ct = default) =>
+        Task.FromResult<Stream?>(null);
+
+    public Task<bool> DeleteAsync(string storageKey, CancellationToken ct = default)
+    {
+        if (ThrowOnDelete) throw new IOException("provider failed");
+        DeletedKeys.Add(storageKey);
+        return Task.FromResult(true);
     }
 }
 

@@ -23,6 +23,27 @@ public static class StoreInitializer
     /// a missing history table, is what identifies an EnsureCreated store.</summary>
     private const string LegacyMarkerTable = "DatabaseConnections";
 
+    /// <summary>Runs the startup blob sweep without making an otherwise healthy store unavailable.</summary>
+    public static async Task SweepOrphansAsync(
+        FileStorageService storage,
+        ILogger logger,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            await storage.SweepOrphansAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "The startup file attachment orphan sweep failed; continuing with the store available.");
+        }
+    }
+
     public static async Task InitializeAsync(
         SqlAgentDbContext db, ILogger logger, CancellationToken ct = default)
     {
