@@ -89,6 +89,7 @@
     private Composer? _composer;
     private string _question = "";
     private bool _busy;
+    private Task? _sendInFlight;
     private bool _scratchpadOpen;
     private Guid? _scratchpadConnectionId;
     private string _scratchpadSql = "";
@@ -193,6 +194,11 @@
 
     private async Task RemoveFileAsync(PendingFileAttachment file)
     {
+        // A send snapshots the pending files before resolving and persisting their refs. Defer an
+        // explicit remove until that send settles so it cannot delete a blob that the turn is still
+        // about to persist (and so a failed send still retains its pending files until the user removes
+        // them after the failure).
+        if (_sendInFlight is { } send) await send;
         if (!_pendingFiles.Remove(file)) return;
         if (FileStorage is { } storage) await storage.DeletePendingAsync(file);
     }
@@ -221,6 +227,9 @@
         _question = "";
         var databaseIds = _attached.Select(a => a.ConnectionId!.Value).ToList();
         var files = _pendingFiles.ToList();
+        var sendCompletion = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        _sendInFlight = sendCompletion.Task;
         // Captured up front: this component instance is reused across "/" and "/chat/{Id}" (that reuse is
         // why OnParametersSetAsync's guard exists), so _loadedChatId can change under us while the send
         // below is in flight — the user opens a stored chat, or leaves for /sql entirely. Comparing the
@@ -295,6 +304,8 @@
             _busy = false;
             _cts?.Dispose();
             _cts = null;
+            sendCompletion.TrySetResult(null);
+            _sendInFlight = null;
         }
     }
 
@@ -450,6 +461,10 @@
     private async Task CleanupPendingFilesAsync()
     {
         if (_pendingFiles.Count == 0) return;
+        // Route changes and disposal can begin while SendAsync is still resolving the attachment refs.
+        // Waiting here keeps cleanup from deleting a blob before that send has either persisted it or
+        // failed and left it pending for cleanup.
+        if (_sendInFlight is { } send) await send;
         var files = _pendingFiles.ToList();
         _pendingFiles.Clear();
         var storage = FileStorage;

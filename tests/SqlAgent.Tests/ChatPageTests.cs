@@ -232,6 +232,66 @@ public class ChatPageTests : IDisposable
     }
 
     [Fact]
+    public async Task Removing_a_file_while_send_is_in_flight_waits_for_send_before_cleaning_storage()
+    {
+        await AddConnectionAsync("prod");
+        _gateway.Hold();
+        var page = _ctx.RenderComponent<ChatPage>();
+        await AttachAsync(page, "prod");
+        await UploadFileAsync(page, "race.txt", "do not delete yet");
+        Type(page, "send after the file is safe");
+
+        var send = ClickAsync(page.Find("[data-testid=send]"));
+        await WaitForConditionAsync(() => _gateway.CallCount == 1);
+        var remove = ClickAsync(page.Find(".pending-file-remove"));
+
+        await Task.Yield();
+        Assert.False(remove.IsCompleted);
+        Assert.NotEmpty(Directory.GetFiles(_fileRoot, "*", SearchOption.AllDirectories));
+
+        _gateway.Release(LlmSqlResponse.Generated("SELECT 1"));
+        await send;
+        await remove;
+
+        var chat = Assert.Single(await ListChatsAsync());
+        Assert.Single((await LoadAsync(chat.Id))!.Messages.First(m => m.Role == ChatRole.User).Files!);
+        Assert.NotEmpty(Directory.GetFiles(_fileRoot, "*", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public async Task Removing_a_file_while_idle_deletes_pending_storage()
+    {
+        var page = _ctx.RenderComponent<ChatPage>();
+        await UploadFileAsync(page, "remove.txt", "remove me");
+
+        await ClickAsync(page.Find(".pending-file-remove"));
+
+        Assert.Empty(page.FindAll(".pending-file"));
+        Assert.Empty(Directory.GetFiles(_fileRoot, "*", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public async Task Disposing_during_send_does_not_clean_a_file_until_send_settles()
+    {
+        await AddConnectionAsync("prod");
+        _gateway.Hold();
+        var page = _ctx.RenderComponent<ChatPage>();
+        await AttachAsync(page, "prod");
+        await UploadFileAsync(page, "dispose-race.txt", "keep until send");
+        Type(page, "send before disposal");
+
+        var send = ClickAsync(page.Find("[data-testid=send]"));
+        await WaitForConditionAsync(() => _gateway.CallCount == 1);
+
+        _ctx.DisposeComponents();
+        Assert.NotEmpty(Directory.GetFiles(_fileRoot, "*", SearchOption.AllDirectories));
+
+        _gateway.Release(LlmSqlResponse.Generated("SELECT 1"));
+        await send;
+        Assert.NotEmpty(Directory.GetFiles(_fileRoot, "*", SearchOption.AllDirectories));
+    }
+
+    [Fact]
     public void Sent_file_chips_are_read_only_authenticated_download_links()
     {
         var fileId = Guid.NewGuid();
