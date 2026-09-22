@@ -25,9 +25,9 @@ public sealed class FileStorageService(
     public async Task<PendingFileAttachment> UploadAsync(FileUpload upload, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(upload);
-        var provider = registry.Get(options.Provider);
         try
         {
+            var provider = registry.Get(options.Provider);
             await using var bounded = new BoundedReadStream(upload.Content, options.MaxBytes);
             var stored = await provider.SaveAsync(upload with { Content = bounded }, ct);
             return new PendingFileAttachment(NormalizeFileName(upload.FileName),
@@ -38,7 +38,7 @@ public sealed class FileStorageService(
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
-            logger.LogError(ex, "File storage provider {ProviderKey} failed while storing an upload.", provider.Key);
+            logger.LogError(ex, "File storage provider {ProviderKey} failed while storing an upload.", options.Provider);
             throw new FileRejectedException();
         }
     }
@@ -56,7 +56,17 @@ public sealed class FileStorageService(
     public async Task SweepOrphansAsync(CancellationToken ct = default)
     {
         if (references is null) return;
-        var provider = registry.Get(options.Provider);
+        IFileStorageProvider provider;
+        try
+        {
+            provider = registry.Get(options.Provider);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "File storage provider {ProviderKey} could not be selected for orphan cleanup.", options.Provider);
+            return;
+        }
         if (provider is not LocalDiskFileStorageProvider local) return;
         foreach (var file in local.EnumerateFiles())
         {

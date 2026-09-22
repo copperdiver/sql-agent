@@ -33,6 +33,34 @@ public sealed class FileStorageServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Upload_maps_unknown_provider_selection_to_stable_rejection()
+    {
+        var service = new FileStorageService(
+            new SqlAgent.Core.FileStorageProviderRegistry([]),
+            new FileStorageOptions(Provider: "missing"),
+            NullLogger<FileStorageService>.Instance);
+
+        var exception = await Assert.ThrowsAsync<FileRejectedException>(() =>
+            service.UploadAsync(new FileUpload("file.txt", "text/plain", new MemoryStream("x"u8.ToArray()))));
+
+        Assert.Equal("The file could not be stored.", exception.Message);
+    }
+
+    [Fact]
+    public async Task Upload_maps_throwing_provider_selection_to_stable_rejection()
+    {
+        var service = new FileStorageService(
+            new ThrowingRegistry(),
+            new FileStorageOptions(),
+            NullLogger<FileStorageService>.Instance);
+
+        var exception = await Assert.ThrowsAsync<FileRejectedException>(() =>
+            service.UploadAsync(new FileUpload("file.txt", "text/plain", new MemoryStream("x"u8.ToArray()))));
+
+        Assert.Equal("The file could not be stored.", exception.Message);
+    }
+
+    [Fact]
     public async Task Sweep_deletes_only_old_unreferenced_files()
     {
         var provider = new LocalDiskFileStorageProvider(_root);
@@ -53,6 +81,30 @@ public sealed class FileStorageServiceTests : IDisposable
             Assert.NotNull(freshStream);
     }
 
+    [Fact]
+    public async Task Sweep_swallows_unknown_provider_selection()
+    {
+        var service = new FileStorageService(
+            new SqlAgent.Core.FileStorageProviderRegistry([]),
+            new FileStorageOptions(Provider: "missing"),
+            NullLogger<FileStorageService>.Instance,
+            new ReferenceReader("unused"));
+
+        await service.SweepOrphansAsync();
+    }
+
+    [Fact]
+    public async Task Sweep_swallows_throwing_provider_selection()
+    {
+        var service = new FileStorageService(
+            new ThrowingRegistry(),
+            new FileStorageOptions(),
+            NullLogger<FileStorageService>.Instance,
+            new ReferenceReader("unused"));
+
+        await service.SweepOrphansAsync();
+    }
+
     private static void SetAge(LocalDiskFileStorageProvider provider, string key, int hours)
     {
         var field = typeof(LocalDiskFileStorageProvider).GetField("_filesRoot", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
@@ -63,6 +115,11 @@ public sealed class FileStorageServiceTests : IDisposable
     private sealed class ReferenceReader(string key) : IFileStorageReferenceReader
     {
         public Task<bool> ExistsAsync(string providerKey, string storageKey, CancellationToken ct = default) => Task.FromResult(storageKey == key);
+    }
+
+    private sealed class ThrowingRegistry : IFileStorageProviderRegistry
+    {
+        public IFileStorageProvider Get(string key) => throw new InvalidOperationException("provider selection failed");
     }
 
     public void Dispose()
