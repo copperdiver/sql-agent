@@ -25,6 +25,8 @@
             NlResponseKind.QueryResult, m.GeneratedSql, null, null, null,
             [], [], m.RowCount ?? 0, m.Truncated, m.ElapsedMs ?? 0),
         ChatOutcomeKind.Clarification => NlQueryResult.Clarification(m.Text),
+        ChatOutcomeKind.ConfirmationRequired when !string.IsNullOrWhiteSpace(m.GeneratedSql) =>
+            NlQueryResult.Confirmation(m.GeneratedSql!, m.ConfirmationOperation ?? "write"),
         ChatOutcomeKind.Error => NlQueryResult.Error(
             m.ErrorCode ?? "", m.Text, m.GeneratedSql, m.ElapsedMs ?? 0),
         _ => null,

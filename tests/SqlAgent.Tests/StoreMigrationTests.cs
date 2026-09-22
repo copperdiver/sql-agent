@@ -626,6 +626,7 @@ public sealed class ChatOnlyDbContext(DbContextOptions<ChatOnlyDbContext> option
                 .HasForeignKey(x => x.ChatId).OnDelete(DeleteBehavior.Cascade);
             e.Property(x => x.Role).HasConversion<string>().HasMaxLength(16);
             e.Property(x => x.OutcomeKind).HasConversion<string>().HasMaxLength(32);
+            e.Ignore(x => x.ConfirmationOperation);
         });
     }
 }

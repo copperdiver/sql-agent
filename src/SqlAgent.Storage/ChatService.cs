@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using SqlAgent.Core;
 
 namespace SqlAgent.Storage;
 
@@ -23,7 +24,8 @@ public record ChatMessageView(
     int? RowCount,
     long? ElapsedMs,
     bool Truncated,
-    IReadOnlyList<ChatDatabaseRef> Databases);
+    IReadOnlyList<ChatDatabaseRef> Databases,
+    string? ConfirmationOperation = null);
 
 /// <summary>A whole conversation, messages in order.</summary>
 public record ChatDetail(Guid Id, string Title, IReadOnlyList<ChatMessageView> Messages);
@@ -39,7 +41,11 @@ public record ChatMessageInput(
     string? ErrorCode = null,
     int? RowCount = null,
     long? ElapsedMs = null,
-    bool Truncated = false);
+    bool Truncated = false,
+    string? ConfirmationOperation = null);
+
+/// <summary>All information needed to confirm one pending assistant message.</summary>
+public record ChatConfirmationTarget(Guid MessageId, Guid ChatId, string Sql, Guid ConnectionId);
 
 /// <summary>
 /// The chat store: history, one conversation, and appends. Orchestrating a turn — deciding what to do
@@ -75,6 +81,60 @@ public class ChatService(SqlAgentDbContext db)
 
         return new ChatDetail(chat.Id, chat.Title,
             chat.Messages.OrderBy(m => m.Sequence).Select(ToView).ToList());
+    }
+
+    /// <summary>
+    /// Resolves a pending assistant message to the one live database attached to the user message that
+    /// preceded it. The attachment is read from the transcript, not from current circuit state, so a
+    /// later chip edit cannot make a confirmation execute against a different connection.
+    /// </summary>
+    public async Task<ChatConfirmationTarget?> GetConfirmationTargetAsync(
+        Guid assistantMessageId, CancellationToken ct = default)
+    {
+        var assistant = await db.ChatMessages
+            .AsNoTracking()
+            .Include(m => m.Databases)
+            .FirstOrDefaultAsync(m => m.Id == assistantMessageId, ct);
+        if (assistant is null || assistant.Role != ChatRole.Assistant
+            || assistant.OutcomeKind != ChatOutcomeKind.ConfirmationRequired
+            || string.IsNullOrWhiteSpace(assistant.GeneratedSql))
+            return null;
+
+        var user = await db.ChatMessages
+            .AsNoTracking()
+            .Include(m => m.Databases)
+            .Where(m => m.ChatId == assistant.ChatId && m.Role == ChatRole.User
+                        && m.Sequence < assistant.Sequence)
+            .OrderByDescending(m => m.Sequence)
+            .FirstOrDefaultAsync(ct);
+        var connectionIds = user?.Databases
+            .Select(d => d.DatabaseConnectionId)
+            .Where(id => id is not null)
+            .Select(id => id!.Value)
+            .Distinct()
+            .ToList() ?? [];
+        return connectionIds.Count == 1
+            ? new ChatConfirmationTarget(assistant.Id, assistant.ChatId, assistant.GeneratedSql!, connectionIds[0])
+            : null;
+    }
+
+    /// <summary>Replaces a pending outcome in place after the shared executor has finished.</summary>
+    public async Task<ChatMessageView?> UpdateOutcomeAsync(
+        Guid assistantMessageId, QueryExecutionResult result, CancellationToken ct = default)
+    {
+        var message = await db.ChatMessages.FirstOrDefaultAsync(m => m.Id == assistantMessageId, ct);
+        if (message is null) return null;
+
+        message.Text = result.Success ? "" : result.ErrorMessage ?? "";
+        message.GeneratedSql = result.Sql;
+        message.OutcomeKind = result.Success ? ChatOutcomeKind.QueryResult : ChatOutcomeKind.Error;
+        message.ErrorCode = result.Success ? null : result.ErrorCode;
+        message.ConfirmationOperation = result.Operation?.ToString();
+        message.RowCount = result.Success ? result.RowCount : 0;
+        message.ElapsedMs = result.ElapsedMs;
+        message.Truncated = result.Truncated;
+        await db.SaveChangesAsync(ct);
+        return ToView(message);
     }
 
     public async Task<Guid> CreateChatAsync(string title, CancellationToken ct = default)
@@ -142,6 +202,7 @@ public class ChatService(SqlAgentDbContext db)
             GeneratedSql = input.GeneratedSql,
             OutcomeKind = input.OutcomeKind,
             ErrorCode = input.ErrorCode,
+            ConfirmationOperation = input.ConfirmationOperation,
             RowCount = input.RowCount,
             ElapsedMs = input.ElapsedMs,
             Truncated = input.Truncated,
@@ -214,5 +275,6 @@ public class ChatService(SqlAgentDbContext db)
     private static ChatMessageView ToView(ChatMessage m) => new(
         m.Id, m.Sequence, m.Role, m.Text, m.CreatedAt, m.GeneratedSql, m.OutcomeKind,
         m.ErrorCode, m.RowCount, m.ElapsedMs, m.Truncated,
-        m.Databases.Select(d => new ChatDatabaseRef(d.DatabaseConnectionId, d.DatabaseName)).ToList());
+        m.Databases.Select(d => new ChatDatabaseRef(d.DatabaseConnectionId, d.DatabaseName)).ToList(),
+        m.ConfirmationOperation);
 }

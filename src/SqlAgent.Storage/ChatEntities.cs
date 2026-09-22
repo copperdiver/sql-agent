@@ -4,11 +4,10 @@ namespace SqlAgent.Storage;
 public enum ChatRole { User, Assistant }
 
 /// <summary>
-/// What an assistant message carries. Only the values Phase B1 can produce: Phase D adds
-/// ConfirmationRequired and SchemaDiagram alongside the components that render them, so no member here
-/// is ever written by nothing.
+/// What an assistant message carries. ConfirmationRequired and SchemaDiagram are persisted outcomes
+/// whose rendering components live in Phase D.
 /// </summary>
-public enum ChatOutcomeKind { None, QueryResult, Clarification, Error }
+public enum ChatOutcomeKind { None, QueryResult, Clarification, ConfirmationRequired, Error, SchemaDiagram }
 
 /// <summary>A conversation. Databases belong to its messages, not to it.</summary>
 public class Chat
@@ -50,6 +49,9 @@ public class ChatMessage
 
     /// <summary>Stable code from the service layer. The user-safe message lives in <see cref="Text"/>.</summary>
     public string? ErrorCode { get; set; }
+
+    /// <summary>Operation label shown by the confirmation UI for a pending model write/DDL.</summary>
+    public string? ConfirmationOperation { get; set; }
 
     public int? RowCount { get; set; }
     public long? ElapsedMs { get; set; }

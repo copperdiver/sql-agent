@@ -9,6 +9,8 @@ namespace SqlAgent.Storage;
 public record ChatTurnResult(
     Guid ChatId, ChatMessageView UserMessage, ChatMessageView AssistantMessage, NlQueryResult? Live);
 
+public record ChatConfirmationResult(ChatMessageView Message, NlQueryResult Live);
+
 /// <summary>
 /// Runs one chat turn: persist the question, decide what the attached databases allow, ask, persist the
 /// answer. Split out of <see cref="ChatService"/> so a whole turn is unit-testable without bUnit and the
@@ -19,7 +21,8 @@ public record ChatTurnResult(
 /// Losing a typed question to any of those is the one outcome this design refuses.
 /// </summary>
 public class ChatTurnService(
-    ChatService chats, NlQueryService nlQueries, DatabaseConnectionService connections)
+    ChatService chats, NlQueryService nlQueries, DatabaseConnectionService connections,
+    QueryExecutionService executor)
 {
     public const string NoDatabaseAttached = "no_database_attached";
     public const string MultipleDatabasesUnsupported = "multiple_databases_unsupported";
@@ -137,11 +140,36 @@ public class ChatTurnService(
             OutcomeKind: ChatOutcomeKind.Clarification),
 
         NlResponseKind.ConfirmationRequired => new ChatMessageInput(
-            chat, ChatRole.Assistant, r.ErrorMessage ?? "", [], r.GeneratedSql, ChatOutcomeKind.Error,
-            ErrorCode: r.ErrorCode, ElapsedMs: r.ElapsedMs == 0 ? null : r.ElapsedMs),
+            chat, ChatRole.Assistant, r.ErrorMessage ?? "", [], r.GeneratedSql,
+            ChatOutcomeKind.ConfirmationRequired, ErrorCode: r.ErrorCode,
+            ElapsedMs: r.ElapsedMs == 0 ? null : r.ElapsedMs,
+            ConfirmationOperation: r.ConfirmationOperation),
 
         _ => new ChatMessageInput(
             chat, ChatRole.Assistant, r.ErrorMessage ?? "", [], r.GeneratedSql, ChatOutcomeKind.Error,
             ErrorCode: r.ErrorCode, ElapsedMs: r.ElapsedMs == 0 ? null : r.ElapsedMs),
     };
+
+    /// <summary>
+    /// Confirms and executes a pending model-generated write/DDL through the same service boundary as
+    /// the SQL page, then replaces that assistant message in place. The caller supplies only the message
+    /// id; the database attachment is recovered from the persisted transcript to prevent a stale or
+    /// changed composer attachment from redirecting the action.
+    /// </summary>
+    public async Task<ChatConfirmationResult> ConfirmAsync(
+        Guid assistantMessageId, CancellationToken ct = default)
+    {
+        var target = await chats.GetConfirmationTargetAsync(assistantMessageId, ct)
+            ?? throw new InvalidOperationException("The pending confirmation is no longer available.");
+        var result = await executor.ExecuteSqlAsync(
+            target.ConnectionId, target.Sql, confirmed: true, ct);
+
+        var message = await chats.UpdateOutcomeAsync(target.MessageId, result, CancellationToken.None)
+            ?? throw new InvalidOperationException("The pending confirmation message no longer exists.");
+        var live = result.Success
+            ? NlQueryResult.Query(result)
+            : NlQueryResult.Error(result.ErrorCode ?? "execution_error",
+                result.ErrorMessage ?? "The statement could not be executed.", result.Sql, result.ElapsedMs);
+        return new ChatConfirmationResult(message, live);
+    }
 }

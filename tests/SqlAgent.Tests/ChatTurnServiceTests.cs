@@ -36,7 +36,7 @@ public class ChatTurnServiceTests : IDisposable
         var executor = new QueryExecutionService(
             _connections, registry, _db, schemas, NullLogger<QueryExecutionService>.Instance);
         _turns = new ChatTurnService(
-            _chats, new NlQueryService(_connections, schemas, executor, _gateway), _connections);
+            _chats, new NlQueryService(_connections, schemas, executor, _gateway), _connections, executor);
     }
 
     [Fact]
@@ -124,10 +124,32 @@ public class ChatTurnServiceTests : IDisposable
 
         var turn = await _turns.SendAsync(null, "zero out the orders", [id]);
 
-        Assert.Equal(ChatOutcomeKind.Error, turn.AssistantMessage.OutcomeKind);
+        Assert.Equal(ChatOutcomeKind.ConfirmationRequired, turn.AssistantMessage.OutcomeKind);
         Assert.Equal("ddl_confirmation_required", turn.AssistantMessage.ErrorCode);
+        Assert.Equal("write", turn.AssistantMessage.ConfirmationOperation);
         Assert.Equal("UPDATE orders SET total = 0", turn.AssistantMessage.GeneratedSql);
         Assert.False(_provider.Executed);
+    }
+
+    [Fact]
+    public async Task Confirming_a_pending_model_write_executes_and_updates_the_same_assistant_message()
+    {
+        var id = await NewConnectionAsync("prod", readOnly: false);
+        _gateway.NextResponse = LlmSqlResponse.Generated("UPDATE orders SET total = 0");
+
+        var turn = await _turns.SendAsync(null, "zero out the orders", [id]);
+        var confirmed = await _turns.ConfirmAsync(turn.AssistantMessage.Id);
+
+        Assert.Equal(turn.AssistantMessage.Id, confirmed.Message.Id);
+        Assert.Equal(ChatOutcomeKind.QueryResult, confirmed.Message.OutcomeKind);
+        Assert.Null(confirmed.Message.ErrorCode);
+        Assert.Equal("UPDATE orders SET total = 0", confirmed.Message.GeneratedSql);
+        Assert.Equal(NlResponseKind.QueryResult, confirmed.Live!.Kind);
+        Assert.True(_provider.Executed);
+
+        var reloaded = await _chats.GetChatAsync(turn.ChatId);
+        Assert.Equal(2, reloaded!.Messages.Count);
+        Assert.Equal(ChatOutcomeKind.QueryResult, reloaded.Messages[1].OutcomeKind);
     }
 
     [Fact]
@@ -282,7 +304,7 @@ public class ChatTurnServiceTests : IDisposable
         var schemas = new SchemaService(_connections, registry, _db);
         var executor = new QueryExecutionService(
             _connections, registry, _db, schemas, NullLogger<QueryExecutionService>.Instance);
-        return new ChatTurnService(chats, new NlQueryService(_connections, schemas, executor, _gateway), _connections);
+        return new ChatTurnService(chats, new NlQueryService(_connections, schemas, executor, _gateway), _connections, executor);
     }
 
     private async Task<Guid> NewConnectionAsync(string name, bool readOnly = true) =>
