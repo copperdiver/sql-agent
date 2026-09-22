@@ -46,7 +46,7 @@ public class ChatPageTests : IDisposable
         _ctx.Services.AddSingleton<IDatabaseProvider>(_provider);
         _ctx.Services.AddSingleton<IDatabaseProviderRegistry, DatabaseProviderRegistry>();
         _ctx.Services.AddSingleton<ILlmSqlGateway>(_gateway);
-        var fileProvider = new LocalDiskFileStorageProvider(_fileRoot);
+        var fileProvider = new GatedFileStorageProvider(_fileRoot);
         _ctx.Services.AddSingleton(new FileStorageOptions());
         _ctx.Services.AddSingleton<IFileStorageProvider>(fileProvider);
         _ctx.Services.AddSingleton<IFileStorageProviderRegistry>(new FileStorageProviderRegistry([fileProvider]));
@@ -67,6 +67,9 @@ public class ChatPageTests : IDisposable
 
         _ctx.JSInterop.Mode = JSRuntimeMode.Loose;
     }
+
+    private GatedFileStorageProvider FileProvider =>
+        (GatedFileStorageProvider)_ctx.Services.GetRequiredService<IFileStorageProvider>();
 
     [Fact]
     public void A_new_chat_offers_the_composer_and_suggestions_rather_than_an_empty_transcript()
@@ -215,6 +218,62 @@ public class ChatPageTests : IDisposable
         var file = Assert.Single(message.Files!);
         Assert.Equal("report.txt", file.FileName);
         Assert.Empty(page.FindAll(".composer .pending-file"));
+    }
+
+    [Fact]
+    public async Task Sending_and_enter_are_blocked_while_a_file_upload_is_in_flight()
+    {
+        FileProvider.HoldUpload();
+        var page = _ctx.RenderComponent<ChatPage>();
+        var upload = Task.Run(() => UploadFileAsync(page, "busy.txt", "wait for upload"));
+        await FileProvider.WaitForUploadStartAsync();
+
+        Type(page, "send while uploading");
+        Assert.True(page.Find("[data-testid=send]").HasAttribute("disabled"));
+        await page.InvokeAsync(() => page.FindComponent<Composer>().Instance.SendFromEditor());
+        Assert.Equal(0, _gateway.CallCount);
+
+        FileProvider.ReleaseUpload();
+        await upload;
+    }
+
+    [Fact]
+    public async Task Changing_chat_while_a_file_upload_is_in_flight_waits_then_cleans_the_uploaded_file()
+    {
+        var chat = await CreateStoredChatAsync("existing chat");
+        FileProvider.HoldUpload();
+        var page = _ctx.RenderComponent<ChatPage>();
+        var upload = Task.Run(() => UploadFileAsync(page, "route-race.txt", "clean me"));
+        await FileProvider.WaitForUploadStartAsync();
+
+        var route = page.InvokeAsync(() => page.SetParametersAndRender(p => p.Add(c => c.Id, chat)));
+        await Task.Yield();
+        Assert.False(FileProvider.DeleteStarted);
+
+        FileProvider.ReleaseUpload();
+        await upload;
+        await FileProvider.WaitForDeleteStartAsync();
+        await route;
+        await WaitForConditionAsync(() => !page.FindAll(".composer .pending-file").Any());
+
+        Assert.Empty(page.FindAll(".composer .pending-file"));
+        Assert.Empty(Directory.GetFiles(_fileRoot, "*", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public async Task Disposing_while_a_file_upload_is_in_flight_waits_then_cleans_the_uploaded_file()
+    {
+        FileProvider.HoldUpload();
+        var page = _ctx.RenderComponent<ChatPage>();
+        var upload = Task.Run(() => UploadFileAsync(page, "dispose-upload-race.txt", "clean me"));
+        await FileProvider.WaitForUploadStartAsync();
+
+        _ctx.DisposeComponents();
+        Assert.False(FileProvider.DeleteStarted);
+        FileProvider.ReleaseUpload();
+        await upload;
+        await FileProvider.WaitForDeleteStartAsync();
+        await WaitForConditionAsync(() => !Directory.GetFiles(_fileRoot, "*", SearchOption.AllDirectories).Any());
     }
 
     [Fact]

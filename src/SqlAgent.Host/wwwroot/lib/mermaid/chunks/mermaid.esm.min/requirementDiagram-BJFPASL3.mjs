@@ -25,7 +25,7 @@ Expecting `+ge.join(", ")+", got '"+(this.terminals_[g]||g)+"'":Ce="Parse error 
     stroke: ${e.requirementBorderColor};
     stroke-width: ${e.requirementBorderSize};
   }
-  
+
   .reqTitle, .reqLabel{
     fill:  ${e.requirementTextColor};
   }

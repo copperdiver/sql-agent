@@ -229,6 +229,22 @@ public class ComposerTests
     }
 
     [Fact]
+    public async Task Send_button_and_enter_are_blocked_while_an_attachment_is_uploading()
+    {
+        using var ctx = NewContext();
+        var sends = 0;
+        var composer = ctx.RenderComponent<Composer>(p => p
+            .Add(c => c.Value, "summarize the file")
+            .Add(c => c.Uploading, true)
+            .Add(c => c.OnSend, EventCallback.Factory.Create(new object(), () => sends++)));
+
+        Assert.True(composer.Find("[data-testid=send]").HasAttribute("disabled"));
+        await composer.InvokeAsync(() => composer.Instance.SendFromEditor());
+
+        Assert.Equal(0, sends);
+    }
+
+    [Fact]
     public void Value_changed_programmatically_with_no_DOM_input_event_resizes_the_textarea_via_js()
     {
         // A suggestion chip filling the box, or ChatPage.razor clearing it after a send, sets Value from C#

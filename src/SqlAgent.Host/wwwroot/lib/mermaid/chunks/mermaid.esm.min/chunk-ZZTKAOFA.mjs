@@ -6,7 +6,7 @@ import{a as e}from"./chunk-GTKDMUJJ.mjs";var o=e(()=>`
     overflow: visible;
     vertical-align: -0.125em;
   }
-  
+
   .node .label-icon path {
     fill: currentColor;
     stroke: revert;

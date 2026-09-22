@@ -29,13 +29,13 @@
                   Value="@_question" ValueChanged="v => _question = v"
                   Attached="_attached" OnRemoveAttachment="Detach"
                   Files="_pendingFiles" OnRemoveFile="RemoveFileAsync"
-                  Busy="_busy" OnSend="SendAsync" OnStop="Stop">
+                  Busy="_busy" Uploading="_uploading" OnSend="SendAsync" OnStop="Stop">
             <Tools>
                 <AttachmentMenu Connections="_connections"
                                 AttachedIds="@(_attached.Select(a => a.ConnectionId!.Value).ToList())"
                                 OnAttach="Attach" Files="_pendingFiles"
                                 FileStorage="FileStorage" StorageOptions="StorageOptions"
-                                OnFilesChanged="OnFilesChanged" />
+                                OnFilesChanged="OnFilesChanged" OnUploadingChanged="OnUploadingChanged" />
                 <button type="button" class="ghost" data-testid="chat-explain-schema"
                         @onclick="ExplainSchemaAsync">Explain schema</button>
                 <button type="button" class="ghost" data-testid="chat-open-scratchpad"
@@ -89,6 +89,9 @@
     private Composer? _composer;
     private string _question = "";
     private bool _busy;
+    private bool _uploading;
+    private int _activeUploads;
+    private TaskCompletionSource<object?>? _uploadsSettled;
     private Task? _sendInFlight;
     private bool _scratchpadOpen;
     private Guid? _scratchpadConnectionId;
@@ -190,6 +193,22 @@
     {
         _pendingFiles.Clear();
         _pendingFiles.AddRange(files);
+    }
+
+    private void OnUploadingChanged(bool uploading)
+    {
+        if (uploading)
+        {
+            if (_activeUploads++ == 0)
+                _uploadsSettled = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+        else if (_activeUploads > 0 && --_activeUploads == 0)
+        {
+            _uploadsSettled!.TrySetResult(null);
+            _uploadsSettled = null;
+        }
+
+        _uploading = _activeUploads > 0;
     }
 
     private async Task RemoveFileAsync(PendingFileAttachment file)
@@ -460,11 +479,13 @@
 
     private async Task CleanupPendingFilesAsync()
     {
-        if (_pendingFiles.Count == 0) return;
+        if (_pendingFiles.Count == 0 && _uploadsSettled is null) return;
         // Route changes and disposal can begin while SendAsync is still resolving the attachment refs.
         // Waiting here keeps cleanup from deleting a blob before that send has either persisted it or
         // failed and left it pending for cleanup.
         if (_sendInFlight is { } send) await send;
+        if (_uploadsSettled is { } uploads) await uploads.Task;
+        if (_pendingFiles.Count == 0) return;
         var files = _pendingFiles.ToList();
         _pendingFiles.Clear();
         var storage = FileStorage;

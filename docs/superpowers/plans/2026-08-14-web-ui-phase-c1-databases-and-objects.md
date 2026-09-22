@@ -5358,4 +5358,3 @@ than silently permissive. Confirm that fallback is actually reached before accep
 **No `ObjectKind` column** (Task 9, and a departure from the parent spec). The page and the policy path
 both derive an object's kind from the live schema, so a stored column would be written by one path and
 read by none. If a later phase finds a reader for it, it comes back with that reader.
-

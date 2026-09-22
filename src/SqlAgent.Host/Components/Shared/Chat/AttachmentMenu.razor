@@ -30,7 +30,7 @@
         }
 
         <p class="menu-section">Files</p>
-        <InputFile class="file-input" OnChange="OnFilesSelectedAsync" multiple />
+        <InputFile class="file-input" OnChange="OnFilesSelectedAsync" multiple disabled="@_busy" />
         @if (Files.Count == 0)
         {
             <EmptyState Icon="paperclip"
@@ -62,6 +62,7 @@
     [Parameter] public EventCallback<DatabaseConnectionInfo> OnAttach { get; set; }
     [Parameter] public IReadOnlyList<PendingFileAttachment> Files { get; set; } = [];
     [Parameter] public EventCallback<IReadOnlyList<PendingFileAttachment>> OnFilesChanged { get; set; }
+    [Parameter] public EventCallback<bool> OnUploadingChanged { get; set; }
     [Parameter] public FileStorageService? FileStorage { get; set; }
     [Parameter] public FileStorageOptions StorageOptions { get; set; } = new();
 
@@ -73,6 +74,7 @@
 
     private async Task OnFilesSelectedAsync(InputFileChangeEventArgs args)
     {
+        if (_busy) return;
         _errors.Clear();
         var storage = FileStorage ?? Services.GetService<FileStorageService>();
         if (storage is null)
@@ -94,6 +96,7 @@
         _busy = true;
         try
         {
+            await OnUploadingChanged.InvokeAsync(true);
             var pending = Files.ToList();
             foreach (var file in selected)
             {
@@ -136,6 +139,7 @@
         finally
         {
             _busy = false;
+            await OnUploadingChanged.InvokeAsync(false);
         }
     }
 

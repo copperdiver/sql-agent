@@ -83,10 +83,41 @@ public sealed class AttachmentMenuTests : IDisposable
         Assert.Equal(10, pending.Count);
     }
 
+    [Fact]
+    public async Task Uploading_is_reported_and_a_second_selection_is_ignored_until_the_first_finishes()
+    {
+        using var ctx = NewContext();
+        var provider = (GatedFileStorageProvider)ctx.Services.GetRequiredService<IFileStorageProvider>();
+        provider.HoldUpload();
+        var states = new List<bool>();
+        IReadOnlyList<PendingFileAttachment> pending = [];
+        var menu = ctx.RenderComponent<AttachmentMenu>(p => p
+            .Add(m => m.FileStorage, ctx.Services.GetRequiredService<FileStorageService>())
+            .Add(m => m.OnUploadingChanged, EventCallback.Factory.Create<bool>(
+                this, uploading => states.Add(uploading)))
+            .Add(m => m.OnFilesChanged, EventCallback.Factory.Create<IReadOnlyList<PendingFileAttachment>>(
+                this, files => pending = files)));
+        menu.Find(".menu-trigger").Click();
+        var input = menu.FindComponent<InputFile>();
+
+        var first = Task.Run(() => input.UploadFiles(
+            InputFileContent.CreateFromText("first", "first.txt", contentType: "text/plain")));
+        await provider.WaitForUploadStartAsync();
+        Assert.Equal([true], states);
+
+        input.UploadFiles(InputFileContent.CreateFromText("second", "second.txt", contentType: "text/plain"));
+        provider.ReleaseUpload();
+        await first;
+
+        Assert.Equal([true, false], states);
+        Assert.Single(pending);
+        Assert.Equal("first.txt", pending[0].FileName);
+    }
+
     private Bunit.TestContext NewContext()
     {
         Directory.CreateDirectory(_root);
-        var provider = new LocalDiskFileStorageProvider(_root);
+        var provider = new GatedFileStorageProvider(_root);
         var options = new FileStorageOptions();
         var ctx = new Bunit.TestContext();
         ctx.Services.AddSingleton(options);

@@ -20,7 +20,7 @@ Expecting `+Mt.join(", ")+", got '"+(this.terminals_[X]||X)+"'":Xt="Parse error 
   .actor-line {
     stroke: ${e.actorLineColor};
   }
-  
+
   .innerArc {
     stroke-width: 1.5;
     stroke-dasharray: none;

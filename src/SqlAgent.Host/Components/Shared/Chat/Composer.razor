@@ -49,6 +49,7 @@
     [Parameter] public RenderFragment? Tools { get; set; }
 
     [Parameter] public bool Busy { get; set; }
+    [Parameter] public bool Uploading { get; set; }
     [Parameter] public EventCallback OnSend { get; set; }
     [Parameter] public EventCallback OnStop { get; set; }
 
@@ -63,7 +64,7 @@
     /// suggestion chip, a send clearing the box) is recognized as reflected once handled.</summary>
     private string _domReflectsValue = "";
 
-    private bool CanSend => !Busy && !string.IsNullOrWhiteSpace(Value);
+    private bool CanSend => !Busy && !Uploading && !string.IsNullOrWhiteSpace(Value);
 
     private Task OnInput(ChangeEventArgs e)
     {

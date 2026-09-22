@@ -16,10 +16,10 @@ import{a as tr}from"./chunk-4KE642ED.mjs";import{a as _e}from"./chunk-353K7GK5.m
     stroke-dasharray: 8;
   }
   .node-icon-text {
-    display: flex; 
+    display: flex;
     align-items: center;
   }
-  
+
   .node-icon-text > div {
     color: #fff;
     margin: 1px;
