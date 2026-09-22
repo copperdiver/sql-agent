@@ -22,6 +22,14 @@ builder.Services.AddWindowsService(o => o.ServiceName = "SQL Agent").AddSystemd(
 builder.Services.AddDbContext<SqlAgentDbContext>(options =>
     options.UseSqlite(builder.Configuration["SqlAgent:Storage:ConnectionString"] ?? "Data Source=sqlagent.db"));
 
+var fileStorageOptions = new FileStorageOptions();
+builder.Services.AddSingleton(fileStorageOptions);
+builder.Services.AddSingleton<IFileStorageProvider>(_ =>
+    new LocalDiskFileStorageProvider(
+        LaunchUrlFile.ResolveDirectory(builder.Configuration), fileStorageOptions.MaxBytes));
+builder.Services.AddSingleton<IFileStorageProviderRegistry, SqlAgent.Core.FileStorageProviderRegistry>();
+builder.Services.AddScoped<MessageAttachmentService>();
+
 builder.Services.AddSingleton<IDatabaseProvider, SqlServerProvider>();
 builder.Services.AddSingleton<IDatabaseProvider, PostgresProvider>();
 builder.Services.AddSingleton<IDatabaseProviderRegistry, DatabaseProviderRegistry>();
@@ -74,6 +82,7 @@ app.UseMiddleware<TokenAuthMiddleware>();
 app.UseStaticFiles();
 app.UseAntiforgery();
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
+app.MapFileDownload();
 
 // The token is required only for the first request, which exchanges it for a session cookie. It is
 // NOT logged: with the named pipe gone, this token is the entire trust boundary around a TCP port

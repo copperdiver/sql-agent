@@ -3,11 +3,16 @@ using SqlAgent.Core;
 
 namespace SqlAgent.Storage;
 
+public record FileDownload(Stream Content, string FileName, string ContentType, long SizeBytes);
+
 /// <summary>
 /// Binds public file references to persisted metadata while keeping provider locators inside the storage
 /// boundary. It also provides the reference lookup used by the provider's orphan-sweep seam.
 /// </summary>
-public sealed class MessageAttachmentService(SqlAgentDbContext db, FileStorageOptions? options = null)
+public sealed class MessageAttachmentService(
+    SqlAgentDbContext db,
+    FileStorageOptions? options = null,
+    IFileStorageProviderRegistry? providers = null)
     : IFileStorageReferenceReader
 {
     private readonly int maxAttachments = options?.MaxAttachmentsPerMessage ?? 10;
@@ -54,4 +59,30 @@ public sealed class MessageAttachmentService(SqlAgentDbContext db, FileStorageOp
     public Task<bool> ExistsAsync(string providerKey, string storageKey, CancellationToken ct = default) =>
         db.MessageAttachments.AsNoTracking()
             .AnyAsync(a => a.ProviderKey == providerKey && a.StorageKey == storageKey, ct);
+
+    public async Task<FileDownload?> OpenDownloadAsync(Guid attachmentId, CancellationToken ct = default)
+    {
+        var attachment = await db.MessageAttachments.AsNoTracking()
+            .SingleOrDefaultAsync(a => a.Id == attachmentId, ct);
+        if (attachment is null || providers is null) return null;
+
+        try
+        {
+            var provider = providers.Get(attachment.ProviderKey);
+            var content = await provider.OpenReadAsync(attachment.StorageKey, ct);
+            return content is null
+                ? null
+                : new FileDownload(content, attachment.FileName, attachment.ContentType, attachment.SizeBytes);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            // A missing or unavailable provider/blob is intentionally indistinguishable from a missing
+            // metadata row at the HTTP boundary. Provider details must never become a response body.
+            return null;
+        }
+    }
 }
