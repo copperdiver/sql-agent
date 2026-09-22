@@ -30,6 +30,35 @@ public class SqlPolicyValidatorTests
         Func<SqlTableReference, ObjectPolicy>? resolve = null)
         => SqlPolicyValidator.Validate(sql, provider, isReadOnly, resolve ?? Policy());
 
+    [Theory]
+    [InlineData("CREATE TABLE archive (id int)", DatabaseProviderType.Postgres, DdlOperation.CreateTable)]
+    [InlineData("ALTER TABLE archive ADD COLUMN note text", DatabaseProviderType.Postgres, DdlOperation.AlterTable)]
+    [InlineData("ALTER TABLE archive ADD note int", DatabaseProviderType.SqlServer, DdlOperation.AlterTable)]
+    [InlineData("DROP TABLE archive", DatabaseProviderType.Postgres, DdlOperation.DropTable)]
+    [InlineData("CREATE INDEX ix_archive_id ON archive (id)", DatabaseProviderType.Postgres, DdlOperation.CreateIndex)]
+    [InlineData("DROP INDEX ix_archive_id", DatabaseProviderType.Postgres, DdlOperation.DropIndex)]
+    [InlineData("TRUNCATE TABLE archive", DatabaseProviderType.Postgres, DdlOperation.Truncate)]
+    public void Supported_ddl_gets_a_specific_operation(
+        string sql, DatabaseProviderType provider, DdlOperation operation)
+    {
+        var parsed = Assert.Single(SqlAnalyzer.Analyze(sql, provider));
+
+        Assert.Equal(SqlStatementKind.Ddl, parsed.Kind);
+        Assert.Equal(operation, parsed.DdlOperation);
+    }
+
+    [Theory]
+    [InlineData("CREATE VIEW report AS SELECT 1")]
+    [InlineData("GRANT SELECT ON orders TO app")]
+    [InlineData("EXEC report")]
+    public void Unsupported_statement_shapes_remain_other_and_fail_closed(string sql)
+    {
+        var parsed = Assert.Single(SqlAnalyzer.Analyze(sql, DatabaseProviderType.Postgres));
+
+        Assert.Equal(SqlStatementKind.Other, parsed.Kind);
+        Assert.Equal(DdlOperation.Unsupported, parsed.DdlOperation);
+    }
+
     // --- Read-only enforcement -------------------------------------------------
 
     [Theory]

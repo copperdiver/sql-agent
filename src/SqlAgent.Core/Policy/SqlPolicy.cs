@@ -8,8 +8,8 @@ using SqlParser.Dialects;
 namespace SqlAgent.Core.Policy;
 
 /// <summary>
-/// How a parsed statement relates to the read-only policy. The agent only ever runs read queries
-/// and (on writable connections) basic DML; anything else is <see cref="Other"/> and denied.
+/// How a parsed statement relates to the policy. DDL is classified separately so a connection can
+/// opt into a closed set of structural operations; unsupported shapes remain <see cref="Other"/>.
 /// </summary>
 public enum SqlStatementKind
 {
@@ -19,8 +19,36 @@ public enum SqlStatementKind
     /// <summary>INSERT / UPDATE / DELETE — allowed only when the connection is not read-only.</summary>
     Write,
 
-    /// <summary>DDL, EXEC, TRUNCATE, etc. — never supported by the agent in v1 (fail closed).</summary>
+    /// <summary>A supported, permission-controlled structural operation.</summary>
+    Ddl,
+
+    /// <summary>EXEC, GRANT, routines, and parser shapes the agent never supports (fail closed).</summary>
     Other,
+}
+
+/// <summary>One structural operation that can be classified by the SQL parser.</summary>
+public enum DdlOperation
+{
+    Unsupported = 0,
+    CreateTable,
+    AlterTable,
+    DropTable,
+    CreateIndex,
+    DropIndex,
+    Truncate,
+}
+
+/// <summary>Per-connection allow-list for the structural operations the agent may execute.</summary>
+[Flags]
+public enum AllowedDdl
+{
+    None = 0,
+    CreateTable = 1 << 0,
+    AlterTable = 1 << 1,
+    DropTable = 1 << 2,
+    CreateIndex = 1 << 3,
+    DropIndex = 1 << 4,
+    Truncate = 1 << 5,
 }
 
 /// <summary>A table named by a statement. <see cref="Schema"/> is null when the SQL left it unqualified.</summary>
@@ -42,7 +70,8 @@ public record ParsedStatement(
     string StatementType,
     string Normalized,
     IReadOnlyList<SqlTableReference> Tables,
-    IReadOnlyList<SqlTableReference> WrittenTables);
+    IReadOnlyList<SqlTableReference> WrittenTables,
+    DdlOperation DdlOperation = DdlOperation.Unsupported);
 
 /// <summary>
 /// Dialect-aware SQL parsing (ADR-0002, CD-50 T5). Turns raw SQL into <see cref="ParsedStatement"/>s
@@ -73,11 +102,20 @@ public static class SqlAnalyzer
         var collector = new TableCollector();
         collector.Walk(statement, ImmutableHashSet<string>.Empty.WithComparer(StringComparer.OrdinalIgnoreCase));
 
-        var kind = statement switch
+        var (kind, ddlOperation) = statement switch
         {
-            Statement.Select => SqlStatementKind.Read,
-            Statement.Insert or Statement.Update or Statement.Delete => SqlStatementKind.Write,
-            _ => SqlStatementKind.Other,
+            Statement.Select => (SqlStatementKind.Read, DdlOperation.Unsupported),
+            Statement.Insert or Statement.Update or Statement.Delete =>
+                (SqlStatementKind.Write, DdlOperation.Unsupported),
+            Statement.CreateTable => (SqlStatementKind.Ddl, DdlOperation.CreateTable),
+            Statement.AlterTable => (SqlStatementKind.Ddl, DdlOperation.AlterTable),
+            Statement.CreateIndex => (SqlStatementKind.Ddl, DdlOperation.CreateIndex),
+            Statement.Truncate => (SqlStatementKind.Ddl, DdlOperation.Truncate),
+            Statement.Drop drop when drop.ObjectType == ObjectType.Table =>
+                (SqlStatementKind.Ddl, DdlOperation.DropTable),
+            Statement.Drop drop when drop.ObjectType == ObjectType.Index =>
+                (SqlStatementKind.Ddl, DdlOperation.DropIndex),
+            _ => (SqlStatementKind.Other, DdlOperation.Unsupported),
         };
 
         // A write can hide behind a syntactically read-shaped wrapper. `WITH cte AS (...) INSERT INTO t
@@ -104,7 +142,7 @@ public static class SqlAnalyzer
             written = collector.References;
 
         return new ParsedStatement(
-            kind, statement.GetType().Name, statement.ToSql(), collector.References, written);
+            kind, statement.GetType().Name, statement.ToSql(), collector.References, written, ddlOperation);
     }
 
     /// <summary>
