@@ -89,7 +89,7 @@ public class ResultGridTests
         var grid = ctx.RenderComponent<ResultGrid>(p => p.Add(g => g.Result, SuccessWithValue(payload)));
 
         Assert.DoesNotContain("<script>", grid.Markup);
-        Assert.Equal(payload, grid.Find("td").TextContent);
+        Assert.Equal(payload, grid.Find("td:not(.row-number)").TextContent);
     }
 
     // The two export tests below are wiring tests, and their names say so. They assert the payload

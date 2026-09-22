@@ -1,0 +1,12 @@
+.sql-block { margin: var(--space-3) 0; border: 1px solid var(--base-100); border-radius: var(--radius-md); overflow: hidden; }
+.sql-block-head { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); background: var(--background-soft-200); }
+.sql-label { font-size: var(--text-xs); font-weight: 700; letter-spacing: .08em; }
+.dialect-badge { color: var(--text-100); font-size: var(--text-xs); }
+.sql-block-spacer { flex: 1; }
+.sql-code { margin: 0; padding: var(--space-3); overflow-x: auto; background: var(--background-50); }
+.sql-warning { padding: var(--space-2) var(--space-3); background: var(--warning-soft-100); color: var(--warning-50); }
+:global(.sql-keyword) { color: var(--accent-50); font-weight: 600; }
+:global(.sql-string) { color: var(--success-50); }
+:global(.sql-number) { color: var(--warning-50); }
+:global(.sql-comment) { color: var(--text-100); font-style: italic; }
+:global(.sql-identifier) { color: var(--title-50); }
