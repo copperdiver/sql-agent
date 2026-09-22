@@ -102,6 +102,7 @@ public class DatabasePageTests : IDisposable
 
         Assert.Contains("warehouse", page.Find("[data-testid=connection-name]").GetAttribute("value"));
         Assert.Single(page.FindAll("[data-testid=objects-panel-slot]"));
+        Assert.Single(page.FindAll("[data-testid=structure-permissions-slot]"));
     }
 
     [Fact]

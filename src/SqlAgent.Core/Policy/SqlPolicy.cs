@@ -49,6 +49,7 @@ public enum AllowedDdl
     CreateIndex = 1 << 3,
     DropIndex = 1 << 4,
     Truncate = 1 << 5,
+    All = CreateTable | AlterTable | DropTable | CreateIndex | DropIndex | Truncate,
 }
 
 /// <summary>A table named by a statement. <see cref="Schema"/> is null when the SQL left it unqualified.</summary>

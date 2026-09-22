@@ -1,0 +1,120 @@
+@using SqlAgent.Core.Policy
+@inject ScopedRunner Runner
+@inject ILogger<StructurePermissions> Logger
+
+<section class="panel structure-permissions" data-testid="structure-permissions">
+    <div class="permissions-head">
+        <div>
+            <h2>Structure permissions</h2>
+            <p class="muted permissions-help">
+                Allow only the structural operations this connection may execute after confirmation.
+                Views, routines, EXEC, and GRANT remain blocked.
+            </p>
+        </div>
+        <label class="permission-master">
+            <input type="checkbox" data-testid="ddl-permission-all" checked="@AllSelected"
+                   @onchange="OnAllChanged" />
+            <span>All</span>
+        </label>
+    </div>
+
+    @if (_error is not null)
+    {
+        <OutcomeMessage Message="@_error" />
+    }
+
+    <div class="permission-list">
+        @foreach (var definition in Definitions)
+        {
+            <label class="permission-row">
+                <input type="checkbox" data-testid="@($"ddl-permission-{definition.Operation}")"
+                       checked="@IsAllowed(definition.Flag)"
+                       @onchange="e => OnPermissionChanged(definition.Flag, e)" />
+                <span>@definition.Label</span>
+            </label>
+        }
+    </div>
+</section>
+
+@code {
+    [Parameter, EditorRequired] public Guid ConnectionId { get; set; }
+
+    private AllowedDdl _allowed;
+    private Guid _loaded;
+    private string? _error;
+
+    private static readonly IReadOnlyList<PermissionDefinition> Definitions =
+    [
+        new(DdlOperation.CreateTable, AllowedDdl.CreateTable, "Create table"),
+        new(DdlOperation.AlterTable, AllowedDdl.AlterTable, "Alter table"),
+        new(DdlOperation.DropTable, AllowedDdl.DropTable, "Drop table"),
+        new(DdlOperation.CreateIndex, AllowedDdl.CreateIndex, "Create index"),
+        new(DdlOperation.DropIndex, AllowedDdl.DropIndex, "Drop index"),
+        new(DdlOperation.Truncate, AllowedDdl.Truncate, "Truncate table"),
+    ];
+
+    private bool AllSelected => _allowed == AllowedDdl.All;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loaded == ConnectionId) return;
+        _loaded = ConnectionId;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        try
+        {
+            var info = await Runner.RunAsync<DatabaseConnectionService, DatabaseConnectionInfo?>(
+                s => s.GetAsync(ConnectionId));
+            if (info is null)
+            {
+                _allowed = AllowedDdl.None;
+                _error = "That database is no longer configured.";
+                return;
+            }
+
+            _allowed = info.AllowedDdl & AllowedDdl.All;
+            _error = null;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load structure permissions for connection {ConnectionId}.", ConnectionId);
+            _error = "The structure permissions could not be read. The details are in the server log.";
+        }
+    }
+
+    private bool IsAllowed(AllowedDdl flag) => (_allowed & flag) == flag;
+
+    private Task OnPermissionChanged(AllowedDdl flag, ChangeEventArgs e) =>
+        SetAsync((bool)(e.Value ?? false) ? _allowed | flag : _allowed & ~flag);
+
+    private Task OnAllChanged(ChangeEventArgs e) =>
+        SetAsync((bool)(e.Value ?? false) ? AllowedDdl.All : AllowedDdl.None);
+
+    private async Task SetAsync(AllowedDdl value)
+    {
+        try
+        {
+            var info = await Runner.RunAsync<DatabaseConnectionService, DatabaseConnectionInfo?>(
+                s => s.SetAllowedDdlAsync(ConnectionId, value));
+            if (info is null)
+            {
+                _error = "That database is no longer configured.";
+                return;
+            }
+
+            _allowed = info.AllowedDdl & AllowedDdl.All;
+            _error = null;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to set structure permissions for connection {ConnectionId}.", ConnectionId);
+            _error = "The structure permissions could not be saved. The details are in the server log.";
+            await ReloadAsync();
+        }
+    }
+
+    private sealed record PermissionDefinition(DdlOperation Operation, AllowedDdl Flag, string Label);
+}

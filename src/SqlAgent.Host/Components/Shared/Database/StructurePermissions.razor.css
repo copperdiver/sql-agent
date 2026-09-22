@@ -1,0 +1,17 @@
+.structure-permissions { margin-top: var(--space-4); }
+.permissions-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.permissions-help { max-width: 42rem; margin: var(--space-1) 0 0; }
+.permission-master,
+.permission-row { display: flex; align-items: center; gap: var(--space-2); }
+.permission-master { white-space: nowrap; padding-top: var(--space-1); }
+.permission-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-4);
+}
