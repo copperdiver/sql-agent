@@ -22,7 +22,7 @@ builder.Services.AddWindowsService(o => o.ServiceName = "SQL Agent").AddSystemd(
 builder.Services.AddDbContext<SqlAgentDbContext>(options =>
     options.UseSqlite(builder.Configuration["SqlAgent:Storage:ConnectionString"] ?? "Data Source=sqlagent.db"));
 
-var fileStorageOptions = new FileStorageOptions();
+var fileStorageOptions = FileStorageConfiguration.Resolve(builder.Configuration);
 builder.Services.AddSingleton(fileStorageOptions);
 builder.Services.AddSingleton<IFileStorageProvider>(_ =>
     new LocalDiskFileStorageProvider(
