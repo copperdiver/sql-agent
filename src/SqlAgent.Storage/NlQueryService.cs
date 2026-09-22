@@ -1,15 +1,17 @@
 using System.Text;
 using SqlAgent.Core;
+using SqlAgent.Core.Policy;
 
 namespace SqlAgent.Storage;
 
 /// <summary>Which of the three ask_database outcomes (CD-51 Story 1.4) a result carries.</summary>
-public enum NlResponseKind { QueryResult, ClarificationRequired, Error }
+public enum NlResponseKind { QueryResult, ClarificationRequired, ConfirmationRequired, Error }
 
 /// <summary>
 /// The ask_database contract: exactly one outcome per result. A <see cref="NlResponseKind.QueryResult"/>
 /// carries the generated SQL plus the executed result set; <see cref="NlResponseKind.ClarificationRequired"/>
-/// carries only a clarifying question (no SQL ran); <see cref="NlResponseKind.Error"/> carries a stable
+/// carries only a clarifying question (no SQL ran); <see cref="NlResponseKind.ConfirmationRequired"/>
+/// carries generated SQL that passed policy but needs an explicit confirmation; <see cref="NlResponseKind.Error"/> carries a stable
 /// <see cref="ErrorCode"/> and a user-safe message (never a stack trace), and still echoes the generated SQL
 /// when one existed so the user can audit what was rejected.
 /// </summary>
@@ -23,7 +25,9 @@ public record NlQueryResult(
     IReadOnlyList<IReadOnlyList<object?>> Rows,
     int RowCount,
     bool Truncated,
-    long ElapsedMs)
+    long ElapsedMs,
+    string? ConfirmationOperation = null,
+    DdlOperation? ConfirmationDdlOperation = null)
 {
     public static NlQueryResult Query(QueryExecutionResult r) => new(
         NlResponseKind.QueryResult, r.Sql, null, null, null,
@@ -34,6 +38,12 @@ public record NlQueryResult(
 
     public static NlQueryResult Error(string code, string message, string? generatedSql = null, long elapsedMs = 0) => new(
         NlResponseKind.Error, generatedSql, null, code, message, [], [], 0, false, elapsedMs);
+
+    public static NlQueryResult Confirmation(string generatedSql, string operation,
+        DdlOperation? ddlOperation = null) => new(
+        NlResponseKind.ConfirmationRequired, generatedSql, null,
+        "ddl_confirmation_required", "Confirmation is required before executing this statement.",
+        [], [], 0, false, 0, operation, ddlOperation);
 }
 
 /// <summary>
@@ -109,7 +119,11 @@ public class NlQueryService(
 
         // Generated SQL is never trusted: it goes through the same validate-then-execute path as every other
         // surface, so read-only and hidden-table policy still apply and the run is audited.
-        var r = await executor.ExecuteSqlAsync(connectionId, llm.Sql!, ct);
+        var r = await executor.ExecuteSqlAsync(connectionId, llm.Sql!, confirmed: false, ct);
+        if (!r.Success && r.ErrorCode == "ddl_confirmation_required")
+            return NlQueryResult.Confirmation(
+                r.Sql ?? llm.Sql!, r.Operation?.ToString() ?? "write", r.Operation);
+
         return r.Success
             ? NlQueryResult.Query(r)
             : NlQueryResult.Error(r.ErrorCode!, r.ErrorMessage!, r.Sql, r.ElapsedMs);

@@ -2,6 +2,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using SqlAgent.Core;
+using SqlAgent.Core.Policy;
 using SqlAgent.Storage;
 
 namespace SqlAgent.Tests;
@@ -153,6 +154,45 @@ public class NlQueryServiceTests
 
         Assert.Equal(NlResponseKind.Error, r.Kind);
         Assert.Equal("policy_denied_readonly", r.ErrorCode);
+        conn.Dispose();
+    }
+
+    [Fact]
+    public async Task Generated_write_requires_confirmation_for_nl()
+    {
+        var (db, conn) = NewStore();
+        var provider = new NlFakeProvider(Schema);
+        var (svc, connections) = Build(db, provider,
+            new FakeGateway(LlmSqlResponse.Generated("UPDATE orders SET total = 0")));
+        var id = await AddConnectionAsync(connections, readOnly: false);
+
+        var r = await svc.AskAsync(id, "zero out the orders");
+
+        Assert.Equal(NlResponseKind.ConfirmationRequired, r.Kind);
+        Assert.Equal("ddl_confirmation_required", r.ErrorCode);
+        Assert.Equal("write", r.ConfirmationOperation);
+        Assert.Equal("UPDATE orders SET total = 0", r.GeneratedSql);
+        Assert.False(provider.Executed);
+        conn.Dispose();
+    }
+
+    [Fact]
+    public async Task Permitted_ddl_still_requires_confirmation_and_preserves_operation()
+    {
+        var (db, conn) = NewStore();
+        var provider = new NlFakeProvider(Schema);
+        var (svc, connections) = Build(db, provider,
+            new FakeGateway(LlmSqlResponse.Generated("DROP TABLE orders")));
+        var id = await AddConnectionAsync(connections, readOnly: false);
+        await connections.SetAllowedDdlAsync(id, AllowedDdl.DropTable);
+
+        var r = await svc.AskAsync(id, "drop orders");
+
+        Assert.Equal(NlResponseKind.ConfirmationRequired, r.Kind);
+        Assert.Equal("ddl_confirmation_required", r.ErrorCode);
+        Assert.Equal("DropTable", r.ConfirmationOperation);
+        Assert.Equal("DROP TABLE orders", r.GeneratedSql);
+        Assert.False(provider.Executed);
         conn.Dispose();
     }
 

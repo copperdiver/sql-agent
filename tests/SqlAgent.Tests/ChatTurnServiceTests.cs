@@ -117,6 +117,20 @@ public class ChatTurnServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task A_model_write_is_persisted_as_confirmation_required_without_execution()
+    {
+        var id = await NewConnectionAsync("prod", readOnly: false);
+        _gateway.NextResponse = LlmSqlResponse.Generated("UPDATE orders SET total = 0");
+
+        var turn = await _turns.SendAsync(null, "zero out the orders", [id]);
+
+        Assert.Equal(ChatOutcomeKind.Error, turn.AssistantMessage.OutcomeKind);
+        Assert.Equal("ddl_confirmation_required", turn.AssistantMessage.ErrorCode);
+        Assert.Equal("UPDATE orders SET total = 0", turn.AssistantMessage.GeneratedSql);
+        Assert.False(_provider.Executed);
+    }
+
+    [Fact]
     public async Task A_gateway_that_throws_anything_else_leaves_the_question_on_disk_too()
     {
         var id = await NewConnectionAsync("prod");
@@ -271,9 +285,9 @@ public class ChatTurnServiceTests : IDisposable
         return new ChatTurnService(chats, new NlQueryService(_connections, schemas, executor, _gateway), _connections);
     }
 
-    private async Task<Guid> NewConnectionAsync(string name) =>
+    private async Task<Guid> NewConnectionAsync(string name, bool readOnly = true) =>
         (await _connections.CreateAsync(
-            new DatabaseConnectionInput(name, DatabaseProviderType.Postgres, IsReadOnly: true), "cs")).Id;
+            new DatabaseConnectionInput(name, DatabaseProviderType.Postgres, IsReadOnly: readOnly), "cs")).Id;
 
     public void Dispose()
     {
@@ -324,6 +338,7 @@ sealed class TurnProviderStub : IDatabaseProvider
 {
     public QueryResultSet NextResult { get; set; } = new([], [], false);
     public bool Block { get; set; }
+    public bool Executed { get; private set; }
     public DatabaseProviderType ProviderType => DatabaseProviderType.Postgres;
 
     public Task<ConnectionTestResult> TestConnectionAsync(string cs, CancellationToken ct = default)
@@ -335,6 +350,7 @@ sealed class TurnProviderStub : IDatabaseProvider
     public async Task<QueryResultSet> ExecuteQueryAsync(
         string cs, string sql, QueryExecutionOptions o, CancellationToken ct = default)
     {
+        Executed = true;
         if (Block) await Task.Delay(Timeout.Infinite, ct);
         return NextResult;
     }

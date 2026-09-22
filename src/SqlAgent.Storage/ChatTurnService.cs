@@ -136,6 +136,10 @@ public class ChatTurnService(
             chat, ChatRole.Assistant, r.ClarificationQuestion ?? "", [],
             OutcomeKind: ChatOutcomeKind.Clarification),
 
+        NlResponseKind.ConfirmationRequired => new ChatMessageInput(
+            chat, ChatRole.Assistant, r.ErrorMessage ?? "", [], r.GeneratedSql, ChatOutcomeKind.Error,
+            ErrorCode: r.ErrorCode, ElapsedMs: r.ElapsedMs == 0 ? null : r.ElapsedMs),
+
         _ => new ChatMessageInput(
             chat, ChatRole.Assistant, r.ErrorMessage ?? "", [], r.GeneratedSql, ChatOutcomeKind.Error,
             ErrorCode: r.ErrorCode, ElapsedMs: r.ElapsedMs == 0 ? null : r.ElapsedMs),
