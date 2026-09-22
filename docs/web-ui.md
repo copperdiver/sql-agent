@@ -352,9 +352,10 @@ chooses a directory or blob identity.
 `SqlAgent:Files:MaxBytes` (`SqlAgent__Files__MaxBytes`) defaults to **25 MiB** (`26214400` bytes).
 The message limit is 10 attachments (`FileStorageOptions.MaxAttachmentsPerMessage`). The picker is
 only a convenience: the service streams and enforces the byte limit server-side, and the message
-binding enforces the count limit. The host currently registers the default `FileStorageOptions`
-(`local-disk`, 25 MiB, 10); no remote provider is shipped in this release, so changing the provider
-requires a provider implementation and DI registration as described by
+binding enforces the count limit. The host resolves `SqlAgent:Files:Provider` and
+`SqlAgent:Files:MaxBytes` from configuration, using the documented defaults when they are unset. Only
+the `local-disk` provider is registered in this release; changing the provider requires a provider
+implementation and DI registration as described by
 [`ADR 0006`](adr/0006-file-storage-provider-boundary.md).
 
 The LLM boundary receives filename, content type, and authenticated URL metadata without opening or

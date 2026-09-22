@@ -77,10 +77,11 @@ File attachments use the provider boundary described in
 | `SqlAgent:Files:MaxBytes` | `SqlAgent__Files__MaxBytes` | `26214400` | Maximum size of one upload (25 MiB) |
 | message attachment count | — | `10` | Maximum files persisted on one message |
 
-The host currently constructs the default `FileStorageOptions` (`local-disk`, 25 MiB, 10); no cloud
-or object-storage provider is registered in this release. Treat the two `SqlAgent:Files:*` names as
-the provider configuration contract: selecting a different provider requires implementing it and
-registering it with the host, and the current local-disk registration remains the safe default.
+The host resolves `SqlAgent:Files:Provider` and `SqlAgent:Files:MaxBytes` from configuration, using
+the documented defaults when they are unset. No cloud or object-storage provider is registered in
+this release. Treat the two `SqlAgent:Files:*` names as the provider configuration contract:
+selecting a different provider requires implementing it and registering it with the host, and the
+current local-disk registration remains the safe default.
 
 Local-disk stores bytes under `<SQLite store directory>/files/yyyy/MM/{guid}{safe-extension}`. With
 the default `Data Source=sqlagent.db`, this is `files` under the process working directory; with an
