@@ -9,6 +9,7 @@ public sealed record PendingFileAttachment(string FileName, string ContentType, 
 public sealed class FileRejectedException : Exception
 {
     public FileRejectedException() : base("The file could not be stored.") { }
+    public string ErrorCode => "file_rejected";
 }
 
 public interface IFileStorageReferenceReader

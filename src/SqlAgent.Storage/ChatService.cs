@@ -7,6 +7,13 @@ namespace SqlAgent.Storage;
 /// <summary>A database attached to a message: the live connection id when it still exists, and always
 /// the name it had when the message was sent.</summary>
 public record ChatDatabaseRef(Guid? ConnectionId, string Name);
+public record ChatFileRef(Guid Id, string FileName, string ContentType, long SizeBytes, string Url)
+{
+    // Provider/storage locators stay behind the storage seam. They are carried only while binding a
+    // pending upload and are never projected by ChatMessageView.
+    internal string ProviderKey { get; init; } = "";
+    internal string StorageKey { get; init; } = "";
+}
 
 /// <summary>A history row. Deliberately without messages — the sidebar lists hundreds of these.</summary>
 public record ChatSummary(Guid Id, string Title, DateTime LastMessageAt);
@@ -26,7 +33,8 @@ public record ChatMessageView(
     bool Truncated,
     IReadOnlyList<ChatDatabaseRef> Databases,
     string? ConfirmationOperation = null,
-    Guid? SchemaDiagramConnectionId = null);
+    Guid? SchemaDiagramConnectionId = null,
+    IReadOnlyList<ChatFileRef>? Files = null);
 
 /// <summary>A whole conversation, messages in order.</summary>
 public record ChatDetail(Guid Id, string Title, IReadOnlyList<ChatMessageView> Messages);
@@ -44,7 +52,8 @@ public record ChatMessageInput(
     long? ElapsedMs = null,
     bool Truncated = false,
     string? ConfirmationOperation = null,
-    Guid? SchemaDiagramConnectionId = null);
+    Guid? SchemaDiagramConnectionId = null,
+    IReadOnlyList<ChatFileRef>? Files = null);
 
 /// <summary>All information needed to confirm one pending assistant message.</summary>
 public record ChatConfirmationTarget(Guid MessageId, Guid ChatId, string Sql, Guid ConnectionId);
@@ -55,8 +64,9 @@ public record ChatRegenerationTarget(Guid MessageId, Guid ChatId, string Questio
 /// with the attached databases and calling the model — is <see cref="ChatTurnService"/>'s job, kept
 /// separate so this stays a store with no opinion about language models.
 /// </summary>
-public class ChatService(SqlAgentDbContext db)
+public class ChatService(SqlAgentDbContext db, MessageAttachmentService? attachmentService = null)
 {
+    private readonly MessageAttachmentService attachmentMetadata = attachmentService ?? new(db);
     /// <summary>SQLite's constraint-violation result code. Raised here by the unique (ChatId, Sequence)
     /// index when two circuits append to one chat at the same moment.</summary>
     private const int SqliteConstraint = 19;
@@ -79,6 +89,7 @@ public class ChatService(SqlAgentDbContext db)
         var chat = await db.Chats
             .AsNoTracking()
             .Include(c => c.Messages).ThenInclude(m => m.Databases)
+            .Include(c => c.Messages).ThenInclude(m => m.Attachments)
             .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (chat is null) return null;
 
@@ -257,7 +268,10 @@ public class ChatService(SqlAgentDbContext db)
                 DatabaseConnectionId = d.ConnectionId,
                 DatabaseName = d.Name,
             }).ToList(),
+            Attachments = attachmentMetadata.Bind(Guid.Empty, input.Files, now).ToList(),
         };
+        foreach (var attachment in message.Attachments)
+            attachment.ChatMessageId = message.Id;
 
         db.ChatMessages.Add(message);
         chat.LastMessageAt = now;
@@ -277,6 +291,8 @@ public class ChatService(SqlAgentDbContext db)
             db.Entry(chat).State = EntityState.Detached;
             foreach (var database in message.Databases)
                 db.Entry(database).State = EntityState.Detached;
+            foreach (var attachment in message.Attachments)
+                db.Entry(attachment).State = EntityState.Detached;
             db.Entry(message).State = EntityState.Detached;
             throw;
         }
@@ -317,5 +333,6 @@ public class ChatService(SqlAgentDbContext db)
         m.Id, m.Sequence, m.Role, m.Text, m.CreatedAt, m.GeneratedSql, m.OutcomeKind,
         m.ErrorCode, m.RowCount, m.ElapsedMs, m.Truncated,
         m.Databases.Select(d => new ChatDatabaseRef(d.DatabaseConnectionId, d.DatabaseName)).ToList(),
-        m.ConfirmationOperation, m.SchemaDiagramConnectionId);
+        m.ConfirmationOperation, m.SchemaDiagramConnectionId,
+        m.Attachments.Select(a => new ChatFileRef(a.Id, a.FileName, a.ContentType, a.SizeBytes, a.Url)).ToList());
 }

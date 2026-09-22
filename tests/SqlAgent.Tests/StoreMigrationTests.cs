@@ -255,6 +255,40 @@ public class StoreMigrationTests : IDisposable
     }
 
     [Fact]
+    public async Task A_pre_attachment_store_keeps_chats_and_messages_when_file_metadata_is_added()
+    {
+        var chatId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+        await using (var db = NewContext())
+        {
+            await db.GetService<IMigrator>().MigrateAsync("20260922020121_SchemaDiagramOutcome");
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO Chats (Id, Title, CreatedAt, UpdatedAt, LastMessageAt, ProjectId)
+                VALUES ({chatId}, {"before attachments"}, {DateTime.UtcNow}, {DateTime.UtcNow}, {DateTime.UtcNow}, NULL)
+                """);
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO ChatMessages
+                    (Id, ChatId, Sequence, Role, Text, CreatedAt, GeneratedSql, OutcomeKind,
+                     ErrorCode, ConfirmationOperation, SchemaDiagramConnectionId, RowCount, ElapsedMs, Truncated)
+                VALUES
+                    ({messageId}, {chatId}, {0}, {"User"}, {"existing question"}, {DateTime.UtcNow}, NULL,
+                     {"None"}, NULL, NULL, NULL, NULL, NULL, {false})
+                """);
+        }
+        SqliteConnection.ClearAllPools();
+
+        await using var migrated = NewContext();
+        await StoreInitializer.InitializeAsync(migrated, NullLogger.Instance);
+
+        Assert.Equal(chatId, (await migrated.Chats.SingleAsync()).Id);
+        Assert.Equal(messageId, (await migrated.ChatMessages.SingleAsync()).Id);
+        var tables = await migrated.Database
+            .SqlQueryRaw<string>("SELECT name AS Value FROM sqlite_master WHERE type = 'table'")
+            .ToListAsync();
+        Assert.Contains("MessageAttachments", tables);
+    }
+
+    [Fact]
     public async Task A_migration_failure_is_logged_with_the_file_path_not_the_full_connection_string()
     {
         // Regression test: the catch block used to log GetDbConnection().ConnectionString, which echoes

@@ -66,6 +66,44 @@ public class ChatServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task File_metadata_round_trips_without_exposing_provider_storage_keys()
+    {
+        var chat = await _chats.CreateChatAsync("t");
+        var fileId = Guid.NewGuid();
+
+        await _chats.AppendMessageAsync(new ChatMessageInput(
+            chat, ChatRole.User, "q", [],
+            Files: [new ChatFileRef(fileId, "report.pdf", "application/pdf", 42, $"/files/{fileId}")]));
+
+        var detail = await _chats.GetChatAsync(chat);
+        Assert.NotNull(detail);
+        var message = detail.Messages.Single();
+        var file = Assert.Single(message.Files!);
+        Assert.Equal(fileId, file.Id);
+        Assert.Equal("report.pdf", file.FileName);
+        Assert.Equal("application/pdf", file.ContentType);
+        Assert.Equal(42, file.SizeBytes);
+        Assert.Equal($"/files/{fileId}", file.Url);
+        Assert.DoesNotContain(typeof(ChatMessageView).GetProperties(),
+            p => p.Name is "ProviderKey" or "StorageKey");
+    }
+
+    [Fact]
+    public async Task A_message_accepts_ten_files_but_rejects_an_eleventh_with_file_rejected()
+    {
+        var chat = await _chats.CreateChatAsync("t");
+        static ChatFileRef File(int index) => new(Guid.NewGuid(), $"file-{index}.txt", "text/plain", index, $"/files/{index}");
+
+        var accepted = await _chats.AppendMessageAsync(new ChatMessageInput(
+            chat, ChatRole.User, "q", [], Files: Enumerable.Range(1, 10).Select(File).ToArray()));
+        Assert.Equal(10, accepted.Files!.Count);
+
+        var exception = await Assert.ThrowsAsync<FileRejectedException>(() => _chats.AppendMessageAsync(
+            new ChatMessageInput(chat, ChatRole.User, "too many", [], Files: Enumerable.Range(1, 11).Select(File).ToArray())));
+        Assert.Equal("file_rejected", exception.ErrorCode);
+    }
+
+    [Fact]
     public async Task Deleting_a_chat_takes_its_messages_and_their_attachments_with_it()
     {
         var chat = await _chats.CreateChatAsync("t");
@@ -77,6 +115,7 @@ public class ChatServiceTests : IDisposable
         Assert.Null(await _chats.GetChatAsync(chat));
         Assert.Empty(await _db.ChatMessages.ToListAsync());
         Assert.Empty(await _db.ChatMessageDatabases.ToListAsync());
+        Assert.Empty(await _db.MessageAttachments.ToListAsync());
     }
 
     [Fact]

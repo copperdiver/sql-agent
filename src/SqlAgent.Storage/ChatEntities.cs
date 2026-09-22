@@ -62,6 +62,7 @@ public class ChatMessage
     public bool Truncated { get; set; }
 
     public List<ChatMessageDatabase> Databases { get; set; } = [];
+    public List<MessageAttachment> Attachments { get; set; } = [];
 }
 
 /// <summary>
@@ -81,4 +82,19 @@ public class ChatMessageDatabase
     public ChatMessage? Message { get; set; }
     public Guid? DatabaseConnectionId { get; set; }
     public string DatabaseName { get; set; } = "";
+}
+
+/// <summary>Persisted metadata for one file attached to a message. File bytes live behind the provider boundary.</summary>
+public class MessageAttachment
+{
+    public Guid Id { get; set; }
+    public Guid ChatMessageId { get; set; }
+    public ChatMessage? Message { get; set; }
+    public string FileName { get; set; } = "";
+    public string ContentType { get; set; } = "application/octet-stream";
+    public long SizeBytes { get; set; }
+    public string ProviderKey { get; set; } = "";
+    public string StorageKey { get; set; } = "";
+    public string Url { get; set; } = "";
+    public DateTime CreatedAt { get; set; }
 }

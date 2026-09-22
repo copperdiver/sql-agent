@@ -15,6 +15,7 @@ public class SqlAgentDbContext(DbContextOptions<SqlAgentDbContext> options) : Db
     public DbSet<Chat> Chats => Set<Chat>();
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
     public DbSet<ChatMessageDatabase> ChatMessageDatabases => Set<ChatMessageDatabase>();
+    public DbSet<MessageAttachment> MessageAttachments => Set<MessageAttachment>();
     public DbSet<Project> Projects => Set<Project>();
 
     protected override void OnModelCreating(ModelBuilder b)
@@ -72,6 +73,14 @@ public class SqlAgentDbContext(DbContextOptions<SqlAgentDbContext> options) : Db
             // constraint on a table that has nothing to do with chat and make
             // DatabaseConnectionService's delete path depend on chat schema. DatabaseName is what a
             // transcript actually relies on to say what a question was asked against.
+        });
+
+        b.Entity<MessageAttachment>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.ChatMessageId);
+            e.HasOne(x => x.Message).WithMany(m => m.Attachments)
+                .HasForeignKey(x => x.ChatMessageId).OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<Project>(e =>
