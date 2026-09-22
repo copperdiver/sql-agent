@@ -514,14 +514,22 @@ public record PolicyDecision(
     string? DenyCode,
     string? Reason,
     IReadOnlyList<SqlTableReference> ReferencedTables,
-    string? NormalizedSql = null)
+    string? NormalizedSql = null,
+    DdlOperation DdlOperation = DdlOperation.Unsupported)
 {
-    public static PolicyDecision Allow(IReadOnlyList<SqlTableReference> tables, string? normalizedSql) =>
-        new(true, null, null, tables, normalizedSql);
+    public static PolicyDecision Allow(
+        IReadOnlyList<SqlTableReference> tables,
+        string? normalizedSql,
+        DdlOperation ddlOperation = DdlOperation.Unsupported) =>
+        new(true, null, null, tables, normalizedSql, ddlOperation);
 
     public static PolicyDecision Deny(
-        string code, string reason, IReadOnlyList<SqlTableReference> tables, string? normalizedSql = null)
-        => new(false, code, reason, tables, normalizedSql);
+        string code,
+        string reason,
+        IReadOnlyList<SqlTableReference> tables,
+        string? normalizedSql = null,
+        DdlOperation ddlOperation = DdlOperation.Unsupported)
+        => new(false, code, reason, tables, normalizedSql, ddlOperation);
 }
 
 /// <summary>
@@ -571,7 +579,9 @@ public static class SqlPolicyValidator
         string sql,
         DatabaseProviderType provider,
         bool isReadOnly,
-        Func<SqlTableReference, ObjectPolicy> resolve)
+        Func<SqlTableReference, ObjectPolicy> resolve,
+        AllowedDdl allowedDdl = AllowedDdl.None,
+        bool confirmed = true)
     {
         if (string.IsNullOrWhiteSpace(sql))
             return PolicyDecision.Deny("policy_denied_empty", "No executable SQL statement was provided.", []);
@@ -604,13 +614,22 @@ public static class SqlPolicyValidator
             return PolicyDecision.Deny(
                 "policy_denied_unsupported",
                 $"Statement type '{stmt.StatementType}' is not supported.",
-                stmt.Tables, stmt.Normalized);
+                stmt.Tables, stmt.Normalized, stmt.DdlOperation);
 
         if (isReadOnly && stmt.Kind != SqlStatementKind.Read)
             return PolicyDecision.Deny(
                 "policy_denied_readonly",
                 $"Connection is read-only; '{stmt.StatementType}' would modify data.",
-                stmt.Tables, stmt.Normalized);
+                stmt.Tables, stmt.Normalized, stmt.DdlOperation);
+
+        if (stmt.Kind == SqlStatementKind.Ddl &&
+            !allowedDdl.HasFlag(FlagFor(stmt.DdlOperation)))
+        {
+            return PolicyDecision.Deny(
+                "policy_denied_ddl",
+                $"DDL operation '{stmt.DdlOperation}' is not permitted for this connection.",
+                stmt.Tables, stmt.Normalized, stmt.DdlOperation);
+        }
 
         // Visibility first, and over every reference rather than only the written ones. A hidden object's
         // name must not leak, and refusing it for any more specific reason would concede that it exists.
@@ -619,7 +638,7 @@ public static class SqlPolicyValidator
             return PolicyDecision.Deny(
                 "policy_denied_hidden_table",
                 $"References table(s) not visible to this connection: {string.Join(", ", hidden)}.",
-                stmt.Tables, stmt.Normalized);
+                stmt.Tables, stmt.Normalized, stmt.DdlOperation);
 
         // Views before levels. A view can only be Not visible or Read-only, so checking the level first
         // would make this branch unreachable and would tell the user to raise a level that the object is
@@ -629,7 +648,7 @@ public static class SqlPolicyValidator
             return PolicyDecision.Deny(
                 "policy_denied_view_write",
                 $"'{stmt.StatementType}' writes to view(s): {string.Join(", ", writtenViews)}.",
-                stmt.Tables, stmt.Normalized);
+                stmt.Tables, stmt.Normalized, stmt.DdlOperation);
 
         var readOnlyTargets = stmt.WrittenTables
             .Where(t => resolve(t).Access == ObjectAccess.ReadOnly)
@@ -638,8 +657,25 @@ public static class SqlPolicyValidator
             return PolicyDecision.Deny(
                 "policy_denied_readonly_object",
                 $"'{stmt.StatementType}' writes to read-only object(s): {string.Join(", ", readOnlyTargets)}.",
-                stmt.Tables, stmt.Normalized);
+                stmt.Tables, stmt.Normalized, stmt.DdlOperation);
 
-        return PolicyDecision.Allow(stmt.Tables, stmt.Normalized);
+        if (!confirmed && (stmt.Kind == SqlStatementKind.Ddl || stmt.Kind == SqlStatementKind.Write))
+            return PolicyDecision.Deny(
+                "ddl_confirmation_required",
+                $"'{stmt.StatementType}' requires explicit confirmation before execution.",
+                stmt.Tables, stmt.Normalized, stmt.DdlOperation);
+
+        return PolicyDecision.Allow(stmt.Tables, stmt.Normalized, stmt.DdlOperation);
     }
+
+    private static AllowedDdl FlagFor(DdlOperation operation) => operation switch
+    {
+        DdlOperation.CreateTable => AllowedDdl.CreateTable,
+        DdlOperation.AlterTable => AllowedDdl.AlterTable,
+        DdlOperation.DropTable => AllowedDdl.DropTable,
+        DdlOperation.CreateIndex => AllowedDdl.CreateIndex,
+        DdlOperation.DropIndex => AllowedDdl.DropIndex,
+        DdlOperation.Truncate => AllowedDdl.Truncate,
+        _ => AllowedDdl.None,
+    };
 }

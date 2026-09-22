@@ -27,8 +27,10 @@ public class SqlPolicyValidatorTests
         string sql,
         bool isReadOnly = false,
         DatabaseProviderType provider = DatabaseProviderType.Postgres,
-        Func<SqlTableReference, ObjectPolicy>? resolve = null)
-        => SqlPolicyValidator.Validate(sql, provider, isReadOnly, resolve ?? Policy());
+        Func<SqlTableReference, ObjectPolicy>? resolve = null,
+        AllowedDdl allowedDdl = AllowedDdl.None,
+        bool confirmed = true)
+        => SqlPolicyValidator.Validate(sql, provider, isReadOnly, resolve ?? Policy(), allowedDdl, confirmed);
 
     [Theory]
     [InlineData("CREATE TABLE archive (id int)", DatabaseProviderType.Postgres, DdlOperation.CreateTable)]
@@ -72,7 +74,7 @@ public class SqlPolicyValidatorTests
     {
         var d = Validate(sql, isReadOnly: true);
         Assert.False(d.Allowed);
-        Assert.Contains(d.DenyCode, new[] { "policy_denied_readonly", "policy_denied_unsupported" });
+        Assert.Contains(d.DenyCode, new[] { "policy_denied_readonly", "policy_denied_unsupported", "policy_denied_ddl" });
     }
 
     [Fact]
@@ -126,7 +128,74 @@ public class SqlPolicyValidatorTests
     {
         var d = Validate(sql, isReadOnly: false);
         Assert.False(d.Allowed);
+        Assert.Equal("policy_denied_ddl", d.DenyCode);
+    }
+
+    [Fact]
+    public void Ddl_without_the_connection_permission_is_denied()
+    {
+        var d = Validate("DROP TABLE orders");
+
+        Assert.False(d.Allowed);
+        Assert.Equal("policy_denied_ddl", d.DenyCode);
+        Assert.Equal(DdlOperation.DropTable, d.DdlOperation);
+        Assert.Contains("DropTable", d.Reason);
+    }
+
+    [Fact]
+    public void Permitted_ddl_requires_confirmation()
+    {
+        var d = Validate(
+            "DROP TABLE orders",
+            allowedDdl: AllowedDdl.DropTable,
+            confirmed: false);
+
+        Assert.False(d.Allowed);
+        Assert.Equal("ddl_confirmation_required", d.DenyCode);
+        Assert.Equal(DdlOperation.DropTable, d.DdlOperation);
+    }
+
+    [Fact]
+    public void Permitted_and_confirmed_ddl_is_allowed()
+    {
+        var d = Validate(
+            "DROP TABLE orders",
+            allowedDdl: AllowedDdl.DropTable,
+            confirmed: true);
+
+        Assert.True(d.Allowed);
+        Assert.Equal(DdlOperation.DropTable, d.DdlOperation);
+    }
+
+    [Fact]
+    public void Unsupported_shapes_remain_denied_even_with_every_supported_permission()
+    {
+        var all = AllowedDdl.CreateTable | AllowedDdl.AlterTable | AllowedDdl.DropTable |
+                  AllowedDdl.CreateIndex | AllowedDdl.DropIndex | AllowedDdl.Truncate;
+        var d = Validate("GRANT SELECT ON orders TO app", allowedDdl: all, confirmed: true);
+
+        Assert.False(d.Allowed);
         Assert.Equal("policy_denied_unsupported", d.DenyCode);
+        Assert.Equal(DdlOperation.Unsupported, d.DdlOperation);
+    }
+
+    [Fact]
+    public void Unconfirmed_dml_is_denied_before_execution()
+    {
+        var d = Validate("UPDATE orders SET total = 0", confirmed: false);
+
+        Assert.False(d.Allowed);
+        Assert.Equal("ddl_confirmation_required", d.DenyCode);
+        Assert.Equal(DdlOperation.Unsupported, d.DdlOperation);
+    }
+
+    [Fact]
+    public void Read_only_connection_denial_wins_over_missing_confirmation()
+    {
+        var d = Validate("UPDATE orders SET total = 0", isReadOnly: true, confirmed: false);
+
+        Assert.False(d.Allowed);
+        Assert.Equal("policy_denied_readonly", d.DenyCode);
     }
 
     // --- Multi-statement batches -----------------------------------------------
