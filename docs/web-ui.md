@@ -280,6 +280,19 @@ untrusted spreadsheet.
 - **Zero or several attached databases** answer with `no_database_attached` and
   `multiple_databases_unsupported`. The second is a limit of today's gateway, which takes one schema and
   returns one SQL string; querying the first attachment silently would misreport what was asked.
+- **Files attach to a message** from the same composer menu. Selecting a file uploads it immediately
+  into provider storage and shows a removable pending chip; the chip remains pending until the
+  message is successfully persisted. Sent messages show read-only download chips with the original
+  display name and size. File bytes are never put in SQLite, the chat transcript, or the LLM prompt.
+  The server enforces a 25 MiB maximum per file and 10 files per message, regardless of picker
+  attributes. The stable browser-facing failures are `file_too_large` and `file_rejected`; provider
+  exception text is logged only on the host.
+- **File downloads are authenticated and forced to download.** `GET /files/{id}` requires the
+  existing session and resolves only the persisted attachment id. It sends
+  `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`, and
+  `Content-Security-Policy: sandbox`; HTML, XHTML, and SVG metadata is served as
+  `application/octet-stream`, never inline. A missing id, missing blob, unauthenticated request, or
+  provider failure does not disclose storage paths or exception details.
 - **Result rows are never stored.** A reloaded answer shows its row count, duration and truncation flag
   with a note saying so; open the SQL in the editor and run it again to see the rows. This keeps the
   local store from becoming a shadow copy of production data.
@@ -324,6 +337,37 @@ The SQLite store is versioned with EF Core migrations. A store created before th
 original tables and no `__EFMigrationsHistory`; startup stamps the initial migration as applied and then
 migrates, so an existing store keeps its data. A migration that fails stops the host rather than running
 against a half-migrated store — the log names the store path.
+
+## File storage and model handoff
+
+Phase E keeps file bytes behind `IFileStorageProvider`; SQLite stores only the message attachment
+metadata needed to render a chip and resolve an authenticated download. The first provider is
+`local-disk`, selected by `SqlAgent:Files:Provider` (environment form
+`SqlAgent__Files__Provider`). Its root is a `files` directory beside the SQLite database: for the
+default `Data Source=sqlagent.db`, that is `<current working directory>/files`; for an absolute
+`SqlAgent:Storage:ConnectionString` data source, it is `<database directory>/files`. Each blob is
+written under `yyyy/MM/{guid}{safe-extension}`. The client filename is display data only and never
+chooses a directory or blob identity.
+
+`SqlAgent:Files:MaxBytes` (`SqlAgent__Files__MaxBytes`) defaults to **25 MiB** (`26214400` bytes).
+The message limit is 10 attachments (`FileStorageOptions.MaxAttachmentsPerMessage`). The picker is
+only a convenience: the service streams and enforces the byte limit server-side, and the message
+binding enforces the count limit. The host currently registers the default `FileStorageOptions`
+(`local-disk`, 25 MiB, 10); no remote provider is shipped in this release, so changing the provider
+requires a provider implementation and DI registration as described by
+[`ADR 0006`](adr/0006-file-storage-provider-boundary.md).
+
+The LLM boundary receives filename, content type, and authenticated URL metadata without opening or
+copying file bytes into `LlmSqlRequest`. Those URLs are loopback-relative (`/files/{id}`), so a future
+model hosted on this machine can fetch them through the same session, while a cloud model cannot reach
+`127.0.0.1`; a remote/provider-backed URL and its own access-token design are required before cloud
+file analysis is supported. The build intentionally has no real LLM provider yet.
+
+Deleting a chat, or deleting a project with **Delete chats**, removes attachment metadata and asks the
+owning provider to delete each blob best-effort. **Keep chats** leaves both metadata and blobs intact.
+The host also runs an orphan sweep after migrations at startup: it only considers local-disk blobs
+older than 24 hours with no matching metadata, so an abandoned upload newer than that age floor is not
+removed while a live circuit could still be finishing its send.
 
 ## Manual regression checklist
 
@@ -377,6 +421,16 @@ files under `wwwroot/js/`:
 | Send with no database attached, then with two | Both explain themselves; both survive a reload |
 | Attach a database, send twice | The chip is still there for the second question |
 | Delete a connection that an old message used | The old message still shows the name it was sent with |
+| Open the composer attachment menu → Files, pick a small file, then cancel the picker | The file picker opens; a selected file shows a pending chip; canceling leaves no chip and no sent message attachment |
+| Pick an unreadable/failed upload or force a provider failure | The UI shows stable `file_rejected` copy without provider exception text; no unusable chip is persisted |
+| Pick a file exactly 25 MiB, then one byte over 25 MiB | The exact-limit file uploads; the larger file is rejected with `file_too_large` |
+| Attach 10 files, then try an 11th before sending | Ten files are accepted; the 11th is rejected with `file_rejected` and the existing pending chips remain usable |
+| Send a message with a file, reload the chat, and click its file chip | The read-only chip persists with name/size; the authenticated link downloads the blob and does not navigate to its contents |
+| Request an HTML or SVG attachment download | Response is `Content-Disposition: attachment`, `application/octet-stream`, `nosniff`, and CSP `sandbox`; no markup renders inline |
+| Open a file link in a private/unauthenticated browser window | The existing session/auth boundary rejects it (401), and no blob details are disclosed |
+| Delete a chat containing an attachment; repeat with a project and choose Delete chats | Attachment metadata disappears and the provider blob is deleted best-effort; provider cleanup failure does not block metadata deletion |
+| Delete a project and choose Keep chats | Chat, attachment metadata, and blob remain available |
+| Start an upload, abandon the send, restart the host, and inspect the files root | Pending state is gone after the circuit ends; startup cleanup removes only orphan blobs older than 24 hours, leaving newer files for the age-gated retry path |
 | Rename and delete a chat from its `⋮` menu | Rename updates the row; delete asks first and names the chat |
 | Do the same from inside the drawer below 1024px | The dialog centres on the viewport, not on the drawer, and survives the drawer closing |
 | Tab through the page below 1024px with the drawer closed | Focus never enters the drawer |
