@@ -164,7 +164,9 @@ nobody spends time rediscovering them:
   set here too. Opening a saved database also tests it and, on success, shows every live table
   and view with a three-level access control (hidden / read-only / full) — a view offers only
   hidden/read-only, since a view cannot be writable. A filter box narrows the list by name, and
-  a level applies immediately, with no separate save step.
+  a level applies immediately, with no separate save step. The Structure permissions panel below it
+  independently controls six DDL operations: Create table, Alter table, Drop table, Create index,
+  Drop index, and Truncate table.
 - **Chat** (`/`, `/chat/{id}`) — ask a question in plain English; the generated SQL and its
   result (or an error) appear in the transcript, with a button to open the generated SQL on the
   SQL page for editing. See "Chats, and what is kept" below for what persists across a reload
@@ -194,6 +196,25 @@ itself — `SqlPolicyValidator.Validate` checks it before a statement runs, not 
   view being written to is refused before its level is even consulted, with the more specific
   `policy_denied_view_write` — the two codes can't both fire for the same statement.
 - **Full access** (`ObjectAccess.Full`) — visible, queryable, and (tables only) writable.
+
+## Structure permissions and confirmation
+
+The Structure permissions panel is a per-connection allow-list. All six DDL switches default to off,
+including on connections created before C2. The master switch selects or clears all six. Changing a
+switch is saved immediately; it does not execute SQL and it does not bypass the connection's
+read-only setting or per-object access levels.
+
+The supported DDL operations are `CREATE TABLE`, `ALTER TABLE`, `DROP TABLE`, `CREATE INDEX`,
+`DROP INDEX`, and `TRUNCATE`. A supported operation whose switch is off is refused with
+`policy_denied_ddl`. Statements outside this closed set — including `CREATE VIEW`, routines,
+`EXEC`, and `GRANT` — remain refused with `policy_denied_unsupported`.
+
+Every write and permitted DDL statement also needs explicit confirmation at the execution boundary.
+Typed SQL from `/sql` supplies that confirmation after the user presses Run. Natural-language Chat
+and `query_database` MCP calls deliberately run unconfirmed: they return `ddl_confirmation_required`,
+echo the generated SQL and operation, and do not call the provider. The chat transcript stores this
+as a stable error-shaped outcome until the Phase D confirmation UI exists. Reads do not need this
+extra confirmation.
 
 **An object with no policy row is Full access — not Hidden, not Read-only.** This is the rule every
 layer applies (see the resolver contract on `SqlPolicyValidator.Validate` and
@@ -326,8 +347,11 @@ files under `wwwroot/js/`:
 | Create a database, then test it | Version and elapsed time reported |
 | Reopen the database for editing | Connection-string field is empty |
 | Open a database's config page | Objects panel lists tables and views grouped by schema, each with a Not visible / Read-only / Full access control |
+| Open a database's config page | Structure permissions shows six unchecked DDL operations by default, and the master switch selects/clears all six |
 | Set a table to Not visible, run `SELECT` against it | `policy_denied_hidden_table` |
 | Set the connection to read-only, run an `UPDATE` | `policy_denied_readonly` |
+| Enable Drop table, ask Chat to drop a table | `ddl_confirmation_required`; no provider call is made |
+| Run a typed UPDATE or permitted DDL from `/sql` | It runs only after the explicit Run action supplies confirmation |
 | Type SQL, press Ctrl+Enter | Query runs, syntax is highlighted |
 | Run a query returning more than 1000 rows | Truncation notice appears |
 | Export CSV, then JSON | Both files download and open cleanly |

@@ -30,6 +30,11 @@ SqlAgent__Storage__ConnectionString="Data Source=/path/to/sqlagent.db" dotnet ru
 Windows service and systemd packaging examples are in `packaging/`. Operator
 startup, fixture, and troubleshooting notes are in `docs/runbook.md`.
 
+Database configuration includes per-object visibility/access controls and a Structure permissions
+panel for the six supported DDL operations. The switches default off and are saved per connection.
+Typed SQL from `/sql` is the confirmed execution surface; Chat-generated writes and MCP
+`query_database` calls fail closed with `ddl_confirmation_required` until the Phase D confirmation UI.
+
 Setting `SqlAgent__LocalAuth__Token` on the host pins the web UI's launch token to a fixed
 value and is shared with the MCP server, which clients present through `SQLAGENT_AUTH_TOKEN`.
 Leave it unset and the web UI generates a fresh random token every start instead. Details are

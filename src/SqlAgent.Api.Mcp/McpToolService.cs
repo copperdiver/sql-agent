@@ -76,7 +76,8 @@ public record QueryDatabaseResponse(
 /// Error codes: <c>invalid_database_id</c>, <c>connection_not_found</c>, <c>connection_secret_missing</c>,
 /// <c>schema_extraction_error</c> (describe_schema), and — passed through from T6 query validation/execution —
 /// <c>policy_denied_readonly</c>, <c>policy_denied_hidden_table</c>, <c>policy_denied_view_write</c>,
-/// <c>policy_denied_readonly_object</c>, <c>schema_unavailable</c>, <c>execution_timeout</c>,
+/// <c>policy_denied_readonly_object</c>, <c>policy_denied_ddl</c>,
+/// <c>policy_denied_unsupported</c>, <c>ddl_confirmation_required</c>, <c>schema_unavailable</c>, <c>execution_timeout</c>,
 /// <c>execution_canceled</c>, <c>execution_error</c>.
 ///
 /// <c>schema_unavailable</c> is worth calling out because it is the one refusal that is not about the SQL

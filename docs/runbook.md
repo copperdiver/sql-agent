@@ -166,6 +166,26 @@ defines, and none of them wires an LLM provider. Connecting a real vendor behind
 `ILlmSqlGateway` is planned for a later phase; when it lands, its own configuration keys and
 setup steps belong in this section.
 
+## DDL permissions and confirmation
+
+On a database's configuration page, **Structure permissions** controls the per-connection allow-list
+for `CREATE TABLE`, `ALTER TABLE`, `DROP TABLE`, `CREATE INDEX`, `DROP INDEX`, and `TRUNCATE`.
+Every switch is off by default, including for migrated stores; the master switch selects or clears all
+six. These settings are saved immediately and only authorize a statement shape — they never execute a
+statement themselves. `CREATE VIEW`, routines, `EXEC`, and `GRANT` remain unsupported and fail closed.
+
+The stable refusal codes are:
+
+- `policy_denied_ddl` — the DDL shape is supported but its connection switch is off.
+- `policy_denied_unsupported` — the SQL shape is outside the supported closed set.
+- `ddl_confirmation_required` — a write or permitted DDL statement reached an unconfirmed surface.
+
+The `/sql` page is the confirmed surface: a typed statement runs with confirmation when the user
+presses Run. Chat's natural-language path and MCP `query_database` intentionally remain unconfirmed
+in this phase. They return `ddl_confirmation_required` with the generated/requested SQL and do not
+call the database provider. The Chat transcript keeps that stable outcome; a confirmation dialog for
+it belongs to Phase D.
+
 ## Provider fixtures
 
 ```bash

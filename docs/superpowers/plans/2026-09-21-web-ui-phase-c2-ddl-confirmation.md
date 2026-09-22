@@ -36,12 +36,12 @@ Interfaces:
 - Add a trailing nullable DdlOperation property to ParsedStatement.
 
 Steps:
-- [ ] Write failing tests that classify CREATE TABLE, ALTER TABLE, DROP TABLE, CREATE INDEX, DROP INDEX, and TRUNCATE for Postgres and SQL Server.
-- [ ] Add tests proving CREATE VIEW, GRANT, and EXECUTE remain Other/Unsupported.
-- [ ] Run the focused policy tests and observe the expected compile failure or old classification.
-- [ ] Implement classification using SqlParserCS AST nodes: Statement.CreateTable, Statement.AlterTable, Statement.CreateIndex, Statement.Truncate, and Statement.Drop with ObjectType.Table/Index. Leave unsupported nodes fail-closed.
-- [ ] Run the focused tests and verify they pass.
-- [ ] Commit with message: Add DDL operation classification.
+- [x] Write failing tests that classify CREATE TABLE, ALTER TABLE, DROP TABLE, CREATE INDEX, DROP INDEX, and TRUNCATE for Postgres and SQL Server.
+- [x] Add tests proving CREATE VIEW, GRANT, and EXECUTE remain Other/Unsupported.
+- [x] Run the focused policy tests and observe the expected compile failure or old classification.
+- [x] Implement classification using SqlParserCS AST nodes: Statement.CreateTable, Statement.CreateIndex, Statement.Truncate, and Statement.Drop with ObjectType.Table/Index. Leave unsupported nodes fail-closed.
+- [x] Run the focused tests and verify they pass.
+- [x] Commit with message: Add DDL operation classification.
 
 ### Task 2: Core policy decisions for permissions and confirmation
 
@@ -54,12 +54,12 @@ Interfaces:
 - Carry DdlOperation? in PolicyDecision.
 
 Steps:
-- [ ] Write failing tests for: no permission gives policy_denied_ddl; permitted but unconfirmed DDL gives ddl_confirmation_required; permitted and confirmed DDL is allowed; unsupported GRANT/EXEC remains denied even with all flags; unconfirmed DML gives ddl_confirmation_required; read-only connection denial still wins for DML.
-- [ ] Run focused tests and confirm they fail because DDL is still policy_denied_unsupported and writes do not require confirmation.
-- [ ] Implement policy ordering: parse/empty/multi-statement checks; unsupported statements; connection read-only; mapped DDL permission; object visibility/view/read-only-object checks; confirmation for DDL and writes; allow.
-- [ ] Keep normalized SQL and operation in every denial decision.
-- [ ] Run focused tests, then the complete test project.
-- [ ] Commit with message: Enforce DDL permission and confirmation policy.
+- [x] Write failing tests for: no permission gives policy_denied_ddl; permitted but unconfirmed DDL gives ddl_confirmation_required; permitted and confirmed DDL is allowed; unsupported GRANT/EXEC remains denied even with all flags; unconfirmed DML gives ddl_confirmation_required; read-only connection denial still wins for DML.
+- [x] Run focused tests and confirm they fail because DDL is still policy_denied_unsupported and writes do not require confirmation.
+- [x] Implement policy ordering: parse/empty/multi-statement checks; unsupported statements; connection read-only; mapped DDL permission; object visibility/view/read-only-object checks; confirmation for DDL and writes; allow.
+- [x] Keep normalized SQL and operation in every denial decision.
+- [x] Run focused tests, then the complete test project.
+- [x] Commit with message: Enforce DDL permission and confirmation policy.
 
 ### Task 3: Persist AllowedDdl and expose connection configuration
 
@@ -80,11 +80,11 @@ Interfaces:
 - CreateAsync and UpdateAsync preserve permissions and do not reset them.
 
 Steps:
-- [ ] Write failing tests for default None, flags round-trip, update, missing connection, and migration from an old EnsureCreated store.
-- [ ] Run the focused tests and observe the expected missing API/default failure.
-- [ ] Add the field, EF mapping, service method, and migration. Existing stores must receive 0 without touching secrets, chats, policies, or caches.
-- [ ] Run focused migration tests and inspect the generated migration.
-- [ ] Commit with message: Persist per-connection DDL permissions.
+- [x] Write failing tests for default None, flags round-trip, update, missing connection, and migration from an old EnsureCreated store.
+- [x] Run the focused tests and observe the expected missing API/default failure.
+- [x] Add the field, EF mapping, service method, and migration. Existing stores must receive 0 without touching secrets, chats, policies, or caches.
+- [x] Run focused migration tests and inspect the generated migration.
+- [x] Commit with message: Persist per-connection DDL permissions.
 
 ### Task 4: Enforce the shared execution boundary and update callers
 
@@ -103,12 +103,12 @@ Interfaces:
 - MCP keeps the default false, so headless writes and DDL cannot execute.
 
 Steps:
-- [ ] Write failing service tests for permitted DROP without confirmation, the same DROP with confirmation, denied DDL even when confirmed, unconfirmed UPDATE, confirmed UPDATE, audit stability, and MCP refusal.
-- [ ] Run focused tests and observe the expected compile failure or old execution behavior.
-- [ ] Load info.AllowedDdl, call the expanded validator, map PolicyDecision to QueryExecutionResult, and keep all denials audited before provider execution.
-- [ ] Update Workspace and direct write tests to pass confirmed: true. Leave NL and MCP on false.
-- [ ] Run focused tests and the complete solution suite.
-- [ ] Commit with message: Require confirmation for writes and permitted DDL.
+- [x] Write failing service tests for permitted DROP without confirmation, the same DROP with confirmation, denied DDL even when confirmed, unconfirmed UPDATE, confirmed UPDATE, audit stability, and MCP refusal.
+- [x] Run focused tests and observe the expected compile failure or old execution behavior.
+- [x] Load info.AllowedDdl, call the expanded validator, map PolicyDecision to QueryExecutionResult, and keep all denials audited before provider execution.
+- [x] Update Workspace and direct write tests to pass confirmed: true. Leave NL and MCP on false.
+- [x] Run focused tests and the complete solution suite.
+- [x] Commit with message: Require confirmation for writes and permitted DDL.
 
 ### Task 5: NL confirmation outcome without executing generated writes
 
@@ -126,11 +126,11 @@ Interfaces:
 - Until Phase D adds the persisted/rendered confirmation outcome, ChatTurnService stores the safe stable code and generated SQL as an error-shaped assistant message; no mutation occurs.
 
 Steps:
-- [ ] Write failing tests for generated UPDATE and permitted DROP returning ConfirmationRequired, preserving SQL, and never calling the provider. Keep SELECT, clarification, llm_not_configured, and ordinary errors unchanged.
-- [ ] Run focused tests and observe the expected red state.
-- [ ] Implement the mapping, falling back to operation write for DML.
-- [ ] Run focused and full tests.
-- [ ] Commit with message: Return confirmation-required outcomes for model writes.
+- [x] Write failing tests for generated UPDATE and permitted DROP returning ConfirmationRequired, preserving SQL, and never calling the provider. Keep SELECT, clarification, llm_not_configured, and ordinary errors unchanged.
+- [x] Run focused tests and observe the expected red state.
+- [x] Implement the mapping, falling back to operation write for DML.
+- [x] Run focused and full tests.
+- [x] Commit with message: Return confirmation-required outcomes for model writes.
 
 ### Task 6: Structure permissions panel on the database page
 
@@ -147,12 +147,12 @@ Interfaces:
 - The panel explains that views, routines, EXEC, GRANT, and unsupported operations are always denied.
 
 Steps:
-- [ ] Write failing component tests for the third panel, six unchecked defaults, persistence of one operation, restoring saved flags, and master select/clear.
-- [ ] Run focused component tests and observe the missing component/API failure.
-- [ ] Implement with ScopedRunner, stable data-testid attributes, safe error rendering, and tokenized CSS.
-- [ ] Mount it after ObjectsPanel and show it only after a successful connection test.
-- [ ] Run focused tests and the design-system checks.
-- [ ] Commit with message: Add database structure permissions panel.
+- [x] Write failing component tests for the third panel, six unchecked defaults, persistence of one operation, restoring saved flags, and master select/clear.
+- [x] Run focused component tests and observe the missing component/API failure.
+- [x] Implement with ScopedRunner, stable data-testid attributes, safe error rendering, and tokenized CSS.
+- [x] Mount it after ObjectsPanel and show it only after a successful connection test.
+- [x] Run focused tests and the design-system checks.
+- [x] Commit with message: Add database structure permissions panel.
 
 ### Task 7: Documentation, migration rehearsal, and final verification
 
@@ -163,15 +163,15 @@ Files:
 - Modify: this plan
 
 Steps:
-- [ ] Document the six toggles, default None, policy_denied_ddl versus ddl_confirmation_required, /sql confirmation, and NL/MCP limitations.
-- [ ] Rehearse migration against an old store and verify AllowedDdl is zero with no data loss.
+- [x] Document the six toggles, default None, policy_denied_ddl versus ddl_confirmation_required, /sql confirmation, and NL/MCP limitations.
+- [x] Rehearse migration against an old store and verify AllowedDdl is zero with no data loss.
 - [ ] Run:
 ~~~powershell
 dotnet restore SqlAgent.slnx
 dotnet build SqlAgent.slnx --configuration Release --no-restore
 dotnet test SqlAgent.slnx --configuration Release --no-build --logger "console;verbosity=minimal"
 ~~~
-- [ ] Record warnings and the AngleSharp advisory accurately.
+- [x] Record warnings and the AngleSharp advisory accurately.
 - [ ] Commit with message: Document C2 DDL permissions and confirmation.
 
 ## Definition of Done
@@ -183,4 +183,3 @@ dotnet test SqlAgent.slnx --configuration Release --no-build --logger "console;v
 - MCP cannot execute unconfirmed writes or DDL.
 - Existing reads, visibility, view-write checks, cancellation, timeout, audit, and error redaction remain green.
 - Build and all tests pass; known warnings are reported accurately.
-
