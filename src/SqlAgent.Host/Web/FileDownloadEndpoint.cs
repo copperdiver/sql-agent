@@ -51,7 +51,10 @@ public static class FileDownloadEndpoint
         var mediaType = normalized.Split(';', 2)[0].Trim();
         if (mediaType.Equals("text/html", StringComparison.OrdinalIgnoreCase)
             || mediaType.Equals("application/xhtml+xml", StringComparison.OrdinalIgnoreCase)
-            || mediaType.Equals("image/svg+xml", StringComparison.OrdinalIgnoreCase))
+            || mediaType.Equals("image/svg+xml", StringComparison.OrdinalIgnoreCase)
+            || mediaType.Equals("text/xml", StringComparison.OrdinalIgnoreCase)
+            || mediaType.Equals("application/xml", StringComparison.OrdinalIgnoreCase)
+            || mediaType.EndsWith("+xml", StringComparison.OrdinalIgnoreCase))
             return "application/octet-stream";
 
         // Persisted metadata is trusted only as data. Reject control characters and malformed media

@@ -51,9 +51,11 @@ public sealed class FileDownloadEndpointTests : IClassFixture<WebTestHost>
     }
 
     [Theory]
-    [InlineData("text/html")]
-    [InlineData("image/svg+xml")]
-    public async Task Active_content_types_are_neutralized(string contentType)
+    [InlineData("text/xml")]
+    [InlineData("application/xml")]
+    [InlineData("application/vnd.example+xml")]
+    [InlineData("APPLICATION/ATOM+XML; charset=utf-8")]
+    public async Task Xml_family_content_types_are_neutralized(string contentType)
     {
         var id = await SeedAttachmentAsync("active-content", contentType, "<script>alert(1)</script>");
         var client = await AuthenticatedClientAsync();
@@ -64,6 +66,21 @@ public sealed class FileDownloadEndpointTests : IClassFixture<WebTestHost>
         Assert.Equal("application/octet-stream", response.Content.Headers.ContentType?.MediaType);
         Assert.Equal("nosniff", response.Headers.GetValues("X-Content-Type-Options").Single());
         Assert.Equal("sandbox", response.Headers.GetValues("Content-Security-Policy").Single());
+    }
+
+    [Theory]
+    [InlineData("text/html")]
+    [InlineData("application/xhtml+xml")]
+    [InlineData("image/svg+xml")]
+    public async Task Existing_active_content_types_remain_neutralized(string contentType)
+    {
+        var id = await SeedAttachmentAsync("active-content", contentType, "<script>alert(1)</script>");
+        var client = await AuthenticatedClientAsync();
+
+        using var response = await client.GetAsync($"/files/{id}");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("application/octet-stream", response.Content.Headers.ContentType?.MediaType);
     }
 
     [Fact]
