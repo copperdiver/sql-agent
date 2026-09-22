@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using SqlAgent.Core;
+using SqlAgent.Core.Policy;
 using SqlAgent.Storage;
 
 namespace SqlAgent.Tests;
@@ -65,6 +66,7 @@ public class StoreMigrationTests : IDisposable
         var kept = await db.DatabaseConnections.SingleAsync();
         Assert.Equal(connectionId, kept.Id);
         Assert.Equal("prod", kept.Name);
+        Assert.Equal(AllowedDdl.None, kept.AllowedDdl);
         // ...and the store now knows it is migrated, so the next start is an ordinary no-op migration.
         Assert.NotEmpty(await db.Database.GetAppliedMigrationsAsync());
     }
@@ -591,6 +593,7 @@ public sealed class LegacyStoreDbContext(DbContextOptions<LegacyStoreDbContext> 
         {
             e.HasKey(x => x.Id);
             e.HasIndex(x => x.Name).IsUnique();
+            e.Ignore(x => x.AllowedDdl);
         });
         b.Entity<TablePolicy>(e =>
         {

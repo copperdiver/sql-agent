@@ -2,6 +2,7 @@ using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 using SqlAgent.Core;
+using SqlAgent.Core.Policy;
 using SqlAgent.Host.Components.Shared.Chat;
 using SqlAgent.Host.Web;
 using SqlAgent.Storage;
@@ -28,8 +29,8 @@ public class ComposerTests
 
     private static IReadOnlyList<DatabaseConnectionInfo> TwoConnections() =>
     [
-        new(Guid.NewGuid(), "analytics", DatabaseProviderType.Postgres, true, true, DateTime.UtcNow, DateTime.UtcNow),
-        new(Guid.NewGuid(), "billing", DatabaseProviderType.SqlServer, false, true, DateTime.UtcNow, DateTime.UtcNow),
+        new(Guid.NewGuid(), "analytics", DatabaseProviderType.Postgres, true, AllowedDdl.None, true, DateTime.UtcNow, DateTime.UtcNow),
+        new(Guid.NewGuid(), "billing", DatabaseProviderType.SqlServer, false, AllowedDdl.None, true, DateTime.UtcNow, DateTime.UtcNow),
     ];
 
     [Fact]

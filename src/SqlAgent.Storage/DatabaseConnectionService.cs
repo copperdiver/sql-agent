@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using SqlAgent.Core;
+using SqlAgent.Core.Policy;
 
 namespace SqlAgent.Storage;
 
@@ -12,6 +13,7 @@ public record DatabaseConnectionInfo(
     string Name,
     DatabaseProviderType ProviderType,
     bool IsReadOnly,
+    AllowedDdl AllowedDdl,
     bool HasSecret,
     DateTime CreatedAt,
     DateTime UpdatedAt);
@@ -69,6 +71,17 @@ public class DatabaseConnectionService(SqlAgentDbContext db, ISecretStore secret
         return ToInfo(e);
     }
 
+    public async Task<DatabaseConnectionInfo?> SetAllowedDdlAsync(
+        Guid id, AllowedDdl allowedDdl, CancellationToken ct = default)
+    {
+        var e = await db.DatabaseConnections.FindAsync([id], ct);
+        if (e is null) return null;
+        e.AllowedDdl = allowedDdl;
+        e.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+        return ToInfo(e);
+    }
+
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
     {
         var e = await db.DatabaseConnections.FindAsync([id], ct);
@@ -88,6 +101,7 @@ public class DatabaseConnectionService(SqlAgentDbContext db, ISecretStore secret
 
     private static DatabaseConnectionInfo ToInfo(DatabaseConnection e) => new(
         e.Id, e.Name, e.ProviderType, e.IsReadOnly,
+        e.AllowedDdl,
         HasSecret: !string.IsNullOrEmpty(e.ConnectionStringSecretRef),
         e.CreatedAt, e.UpdatedAt);
 }

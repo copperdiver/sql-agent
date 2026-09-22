@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using SqlAgent.Core.Policy;
 
 namespace SqlAgent.Storage;
 
@@ -22,6 +23,7 @@ public class SqlAgentDbContext(DbContextOptions<SqlAgentDbContext> options) : Db
         {
             e.HasKey(x => x.Id);
             e.HasIndex(x => x.Name).IsUnique();
+            e.Property(x => x.AllowedDdl).HasConversion<int>().HasDefaultValue(AllowedDdl.None);
         });
         b.Entity<TablePolicy>(e =>
         {

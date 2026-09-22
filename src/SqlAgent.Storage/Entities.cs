@@ -1,4 +1,5 @@
 using SqlAgent.Core;
+using SqlAgent.Core.Policy;
 
 namespace SqlAgent.Storage;
 
@@ -13,6 +14,7 @@ public class DatabaseConnection
     public DatabaseProviderType ProviderType { get; set; }
     public string ConnectionStringSecretRef { get; set; } = "";
     public bool IsReadOnly { get; set; }
+    public AllowedDdl AllowedDdl { get; set; } = AllowedDdl.None;
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }
