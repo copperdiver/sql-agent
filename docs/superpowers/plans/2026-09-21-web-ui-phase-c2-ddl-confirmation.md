@@ -165,14 +165,14 @@ Files:
 Steps:
 - [x] Document the six toggles, default None, policy_denied_ddl versus ddl_confirmation_required, /sql confirmation, and NL/MCP limitations.
 - [x] Rehearse migration against an old store and verify AllowedDdl is zero with no data loss.
-- [ ] Run:
+- [x] Run:
 ~~~powershell
 dotnet restore SqlAgent.slnx
 dotnet build SqlAgent.slnx --configuration Release --no-restore
 dotnet test SqlAgent.slnx --configuration Release --no-build --logger "console;verbosity=minimal"
 ~~~
 - [x] Record warnings and the AngleSharp advisory accurately.
-- [ ] Commit with message: Document C2 DDL permissions and confirmation.
+- [x] Commit with message: Document C2 DDL permissions and confirmation.
 
 ## Definition of Done
 
