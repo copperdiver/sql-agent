@@ -166,7 +166,9 @@ public class ChatServiceTests : IDisposable
         Assert.True(await chats.DeleteChatAsync(chat));
 
         Assert.Empty(await _db.MessageAttachments.ToListAsync());
-        Assert.Contains(logs.Records, record => record.Level == LogLevel.Warning);
+        var warning = Assert.Single(logs.Records, record => record.Level == LogLevel.Warning);
+        Assert.Null(warning.Exception);
+        Assert.DoesNotContain("sensitive provider details", warning.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -326,7 +328,7 @@ file sealed class RecordingFileStorageProvider : IFileStorageProvider
 
     public Task<bool> DeleteAsync(string storageKey, CancellationToken ct = default)
     {
-        if (ThrowOnDelete) throw new IOException("provider failed");
+        if (ThrowOnDelete) throw new IOException("sensitive provider details");
         DeletedKeys.Add(storageKey);
         return Task.FromResult(true);
     }

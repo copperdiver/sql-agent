@@ -90,12 +90,13 @@ public sealed class AttachmentBlobCleanup(
             {
                 throw;
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 // Provider errors must not turn a successful metadata deletion into a failed chat or
                 // project deletion. Keep storage locators out of the log message and log only the
-                // provider identity needed to diagnose configuration or availability failures.
-                logger.LogWarning(ex,
+                // provider identity needed to diagnose configuration or availability failures; do not
+                // attach the provider exception because its text may contain sensitive details.
+                logger.LogWarning(
                     "File storage provider {ProviderKey} failed while deleting an attachment blob; "
                     + "metadata deletion has completed.", attachment.ProviderKey);
             }
