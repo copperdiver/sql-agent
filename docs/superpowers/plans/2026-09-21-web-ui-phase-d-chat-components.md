@@ -43,12 +43,12 @@
 - Confirmation resolves the single database attached to the preceding user message, executes the stored SQL through `QueryExecutionService` with `confirmed: true`, and updates the same assistant row; it never appends a second assistant answer.
 
 **Steps:**
-- [ ] Write tests for persisted `ConfirmationRequired`, operation/SQL round-trip, exactly-one-database resolution, confirmed execution updating the same message, and policy/execution failure persistence.
-- [ ] Run the focused tests and observe missing enum/field/service failures.
-- [ ] Add the enum, stored field, migration, and `ChatService` read/update seams.
-- [ ] Implement `ConfirmAsync` with cancellation-safe stable outcomes and no raw provider exception text.
-- [ ] Run chat, migration, and execution-focused tests.
-- [ ] Commit: `Persist chat confirmation outcomes`.
+- [x] Write tests for persisted `ConfirmationRequired`, operation/SQL round-trip, exactly-one-database resolution, confirmed execution updating the same message, and policy/execution failure persistence.
+- [x] Run the focused tests and observe missing enum/field/service failures.
+- [x] Add the enum, stored field, migration, and `ChatService` read/update seams.
+- [x] Implement `ConfirmAsync` with cancellation-safe stable outcomes and no raw provider exception text.
+- [x] Run chat, migration, and execution-focused tests.
+- [x] Commit: `Persist chat confirmation outcomes`.
 
 ### Task 2: Build safe SQL highlighting and reusable DataTable
 
@@ -70,12 +70,12 @@
 - `DataTable` accepts columns, rows, row count/truncated metadata, and export callbacks/filename context; it renders NULL distinctly, pages 25/50/100, expands long values, and uses `ResultExport` plus `sqlAgentDownload`.
 
 **Steps:**
-- [ ] Add failing tokenizer tests for escaping `<script>`, quotes/comments, SQL keywords, and plain identifiers.
-- [ ] Add failing bUnit tests for dialect label, warning copy, read-vs-write Run behavior, null cells, paging, long-value expansion, truncation, and CSV/JSON wiring.
-- [ ] Implement pure tokenization/highlighting and shared table behavior with tokenized CSS only.
-- [ ] Replace the interim result table in Chat and `/sql` through the compatibility seam without changing export contracts.
-- [ ] Run focused component/helper tests and existing ResultGrid/Workspace tests.
-- [ ] Commit: `Add SQL blocks and reusable data table`.
+- [x] Add failing tokenizer tests for escaping `<script>`, quotes/comments, SQL keywords, and plain identifiers.
+- [x] Add failing bUnit tests for dialect label, warning copy, read-vs-write Run behavior, null cells, paging, long-value expansion, truncation, and CSV/JSON wiring.
+- [x] Implement pure tokenization/highlighting and shared table behavior with tokenized CSS only.
+- [x] Replace the interim result table in Chat and `/sql` through the compatibility seam without changing export contracts.
+- [x] Run focused component/helper tests and existing ResultGrid/Workspace tests.
+- [x] Commit: `Add SQL blocks and reusable data table`.
 
 ### Task 3: Wire Chat rendering and confirmation dialog
 
@@ -98,12 +98,12 @@
 - `ChatPage` calls `ChatTurnService.ConfirmAsync`, replaces the matching message in `_messages`, and places the returned live result in `_live`; it must reject duplicate confirmations while busy and preserve the transcript on cancellation.
 
 **Steps:**
-- [ ] Add failing tests for restored pending confirmation, warning text, cancel-without-execution, confirm-through-service, success replacing the pending outcome, and safe failure rendering.
-- [ ] Run focused Chat tests and capture the red state.
-- [ ] Implement component mapping and page callback flow using `DialogService`/`Modal`.
-- [ ] Ensure confirmation updates the same message, refreshes sidebar state only when needed, and never appends a duplicate answer.
-- [ ] Run all Chat, dialog, and storage tests.
-- [ ] Commit: `Render and confirm pending chat SQL`.
+- [x] Add failing tests for restored pending confirmation, warning text, cancel-without-execution, confirm-through-service, success replacing the pending outcome, and safe failure rendering.
+- [x] Run focused Chat tests and capture the red state.
+- [x] Implement component mapping and page callback flow using `DialogService`/`Modal`.
+- [x] Ensure confirmation updates the same message, refreshes sidebar state only when needed, and never appends a duplicate answer.
+- [x] Run all Chat, dialog, and storage tests.
+- [x] Commit: `Render and confirm pending chat SQL`.
 
 ### Task 4: Add Chat scratchpad and composer actions
 
@@ -123,11 +123,11 @@
 - Read/DDL/write behavior remains consistent with `/sql`, including cancel, row caps, exports, and policy failures.
 
 **Steps:**
-- [ ] Add failing tests for opening from a block, round-tripping SQL, explicit confirmed execution, cancel, close/reopen state, and export.
-- [ ] Run Chat/Workspace focused tests and observe missing scratchpad behavior.
-- [ ] Implement the panel with the existing CodeMirror seam and shared DataTable.
-- [ ] Run Chat, Workspace, SqlEditor, and ResultGrid tests.
-- [ ] Commit: `Add chat scratchpad`.
+- [x] Add failing tests for opening from a block, round-tripping SQL, explicit confirmed execution, cancel, close/reopen state, and export.
+- [x] Run Chat/Workspace focused tests and observe missing scratchpad behavior.
+- [x] Implement the panel with the existing CodeMirror seam and shared DataTable.
+- [x] Run Chat, Workspace, SqlEditor, and ResultGrid tests.
+- [x] Commit: `Add chat scratchpad`.
 
 ### Task 5: Schema diagram source and lazy Mermaid rendering
 
@@ -150,12 +150,12 @@
 - `ErDiagram` dynamically imports Mermaid on first render, passes CSS token colors, and exposes zoom/reset/fullscreen/download controls.
 
 **Steps:**
-- [ ] Add failing pure tests for PK/FK output, deterministic names, view inclusion, and omission of hidden objects.
-- [ ] Add failing page/component tests for one-database requirement and Tools entry point.
-- [ ] Implement source generation, outcome persistence, lazy import, theme token handoff, and safe diagram download.
-- [ ] Add manual checklist items for Mermaid rendering, theme changes, fullscreen, and SVG download.
-- [ ] Run focused tests and the existing design-system suite.
-- [ ] Commit: `Add policy-filtered schema diagrams`.
+- [x] Add failing pure tests for PK/FK output, deterministic names, view inclusion, and omission of hidden objects.
+- [x] Add failing page/component tests for one-database requirement and Tools entry point.
+- [x] Implement source generation, outcome persistence, lazy import, theme token handoff, and safe diagram download.
+- [x] Add manual checklist items for Mermaid rendering, theme changes, fullscreen, and SVG download.
+- [x] Run focused tests and the existing design-system suite.
+- [x] Commit: `Add policy-filtered schema diagrams`.
 
 ### Task 6: Composer polish, regenerate, docs, and final verification
 
@@ -177,14 +177,14 @@
 - Model selector remains an explicit “No model configured” state until a provider exists.
 
 **Steps:**
-- [ ] Add failing tests for copy/edit, regenerate replacement, empty model state, keyboard behavior, and responsive action-row rendering.
-- [ ] Implement only the interactions supported by existing services; keep unsupported model selection visibly disabled.
-- [ ] Update manual checklist and documentation for SQL blocks, confirmation, scratchpad, DataTable, and diagrams.
-- [ ] Run `dotnet restore SqlAgent.slnx`.
-- [ ] Run `dotnet build SqlAgent.slnx --configuration Release --no-restore`.
-- [ ] Run `dotnet test SqlAgent.slnx --configuration Release --no-build --logger "console;verbosity=minimal"`.
-- [ ] Record warnings and known advisories accurately.
-- [ ] Commit: `Document Phase D chat components`.
+- [x] Add failing tests for copy/edit, regenerate replacement, empty model state, keyboard behavior, and responsive action-row rendering.
+- [x] Implement only the interactions supported by existing services; keep unsupported model selection visibly disabled.
+- [x] Update manual checklist and documentation for SQL blocks, confirmation, scratchpad, DataTable, and diagrams.
+- [x] Run `dotnet restore SqlAgent.slnx`.
+- [x] Run `dotnet build SqlAgent.slnx --configuration Release --no-restore`.
+- [x] Run `dotnet test SqlAgent.slnx --configuration Release --no-build --logger "console;verbosity=minimal"`.
+- [x] Record warnings and known advisories accurately.
+- [x] Commit: `Document Phase D chat components`.
 
 ## Definition of Done
 

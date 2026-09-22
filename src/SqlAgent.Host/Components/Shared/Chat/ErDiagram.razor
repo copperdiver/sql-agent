@@ -16,6 +16,7 @@
             <button type="button" class="ghost" data-testid="diagram-zoom-out" @onclick="ZoomOut">−</button>
             <button type="button" class="ghost" data-testid="diagram-zoom-in" @onclick="ZoomIn">+</button>
             <button type="button" class="ghost" data-testid="diagram-fit" @onclick="Fit">Fit</button>
+            <button type="button" class="ghost" data-testid="diagram-fullscreen" @onclick="Fullscreen">Fullscreen</button>
             <button type="button" class="ghost" data-testid="diagram-download" @onclick="Download">Download</button>
             @if (OnRefresh.HasDelegate)
             {
@@ -62,6 +63,7 @@
     private Task ZoomOut() => CallAsync("zoom", _canvas, 0.85);
     private Task ZoomIn() => CallAsync("zoom", _canvas, 1.15);
     private Task Fit() => CallAsync("fit", _canvas);
+    private Task Fullscreen() => CallAsync("fullscreen", _canvas);
     private Task Download() => CallAsync("download", _canvas, "schema-diagram.svg");
 
     public async ValueTask DisposeAsync()

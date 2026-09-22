@@ -26,6 +26,7 @@ public class ErDiagramTests
         Assert.Contains("customers", diagram.Markup);
         Assert.NotEmpty(diagram.FindAll("[data-testid=diagram-zoom-in]"));
         Assert.NotEmpty(diagram.FindAll("[data-testid=diagram-download]"));
+        Assert.NotEmpty(diagram.FindAll("[data-testid=diagram-fullscreen]"));
         Assert.Contains("erDiagram", diagram.Find("[data-testid=diagram-source]").TextContent);
     }
 }

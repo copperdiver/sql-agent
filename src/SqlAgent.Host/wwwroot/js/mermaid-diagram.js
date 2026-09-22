@@ -30,6 +30,13 @@ export function fit(host) {
     svg.style.transform = "scale(1)";
 }
 
+export function fullscreen(host) {
+    const panel = host?.closest(".er-diagram");
+    if (!panel) return;
+    if (document.fullscreenElement) document.exitFullscreen();
+    else panel.requestFullscreen?.();
+}
+
 export function download(host, filename) {
     const svg = host?.querySelector("svg");
     if (!svg) return;
