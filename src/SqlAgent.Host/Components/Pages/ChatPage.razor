@@ -4,6 +4,7 @@
 @inject ScopedRunner Runner
 @inject AppState State
 @inject NavigationManager Nav
+@inject DialogService Dialogs
 
 <div class="chat">
     @if (_messages.Count == 0)
@@ -15,7 +16,8 @@
     }
     else
     {
-        <MessageList Messages="_messages" Live="_live" OnOpenInEditor="OpenInEditor" />
+        <MessageList Messages="_messages" Live="_live" Providers="_providers"
+                     OnOpenInEditor="OpenInEditor" OnConfirm="RequestConfirmation" />
     }
 
     <div class="chat-composer">
@@ -57,6 +59,7 @@
 
     private readonly List<ChatMessageView> _messages = [];
     private readonly Dictionary<Guid, NlQueryResult> _live = [];
+    private readonly Dictionary<Guid, DatabaseProviderType> _providers = [];
     private readonly List<ChatDatabaseRef> _attached = [];
     private IReadOnlyList<DatabaseConnectionInfo> _connections = [];
     private Composer? _composer;
@@ -89,6 +92,7 @@
         _loadedChatId = Id;
         _messages.Clear();
         _live.Clear();
+        _providers.Clear();
         // Attachments are per-conversation, not per-circuit: carrying prod's chips into a brand-new chat
         // (or someone else's, reached via history) would send them somewhere the user never attached them.
         _attached.Clear();
@@ -113,6 +117,7 @@
                 return;
             }
             _messages.AddRange(detail.Messages);
+            IndexProviders(detail.Messages);
         }
         State.SetActiveChat(Id);
     }
@@ -198,6 +203,7 @@
 
             _messages.Add(turn.UserMessage);
             _messages.Add(turn.AssistantMessage);
+            IndexProvider(turn.UserMessage, turn.AssistantMessage);
             if (turn.Live is { } live) _live[turn.AssistantMessage.Id] = live;
 
             // The chips deliberately stay: attachments are per message, but re-attaching every turn
@@ -240,6 +246,54 @@
         // The editor is a separate route now, so the SQL travels through AppState rather than a tab flip.
         State.HandOffSql(sql);
         Nav.NavigateTo("/sql");
+    }
+
+    private void IndexProviders(IEnumerable<ChatMessageView> messages)
+    {
+        ChatMessageView? user = null;
+        foreach (var message in messages.OrderBy(m => m.Sequence))
+        {
+            if (message.Role == ChatRole.User) user = message;
+            else if (user is not null) IndexProvider(user, message);
+        }
+    }
+
+    private void IndexProvider(ChatMessageView user, ChatMessageView assistant)
+    {
+        var id = user.Databases.Select(d => d.ConnectionId).FirstOrDefault(id => id is not null);
+        if (id is { } connection)
+        {
+            var info = _connections.FirstOrDefault(c => c.Id == connection);
+            if (info is not null) _providers[assistant.Id] = info.ProviderType;
+        }
+    }
+
+    private void RequestConfirmation(ChatMessageView message)
+    {
+        if (string.IsNullOrWhiteSpace(message.GeneratedSql)) return;
+        Dialogs.Show(@<ConfirmDialog Sql="@message.GeneratedSql"
+                                  Operation="@(message.ConfirmationOperation ?? "write")"
+                                  OnCancel="Dialogs.Close"
+                                  OnConfirm="() => ConfirmAsync(message.Id)" />);
+    }
+
+    private async Task ConfirmAsync(Guid messageId)
+    {
+        Dialogs.Close();
+        try
+        {
+            var confirmed = await Runner.RunAsync<ChatTurnService, ChatConfirmationResult>(
+                s => s.ConfirmAsync(messageId));
+            var index = _messages.FindIndex(m => m.Id == messageId);
+            if (index >= 0) _messages[index] = confirmed.Message;
+            _live[messageId] = confirmed.Live;
+            State.NotifyChatsChanged();
+        }
+        catch (Exception)
+        {
+            // The pending row remains visible and confirmable. The service already converts provider
+            // failures into stable outcomes; this catch only covers a stale/deleted message target.
+        }
     }
 
     public void Dispose()

@@ -237,6 +237,32 @@ public class ChatPageTests : IDisposable
     }
 
     [Fact]
+    public async Task A_pending_model_write_shows_a_confirmation_action_and_confirming_replaces_it_in_place()
+    {
+        await AddConnectionAsync("prod", readOnly: false);
+        _gateway.NextResponse = LlmSqlResponse.Generated("UPDATE orders SET total = 0");
+
+        var page = _ctx.RenderComponent<ChatPage>();
+        await AttachAsync(page, "prod");
+        Type(page, "zero out the orders");
+        await ClickAsync(page.Find("[data-testid=send]"));
+
+        Assert.Contains("Confirmation required", page.Markup);
+        Assert.False(_provider.Executed);
+        await ClickAsync(page.Find("[data-testid=sql-block-run]"));
+        var dialog = _ctx.Render(_ctx.Services.GetRequiredService<DialogService>().Current!);
+        await ClickAsync(dialog.Find("[data-testid=chat-confirm]"));
+
+        Assert.True(_provider.Executed);
+        Assert.DoesNotContain("[data-testid=chat-confirm]", page.Markup);
+        Assert.Contains("UPDATE orders SET total = 0", page.Markup);
+        var chat = (await ListChatsAsync()).Single();
+        var detail = await LoadAsync(chat.Id);
+        Assert.Equal(2, detail!.Messages.Count);
+        Assert.Equal(ChatOutcomeKind.QueryResult, detail.Messages[1].OutcomeKind);
+    }
+
+    [Fact]
     public async Task The_page_tells_the_sidebar_that_history_changed()
     {
         // The history section is a sibling under MainLayout, so nothing else would ever tell it a chat
@@ -275,12 +301,14 @@ public class ChatPageTests : IDisposable
 
         var tables = page.FindAll(".grid-scroll table");
         Assert.Equal(2, tables.Count);
-        Assert.Contains("1", tables[0].TextContent);
-        Assert.DoesNotContain("2", tables[0].TextContent);
-        Assert.DoesNotContain("3", tables[0].TextContent);
-        Assert.Contains("2", tables[1].TextContent);
-        Assert.Contains("3", tables[1].TextContent);
-        Assert.DoesNotContain("1", tables[1].TextContent);
+        var firstValues = string.Join(" ", tables[0].QuerySelectorAll("td:not(.row-number)").Select(c => c.TextContent));
+        var secondValues = string.Join(" ", tables[1].QuerySelectorAll("td:not(.row-number)").Select(c => c.TextContent));
+        Assert.Contains("1", firstValues);
+        Assert.DoesNotContain("2", firstValues);
+        Assert.DoesNotContain("3", firstValues);
+        Assert.Contains("2", secondValues);
+        Assert.Contains("3", secondValues);
+        Assert.DoesNotContain("1", secondValues);
     }
 
     [Fact]
@@ -420,12 +448,12 @@ public class ChatPageTests : IDisposable
         return id;
     }
 
-    private async Task<Guid> AddConnectionAsync(string name)
+    private async Task<Guid> AddConnectionAsync(string name, bool readOnly = true)
     {
         using var scope = _ctx.Services.CreateScope();
         var connections = scope.ServiceProvider.GetRequiredService<DatabaseConnectionService>();
         var created = await connections.CreateAsync(
-            new DatabaseConnectionInput(name, DatabaseProviderType.Postgres, IsReadOnly: true), "cs");
+            new DatabaseConnectionInput(name, DatabaseProviderType.Postgres, IsReadOnly: readOnly), "cs");
         return created.Id;
     }
 

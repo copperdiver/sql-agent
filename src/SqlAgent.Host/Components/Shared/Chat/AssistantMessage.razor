@@ -1,5 +1,16 @@
 <div class="message assistant-message">
-    <ChatOutcome Result="Outcome" Restored="Live is null" OnOpenInEditor="OnOpenInEditor" />
+    @if (Outcome is { GeneratedSql: not null } result)
+    {
+        <SqlBlock Result="result" ProviderType="ProviderType" Restored="Live is null"
+                  OnEdit="OnOpenInEditor"
+                  OnRun="(result.Kind == NlResponseKind.ConfirmationRequired
+                      ? EventCallback.Factory.Create(this, () => OnConfirm.InvokeAsync(Message))
+                      : EventCallback.Factory.Create(this, () => Task.CompletedTask))" />
+    }
+    else
+    {
+        <ChatOutcome Result="Outcome" Restored="Live is null" OnOpenInEditor="OnOpenInEditor" />
+    }
 </div>
 
 @code {
@@ -11,6 +22,8 @@
     [Parameter] public NlQueryResult? Live { get; set; }
 
     [Parameter] public EventCallback<string> OnOpenInEditor { get; set; }
+    [Parameter] public EventCallback<ChatMessageView> OnConfirm { get; set; }
+    [Parameter] public DatabaseProviderType ProviderType { get; set; }
 
     private NlQueryResult? Outcome => Live ?? Restore(Message);
 

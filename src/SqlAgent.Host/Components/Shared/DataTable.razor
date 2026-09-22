@@ -8,17 +8,17 @@
         {
             <p class="data-table-truncated">Results are truncated at the row cap.</p>
         }
-        <div class="data-table-scroll">
+        <div class="grid-scroll data-table-scroll">
             <table>
                 <thead>
-                    <tr><th class="row-number" aria-label="Row"></th>@foreach (var column in Columns) { <th>@column</th> }</tr>
+                    <tr>@if (ShowRowNumbers) { <th class="row-number" aria-label="Row"></th> } @foreach (var column in Columns) { <th>@column</th> }</tr>
                 </thead>
                 <tbody>
                     @foreach (var (row, index) in VisibleRows.Select((row, index) => (row, index)))
                     {
                         var absoluteRow = _page * _pageSize + index;
                         <tr>
-                            <td class="row-number">@(absoluteRow + 1)</td>
+                            @if (ShowRowNumbers) { <td class="row-number">@(absoluteRow + 1)</td> }
                             @for (var column = 0; column < Columns.Count; column++)
                             {
                                 var cellColumn = column;
@@ -75,6 +75,7 @@
     [Parameter] public IReadOnlyList<IReadOnlyList<object?>> Rows { get; set; } = [];
     [Parameter] public int TotalRowCount { get; set; }
     [Parameter] public bool Truncated { get; set; }
+    [Parameter] public bool ShowRowNumbers { get; set; } = true;
     [Parameter] public string ExportName { get; set; } = "result";
 
     private int TotalRows => TotalRowCount > 0 ? TotalRowCount : Rows.Count;
