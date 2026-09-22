@@ -263,6 +263,28 @@ public class NlQueryServiceTests
     }
 
     [Fact]
+    public async Task Message_file_refs_are_forwarded_as_metadata_only()
+    {
+        var (db, conn) = NewStore();
+        var gateway = new FakeGateway(LlmSqlResponse.Clarify("Which report?"));
+        var (svc, connections) = Build(db, new NlFakeProvider(Schema), gateway);
+        var id = await AddConnectionAsync(connections);
+        var fileId = Guid.NewGuid();
+        var files = new[]
+        {
+            new ChatFileRef(fileId, "report.pdf", "application/pdf", 42, $"/files/{fileId}"),
+        };
+
+        await svc.AskAsync(id, "anything", CancellationToken.None, files);
+
+        var attachment = Assert.Single(gateway.LastRequest!.Attachments);
+        Assert.Equal("report.pdf", attachment.FileName);
+        Assert.Equal("application/pdf", attachment.ContentType);
+        Assert.Equal($"/files/{fileId}", attachment.Url);
+        conn.Dispose();
+    }
+
+    [Fact]
     public async Task Prompt_context_includes_dialect_hints()
     {
         var (db, conn) = NewStore();

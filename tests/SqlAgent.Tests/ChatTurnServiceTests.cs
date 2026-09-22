@@ -99,6 +99,31 @@ public class ChatTurnServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Pending_files_are_persisted_with_their_storage_identity()
+    {
+        var id = await NewConnectionAsync("prod");
+        _gateway.NextResponse = LlmSqlResponse.Clarify("Which report?");
+        var pending = new PendingFileAttachment(
+            "report.pdf", "application/pdf", 42, "local-disk", "storage/report.pdf", "/stored/report.pdf");
+
+        var turn = await _turns.SendAsync(null, "orders", [id], [pending]);
+
+        var user = (await _chats.GetChatAsync(turn.ChatId))!.Messages.Single(m => m.Role == ChatRole.User);
+        var file = Assert.Single(user.Files!);
+        Assert.Equal("report.pdf", file.FileName);
+        Assert.Equal("application/pdf", file.ContentType);
+        Assert.Equal(42, file.SizeBytes);
+        Assert.Equal($"/files/{file.Id}", file.Url);
+        var llmFile = Assert.Single(_gateway.LastRequest!.Attachments);
+        Assert.Equal(file.FileName, llmFile.FileName);
+        Assert.Equal(file.ContentType, llmFile.ContentType);
+        Assert.Equal(file.Url, llmFile.Url);
+        var stored = Assert.Single(_db.MessageAttachments);
+        Assert.Equal("local-disk", stored.ProviderKey);
+        Assert.Equal("storage/report.pdf", stored.StorageKey);
+    }
+
+    [Fact]
     public async Task A_gateway_that_is_not_configured_still_leaves_a_question_and_an_answer_on_disk()
     {
         // Until the model service exists this is the ONLY path a real user takes, so it is the path that
@@ -378,10 +403,12 @@ sealed class TurnGatewayStub : ILlmSqlGateway
     public Exception? Throw { get; set; }
     public bool Block { get; set; }
     public int CallCount { get; private set; }
+    public LlmSqlRequest? LastRequest { get; private set; }
 
     public async Task<LlmSqlResponse> GenerateSqlAsync(LlmSqlRequest request, CancellationToken ct = default)
     {
         CallCount++;
+        LastRequest = request;
         if (Block) await Task.Delay(Timeout.Infinite, ct);
         if (Throw is { } ex) throw ex;
         return NextResponse ?? LlmSqlResponse.Generated("SELECT 1");

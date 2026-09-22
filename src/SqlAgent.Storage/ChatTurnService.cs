@@ -37,11 +37,24 @@ public class ChatTurnService(
     /// inventing one would be worse than admitting the gap.</summary>
     private const string DeletedDatabaseName = "(deleted database)";
 
+    // Kept as a source-compatible bridge for callers that supplied the cancellation token as the
+    // fourth positional argument before file attachments were added.
+    public Task<ChatTurnResult> SendAsync(
+        Guid? chatId, string question, IReadOnlyList<Guid> databaseIds, CancellationToken ct) =>
+        SendAsync(chatId, question, databaseIds, files: null, ct);
+
     public async Task<ChatTurnResult> SendAsync(
-        Guid? chatId, string question, IReadOnlyList<Guid> databaseIds, CancellationToken ct = default)
+        Guid? chatId, string question, IReadOnlyList<Guid> databaseIds,
+        IReadOnlyList<PendingFileAttachment>? files = null, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(question))
             throw new ArgumentException("A question is required.", nameof(question));
+
+        // Pending records cross the storage boundary here. The public message ref keeps only display
+        // metadata and the authenticated URL, while the binding seam retains provider/storage identity
+        // for later lifecycle and download work. No file bytes or streams enter the turn or NL layers.
+        var fileRefs = files?.Select(MessageAttachmentService.CreateReference).ToList()
+            ?? (IReadOnlyList<ChatFileRef>)[];
 
         // Names are resolved now, not at render time: this is the moment the snapshot is true.
         var attachments = new List<ChatDatabaseRef>(databaseIds.Count);
@@ -59,14 +72,15 @@ public class ChatTurnService(
         // it too, independently, for the same reason.
         var chat = chatId ?? await chats.CreateChatAsync(question, ct);
         var userMessage = await chats.AppendMessageAsync(
-            new ChatMessageInput(chat, ChatRole.User, question.Trim(), attachments), ct);
+            new ChatMessageInput(chat, ChatRole.User, question.Trim(), attachments, Files: fileRefs), ct);
 
-        var (live, answer) = await AnswerAsync(chat, question, databaseIds, ct);
+        var (live, answer) = await AnswerAsync(chat, question, databaseIds, fileRefs, ct);
         return new ChatTurnResult(chat, userMessage, answer, live);
     }
 
     private async Task<(NlQueryResult? Live, ChatMessageView Answer)> AnswerAsync(
-        Guid chat, string question, IReadOnlyList<Guid> databaseIds, CancellationToken ct)
+        Guid chat, string question, IReadOnlyList<Guid> databaseIds,
+        IReadOnlyList<ChatFileRef> files, CancellationToken ct)
     {
         switch (databaseIds.Count)
         {
@@ -86,7 +100,7 @@ public class ChatTurnService(
                 NlQueryResult result;
                 try
                 {
-                    result = await nlQueries.AskAsync(databaseIds[0], question, ct);
+                    result = await nlQueries.AskAsync(databaseIds[0], question, ct, files);
                 }
                 catch (OperationCanceledException)
                 {

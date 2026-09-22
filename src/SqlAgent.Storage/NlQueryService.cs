@@ -61,7 +61,11 @@ public class NlQueryService(
     QueryExecutionService executor,
     ILlmSqlGateway gateway)
 {
-    public async Task<NlQueryResult> AskAsync(Guid connectionId, string question, CancellationToken ct = default)
+    // The attachment list trails the existing cancellation token so old positional calls keep their
+    // source-compatible meaning.
+    public async Task<NlQueryResult> AskAsync(
+        Guid connectionId, string question, CancellationToken ct = default,
+        IReadOnlyList<ChatFileRef>? files = null)
     {
         if (string.IsNullOrWhiteSpace(question))
             return NlQueryResult.Error("question_empty", "No question was provided.");
@@ -87,7 +91,10 @@ public class NlQueryService(
         // Dialect hints first so the model targets the right syntax (TOP vs LIMIT, GETDATE vs NOW, etc.),
         // then the policy-filtered schema. Both are plain prompt text — nothing here is executed.
         var schemaContext = $"{DialectHints.For(info.ProviderType)}\n\n{FormatSchema(schema)}";
-        var request = new LlmSqlRequest(question, info.ProviderType, schemaContext);
+        var attachments = files?.Select(file =>
+            new LlmFileAttachment(file.FileName, file.ContentType, file.Url)).ToList()
+            ?? (IReadOnlyList<LlmFileAttachment>)[];
+        var request = new LlmSqlRequest(question, info.ProviderType, schemaContext, attachments);
 
         LlmSqlResponse llm;
         try
