@@ -36,7 +36,7 @@ public class ChatTurnServiceTests : IDisposable
         var executor = new QueryExecutionService(
             _connections, registry, _db, schemas, NullLogger<QueryExecutionService>.Instance);
         _turns = new ChatTurnService(
-            _chats, new NlQueryService(_connections, schemas, executor, _gateway), _connections, executor);
+            _chats, new NlQueryService(_connections, schemas, executor, _gateway), _connections, executor, schemas);
     }
 
     [Fact]
@@ -150,6 +150,38 @@ public class ChatTurnServiceTests : IDisposable
         var reloaded = await _chats.GetChatAsync(turn.ChatId);
         Assert.Equal(2, reloaded!.Messages.Count);
         Assert.Equal(ChatOutcomeKind.QueryResult, reloaded.Messages[1].OutcomeKind);
+    }
+
+    [Fact]
+    public async Task A_schema_diagram_persists_only_the_connection_and_uses_visible_schema()
+    {
+        var id = await NewConnectionAsync("prod");
+        _provider.Schema = new DatabaseSchema(
+        [
+            new SchemaTable("public", "orders", [new SchemaColumn("id", "integer", false)], ["id"],
+                [new ForeignKey("customer_id", "public", "customers", "id")], []),
+            new SchemaTable("public", "customers", [new SchemaColumn("id", "integer", false)], ["id"], [], []),
+        ]);
+        await _db.TablePolicies.AddAsync(new TablePolicy
+        {
+            Id = Guid.NewGuid(), DatabaseConnectionId = id, SchemaName = "public", TableName = "customers",
+            IsVisible = false,
+        });
+        await _db.SaveChangesAsync();
+
+        var diagram = await _turns.CreateSchemaDiagramAsync(null, id);
+
+        Assert.Equal(ChatOutcomeKind.SchemaDiagram, diagram.Message.OutcomeKind);
+        Assert.Equal(id, diagram.Message.SchemaDiagramConnectionId);
+        Assert.Single(diagram.Schema.Tables);
+        Assert.Equal("orders", diagram.Schema.Tables[0].Name);
+        Assert.Empty(diagram.Schema.Tables[0].ForeignKeys);
+
+        var reloaded = (await _chats.GetChatAsync(diagram.Message is { } m
+            ? (await _db.ChatMessages.FindAsync(m.Id))!.ChatId
+            : Guid.Empty))!;
+        Assert.Equal(ChatOutcomeKind.SchemaDiagram, reloaded.Messages.Single().OutcomeKind);
+        Assert.Equal(id, reloaded.Messages.Single().SchemaDiagramConnectionId);
     }
 
     [Fact]
@@ -304,7 +336,7 @@ public class ChatTurnServiceTests : IDisposable
         var schemas = new SchemaService(_connections, registry, _db);
         var executor = new QueryExecutionService(
             _connections, registry, _db, schemas, NullLogger<QueryExecutionService>.Instance);
-        return new ChatTurnService(chats, new NlQueryService(_connections, schemas, executor, _gateway), _connections, executor);
+        return new ChatTurnService(chats, new NlQueryService(_connections, schemas, executor, _gateway), _connections, executor, schemas);
     }
 
     private async Task<Guid> NewConnectionAsync(string name, bool readOnly = true) =>
@@ -359,6 +391,7 @@ sealed class CancelOnNthSaveInterceptor(int n, CancellationTokenSource cts) : Sa
 sealed class TurnProviderStub : IDatabaseProvider
 {
     public QueryResultSet NextResult { get; set; } = new([], [], false);
+    public DatabaseSchema Schema { get; set; } = new([]);
     public bool Block { get; set; }
     public bool Executed { get; private set; }
     public DatabaseProviderType ProviderType => DatabaseProviderType.Postgres;
@@ -367,7 +400,7 @@ sealed class TurnProviderStub : IDatabaseProvider
         => Task.FromResult(ConnectionTestResult.Ok(null, 0));
 
     public Task<DatabaseSchema> GetSchemaAsync(string cs, CancellationToken ct = default)
-        => Task.FromResult(new DatabaseSchema([]));
+        => Task.FromResult(Schema);
 
     public async Task<QueryResultSet> ExecuteQueryAsync(
         string cs, string sql, QueryExecutionOptions o, CancellationToken ct = default)

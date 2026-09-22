@@ -627,6 +627,7 @@ public sealed class ChatOnlyDbContext(DbContextOptions<ChatOnlyDbContext> option
             e.Property(x => x.Role).HasConversion<string>().HasMaxLength(16);
             e.Property(x => x.OutcomeKind).HasConversion<string>().HasMaxLength(32);
             e.Ignore(x => x.ConfirmationOperation);
+            e.Ignore(x => x.SchemaDiagramConnectionId);
         });
     }
 }

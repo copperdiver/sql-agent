@@ -17,8 +17,9 @@
     else
     {
         <MessageList Messages="_messages" Live="_live" Providers="_providers"
+                     Diagrams="_diagrams" DiagramConnectionNames="_diagramConnectionNames"
                      OnOpenInEditor="OpenInEditor" OnEdit="OpenScratchpad"
-                     OnConfirm="RequestConfirmation" />
+                     OnConfirm="RequestConfirmation" OnRefreshDiagram="RefreshDiagramAsync" />
     }
 
     <div class="chat-composer">
@@ -32,6 +33,9 @@
                                 OnAttach="Attach" />
                 <button type="button" class="ghost" data-testid="chat-open-scratchpad"
                         @onclick="OpenEmptyScratchpad">Scratchpad</button>
+                <button type="button" class="ghost" data-testid="chat-open-diagram"
+                        @onclick="OpenSchemaDiagramAsync"
+                        disabled="@(_attached.All(a => a.ConnectionId is null))">Schema diagram</button>
             </Tools>
         </Composer>
 
@@ -69,6 +73,8 @@
     private readonly List<ChatMessageView> _messages = [];
     private readonly Dictionary<Guid, NlQueryResult> _live = [];
     private readonly Dictionary<Guid, DatabaseProviderType> _providers = [];
+    private readonly Dictionary<Guid, DatabaseSchema> _diagrams = [];
+    private readonly Dictionary<Guid, string> _diagramConnectionNames = [];
     private readonly List<ChatDatabaseRef> _attached = [];
     private IReadOnlyList<DatabaseConnectionInfo> _connections = [];
     private Composer? _composer;
@@ -105,6 +111,8 @@
         _messages.Clear();
         _live.Clear();
         _providers.Clear();
+        _diagrams.Clear();
+        _diagramConnectionNames.Clear();
         // Attachments are per-conversation, not per-circuit: carrying prod's chips into a brand-new chat
         // (or someone else's, reached via history) would send them somewhere the user never attached them.
         _attached.Clear();
@@ -130,6 +138,7 @@
             }
             _messages.AddRange(detail.Messages);
             IndexProviders(detail.Messages);
+            await LoadDiagramsAsync(detail.Messages);
         }
         State.SetActiveChat(Id);
     }
@@ -289,6 +298,52 @@
             var info = _connections.FirstOrDefault(c => c.Id == connection);
             if (info is not null) _providers[assistant.Id] = info.ProviderType;
         }
+    }
+
+    private async Task OpenSchemaDiagramAsync()
+    {
+        var connectionId = _attached.Select(a => a.ConnectionId).FirstOrDefault(id => id is not null);
+        if (connectionId is not { } id) return;
+
+        var startedIn = _loadedChatId;
+        var result = await Runner.RunAsync<ChatTurnService, ChatDiagramResult>(
+            s => s.CreateSchemaDiagramAsync(startedIn, id));
+        if (_disposed || _loadedChatId != startedIn) return;
+
+        _messages.Add(result.Message);
+        _diagrams[result.Message.Id] = result.Schema;
+        var info = _connections.FirstOrDefault(c => c.Id == id);
+        if (info is not null) _diagramConnectionNames[result.Message.Id] = info.Name;
+        State.NotifyChatsChanged();
+        if (_loadedChatId != result.ChatId)
+        {
+            _loadedChatId = result.ChatId;
+            Nav.NavigateTo($"/chat/{result.ChatId}", replace: true);
+            State.SetActiveChat(result.ChatId);
+        }
+    }
+
+    private async Task LoadDiagramsAsync(IEnumerable<ChatMessageView> messages)
+    {
+        foreach (var message in messages.Where(m => m.OutcomeKind == ChatOutcomeKind.SchemaDiagram
+                                                   && m.SchemaDiagramConnectionId is not null))
+        {
+            var id = message.SchemaDiagramConnectionId!.Value;
+            var schema = await Runner.RunAsync<SchemaService, DatabaseSchema?>(
+                s => s.GetVisibleSchemaAsync(id));
+            if (schema is not null) _diagrams[message.Id] = schema;
+            var info = _connections.FirstOrDefault(c => c.Id == id);
+            if (info is not null) _diagramConnectionNames[message.Id] = info.Name;
+        }
+    }
+
+    private async Task RefreshDiagramAsync(ChatMessageView message)
+    {
+        if (message.SchemaDiagramConnectionId is not { } id) return;
+        var schema = await Runner.RunAsync<SchemaService, DatabaseSchema?>(
+            s => s.GetVisibleSchemaAsync(id));
+        if (schema is null) return;
+        _diagrams[message.Id] = schema;
     }
 
     private void RequestConfirmation(ChatMessageView message)

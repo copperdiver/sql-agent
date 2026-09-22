@@ -53,6 +53,10 @@ public class ChatMessage
     /// <summary>Operation label shown by the confirmation UI for a pending model write/DDL.</summary>
     public string? ConfirmationOperation { get; set; }
 
+    /// <summary>Connection used to build a persisted schema diagram. The schema itself is never stored;
+    /// reopening the transcript re-reads it through the visibility policy.</summary>
+    public Guid? SchemaDiagramConnectionId { get; set; }
+
     public int? RowCount { get; set; }
     public long? ElapsedMs { get; set; }
     public bool Truncated { get; set; }

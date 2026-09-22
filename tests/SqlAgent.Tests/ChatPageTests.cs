@@ -282,6 +282,32 @@ public class ChatPageTests : IDisposable
     }
 
     [Fact]
+    public async Task Schema_diagram_is_added_to_the_chat_and_restored_from_its_connection()
+    {
+        await AddConnectionAsync("prod");
+        _provider.Schema = new DatabaseSchema(
+        [
+            new SchemaTable("public", "orders", [new SchemaColumn("id", "integer", false)], ["id"], [], []),
+        ]);
+
+        var page = _ctx.RenderComponent<ChatPage>();
+        await AttachAsync(page, "prod");
+        await ClickAsync(page.Find("[data-testid=chat-open-diagram]"));
+
+        Assert.Contains("Entity relationship diagram", page.Markup);
+        Assert.Contains("orders", page.Markup);
+        var chat = Assert.Single(await ListChatsAsync());
+        var detail = await LoadAsync(chat.Id);
+        var message = Assert.Single(detail!.Messages);
+        Assert.Equal(ChatOutcomeKind.SchemaDiagram, message.OutcomeKind);
+        Assert.NotNull(message.SchemaDiagramConnectionId);
+
+        var reloaded = _ctx.RenderComponent<ChatPage>(p => p.Add(c => c.Id, chat.Id));
+        Assert.Contains("Entity relationship diagram", reloaded.Markup);
+        Assert.Contains("orders", reloaded.Markup);
+    }
+
+    [Fact]
     public async Task The_page_tells_the_sidebar_that_history_changed()
     {
         // The history section is a sibling under MainLayout, so nothing else would ever tell it a chat

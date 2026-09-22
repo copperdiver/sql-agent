@@ -1,3 +1,5 @@
+using SqlAgent.Core;
+
 namespace SqlAgent.Storage;
 
 /// <summary>
@@ -11,6 +13,8 @@ public record ChatTurnResult(
 
 public record ChatConfirmationResult(ChatMessageView Message, NlQueryResult Live);
 
+public record ChatDiagramResult(Guid ChatId, ChatMessageView Message, DatabaseSchema Schema, Guid ConnectionId);
+
 /// <summary>
 /// Runs one chat turn: persist the question, decide what the attached databases allow, ask, persist the
 /// answer. Split out of <see cref="ChatService"/> so a whole turn is unit-testable without bUnit and the
@@ -22,7 +26,7 @@ public record ChatConfirmationResult(ChatMessageView Message, NlQueryResult Live
 /// </summary>
 public class ChatTurnService(
     ChatService chats, NlQueryService nlQueries, DatabaseConnectionService connections,
-    QueryExecutionService executor)
+    QueryExecutionService executor, SchemaService schemas)
 {
     public const string NoDatabaseAttached = "no_database_attached";
     public const string MultipleDatabasesUnsupported = "multiple_databases_unsupported";
@@ -171,5 +175,20 @@ public class ChatTurnService(
             : NlQueryResult.Error(result.ErrorCode ?? "execution_error",
                 result.ErrorMessage ?? "The statement could not be executed.", result.Sql, result.ElapsedMs);
         return new ChatConfirmationResult(message, live);
+    }
+
+    /// <summary>Creates a transcript outcome whose schema is intentionally live data. Only the
+    /// connection id is persisted; both this path and reload go through SchemaService so hidden objects
+    /// cannot leak into the diagram.</summary>
+    public async Task<ChatDiagramResult> CreateSchemaDiagramAsync(
+        Guid? chatId, Guid connectionId, CancellationToken ct = default)
+    {
+        var schema = await schemas.GetVisibleSchemaAsync(connectionId, ct)
+            ?? throw new InvalidOperationException("The selected database is no longer available.");
+        var chat = chatId ?? await chats.CreateChatAsync("Schema diagram", ct);
+        var message = await chats.AppendMessageAsync(new ChatMessageInput(
+            chat, ChatRole.Assistant, "", [], OutcomeKind: ChatOutcomeKind.SchemaDiagram,
+            SchemaDiagramConnectionId: connectionId), ct);
+        return new ChatDiagramResult(chat, message, schema, connectionId);
     }
 }

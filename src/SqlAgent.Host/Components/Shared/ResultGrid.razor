@@ -4,7 +4,7 @@
 @if (Result is { Success: true } r)
 {
     <p class="meta">@r.RowCount rows · @r.ElapsedMs ms</p>
-    <DataTable Columns="r.Columns" Rows="r.Rows" TotalRowCount="r.RowCount" Truncated="r.Truncated" />
+    <DataTable Columns="r.Columns" Rows="r.Rows" TotalRowCount="r.RowCount" Truncated="r.Truncated" ShowRowNumbers="false" />
 }
 else if (Result is { } failed)
 {

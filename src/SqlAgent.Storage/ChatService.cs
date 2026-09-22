@@ -25,7 +25,8 @@ public record ChatMessageView(
     long? ElapsedMs,
     bool Truncated,
     IReadOnlyList<ChatDatabaseRef> Databases,
-    string? ConfirmationOperation = null);
+    string? ConfirmationOperation = null,
+    Guid? SchemaDiagramConnectionId = null);
 
 /// <summary>A whole conversation, messages in order.</summary>
 public record ChatDetail(Guid Id, string Title, IReadOnlyList<ChatMessageView> Messages);
@@ -42,7 +43,8 @@ public record ChatMessageInput(
     int? RowCount = null,
     long? ElapsedMs = null,
     bool Truncated = false,
-    string? ConfirmationOperation = null);
+    string? ConfirmationOperation = null,
+    Guid? SchemaDiagramConnectionId = null);
 
 /// <summary>All information needed to confirm one pending assistant message.</summary>
 public record ChatConfirmationTarget(Guid MessageId, Guid ChatId, string Sql, Guid ConnectionId);
@@ -203,6 +205,7 @@ public class ChatService(SqlAgentDbContext db)
             OutcomeKind = input.OutcomeKind,
             ErrorCode = input.ErrorCode,
             ConfirmationOperation = input.ConfirmationOperation,
+            SchemaDiagramConnectionId = input.SchemaDiagramConnectionId,
             RowCount = input.RowCount,
             ElapsedMs = input.ElapsedMs,
             Truncated = input.Truncated,
@@ -276,5 +279,5 @@ public class ChatService(SqlAgentDbContext db)
         m.Id, m.Sequence, m.Role, m.Text, m.CreatedAt, m.GeneratedSql, m.OutcomeKind,
         m.ErrorCode, m.RowCount, m.ElapsedMs, m.Truncated,
         m.Databases.Select(d => new ChatDatabaseRef(d.DatabaseConnectionId, d.DatabaseName)).ToList(),
-        m.ConfirmationOperation);
+        m.ConfirmationOperation, m.SchemaDiagramConnectionId);
 }

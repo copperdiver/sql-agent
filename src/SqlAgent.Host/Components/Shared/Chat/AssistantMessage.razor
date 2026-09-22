@@ -1,5 +1,16 @@
 <div class="message assistant-message">
-    @if (Outcome is { GeneratedSql: not null } result)
+    @if (Message.OutcomeKind == ChatOutcomeKind.SchemaDiagram)
+    {
+        @if (Diagram is { } schema)
+        {
+            <ErDiagram Schema="schema" ConnectionName="DiagramConnectionName" OnRefresh="OnRefreshDiagram" />
+        }
+        else
+        {
+            <OutcomeMessage Code="schema_unavailable" Message="The schema is no longer available for this diagram." />
+        }
+    }
+    else if (Outcome is { GeneratedSql: not null } result)
     {
         <SqlBlock Result="result" ProviderType="ProviderType" Restored="Live is null"
                   OnEdit="OnEdit"
@@ -25,6 +36,9 @@
     [Parameter] public EventCallback<string> OnOpenInEditor { get; set; }
     [Parameter] public EventCallback<string> OnEdit { get; set; }
     [Parameter] public EventCallback<ChatMessageView> OnConfirm { get; set; }
+    [Parameter] public DatabaseSchema? Diagram { get; set; }
+    [Parameter] public string? DiagramConnectionName { get; set; }
+    [Parameter] public EventCallback OnRefreshDiagram { get; set; }
     [Parameter] public DatabaseProviderType ProviderType { get; set; }
 
     private NlQueryResult? Outcome => Live ?? Restore(Message);
