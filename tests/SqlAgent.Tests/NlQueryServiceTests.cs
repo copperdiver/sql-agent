@@ -249,6 +249,20 @@ public class NlQueryServiceTests
     }
 
     [Fact]
+    public async Task Existing_nl_requests_have_no_file_attachments()
+    {
+        var (db, conn) = NewStore();
+        var gateway = new FakeGateway(LlmSqlResponse.Clarify("?"));
+        var (svc, connections) = Build(db, new NlFakeProvider(Schema), gateway);
+        var id = await AddConnectionAsync(connections);
+
+        await svc.AskAsync(id, "anything");
+
+        Assert.Empty(gateway.LastRequest!.Attachments);
+        conn.Dispose();
+    }
+
+    [Fact]
     public async Task Prompt_context_includes_dialect_hints()
     {
         var (db, conn) = NewStore();
