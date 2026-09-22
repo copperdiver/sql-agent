@@ -17,7 +17,8 @@
     else
     {
         <MessageList Messages="_messages" Live="_live" Providers="_providers"
-                     OnOpenInEditor="OpenInEditor" OnConfirm="RequestConfirmation" />
+                     OnOpenInEditor="OpenInEditor" OnEdit="OpenScratchpad"
+                     OnConfirm="RequestConfirmation" />
     }
 
     <div class="chat-composer">
@@ -29,8 +30,16 @@
                 <AttachmentMenu Connections="_connections"
                                 AttachedIds="@(_attached.Select(a => a.ConnectionId!.Value).ToList())"
                                 OnAttach="Attach" />
+                <button type="button" class="ghost" data-testid="chat-open-scratchpad"
+                        @onclick="OpenEmptyScratchpad">Scratchpad</button>
             </Tools>
         </Composer>
+
+        @if (_scratchpadOpen)
+        {
+            <ScratchPad ConnectionId="@_scratchpadConnectionId" InitialSql="@_scratchpadSql"
+                        OnClose="CloseScratchpad" />
+        }
 
         @if (_messages.Count == 0)
         {
@@ -65,6 +74,9 @@
     private Composer? _composer;
     private string _question = "";
     private bool _busy;
+    private bool _scratchpadOpen;
+    private Guid? _scratchpadConnectionId;
+    private string _scratchpadSql = "";
     private CancellationTokenSource? _cts;
     private bool _disposed;
 
@@ -247,6 +259,17 @@
         State.HandOffSql(sql);
         Nav.NavigateTo("/sql");
     }
+
+    private void OpenScratchpad(string sql)
+    {
+        _scratchpadSql = sql;
+        _scratchpadConnectionId = _attached.Select(a => a.ConnectionId).FirstOrDefault(id => id is not null);
+        _scratchpadOpen = true;
+    }
+
+    private void OpenEmptyScratchpad() => OpenScratchpad("");
+
+    private void CloseScratchpad() => _scratchpadOpen = false;
 
     private void IndexProviders(IEnumerable<ChatMessageView> messages)
     {

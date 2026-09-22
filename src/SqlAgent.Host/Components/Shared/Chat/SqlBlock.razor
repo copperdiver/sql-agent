@@ -14,7 +14,10 @@
             <button type="button" class="ghost" @onclick="CopyAsync">Copy</button>
             @if (!string.IsNullOrWhiteSpace(result.GeneratedSql))
             {
-                <button type="button" class="ghost" @onclick="() => OnEdit.InvokeAsync(result.GeneratedSql)">Edit</button>
+                <button type="button" class="ghost" data-testid="sql-block-edit"
+                        @onclick="() => OnEdit.InvokeAsync(result.GeneratedSql)">Edit</button>
+                <button type="button" class="ghost"
+                        @onclick="() => OnOpenInEditor.InvokeAsync(result.GeneratedSql)">Open in editor</button>
             }
             <button type="button" class="ghost" data-testid="sql-block-run" @onclick="() => OnRun.InvokeAsync()">Run</button>
         </header>
@@ -27,7 +30,7 @@
             </div>
         }
 
-        <pre class="sql-code"><code>@((MarkupString)SqlHighlighter.Highlight(result.GeneratedSql ?? "", ProviderType))</code></pre>
+        <pre class="sql-code"><code data-sql="@result.GeneratedSql">@((MarkupString)SqlHighlighter.Highlight(result.GeneratedSql ?? "", ProviderType))</code></pre>
 
         @switch (result.Kind)
         {
@@ -57,6 +60,7 @@
     [Parameter] public bool Restored { get; set; }
     [Parameter] public EventCallback OnRun { get; set; }
     [Parameter] public EventCallback<string> OnEdit { get; set; }
+    [Parameter] public EventCallback<string> OnOpenInEditor { get; set; }
 
     private string DialectLabel => ProviderType == DatabaseProviderType.SqlServer ? "T-SQL" : "PostgreSQL";
 

@@ -1,0 +1,3 @@
+.scratchpad { margin-top: var(--space-4); padding: var(--space-4); border: 1px solid var(--base-100); border-radius: var(--radius-md); }
+.scratchpad-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-3); }
+.scratchpad-head h2 { margin: 0; }

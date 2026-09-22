@@ -1,0 +1,87 @@
+@using SqlAgent.Core
+@inject ScopedRunner Runner
+
+<section class="scratchpad" data-testid="scratchpad">
+    <div class="scratchpad-head">
+        <h2>Scratchpad</h2>
+        <button type="button" class="ghost" data-testid="scratchpad-close" @onclick="OnClose">Close</button>
+    </div>
+
+    <SqlEditor @ref="_editor" Value="@_sql" ValueChanged="OnSqlChanged" OnRun="RunAsync" />
+    <div class="actions">
+        <button type="button" class="primary" data-testid="scratchpad-run"
+                @onclick="RunAsync" disabled="@(_running || ConnectionId is null || string.IsNullOrWhiteSpace(_sql))">
+            Run
+        </button>
+        @if (_running)
+        {
+            <button type="button" data-testid="scratchpad-cancel" @onclick="Cancel">Cancel</button>
+        }
+    </div>
+
+    @if (_error is not null)
+    {
+        <OutcomeMessage Message="@_error" />
+    }
+    @if (_result is { Success: true } result)
+    {
+        <DataTable Columns="result.Columns" Rows="result.Rows" TotalRowCount="result.RowCount" Truncated="result.Truncated" />
+    }
+    else if (_result is { } failed)
+    {
+        <OutcomeMessage Code="@failed.ErrorCode" Message="@failed.ErrorMessage" />
+    }
+</section>
+
+@code {
+    [Parameter] public Guid? ConnectionId { get; set; }
+    [Parameter] public string InitialSql { get; set; } = "";
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private SqlEditor? _editor;
+    private string _sql = "";
+    private string _loadedInitial = "\u0001";
+    private Guid? _loadedConnection;
+    private bool _running;
+    private QueryExecutionResult? _result;
+    private CancellationTokenSource? _cts;
+    private string? _error;
+
+    protected override void OnParametersSet()
+    {
+        if (_loadedInitial == InitialSql && _loadedConnection == ConnectionId) return;
+        _loadedInitial = InitialSql;
+        _loadedConnection = ConnectionId;
+        _sql = InitialSql;
+        _result = null;
+        _error = null;
+    }
+
+    private Task OnSqlChanged(string value)
+    {
+        _sql = value;
+        return Task.CompletedTask;
+    }
+
+    private async Task RunAsync()
+    {
+        if (_running || ConnectionId is not { } id || string.IsNullOrWhiteSpace(_sql)) return;
+        _running = true;
+        _result = null;
+        _error = null;
+        _cts = new CancellationTokenSource();
+        try
+        {
+            _result = await Runner.RunAsync<QueryExecutionService, QueryExecutionResult>(
+                s => s.ExecuteSqlAsync(id, _sql, confirmed: true, ct: _cts.Token));
+        }
+        finally
+        {
+            _running = false;
+            _cts.Dispose();
+            _cts = null;
+        }
+    }
+
+    private void Cancel() => _cts?.Cancel();
+}

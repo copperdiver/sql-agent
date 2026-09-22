@@ -12,6 +12,7 @@
             <AssistantMessage @key="message.Id" Message="message"
                               Live="@(Live.TryGetValue(message.Id, out var live) ? live : null)"
                               OnOpenInEditor="OnOpenInEditor"
+                              OnEdit="OnEdit"
                               OnConfirm="OnConfirm"
                               ProviderType="@(Providers.TryGetValue(message.Id, out var provider) ? provider : DatabaseProviderType.Postgres)" />
         }
@@ -26,6 +27,7 @@
         new Dictionary<Guid, NlQueryResult>();
 
     [Parameter] public EventCallback<string> OnOpenInEditor { get; set; }
+    [Parameter] public EventCallback<string> OnEdit { get; set; }
     [Parameter] public EventCallback<ChatMessageView> OnConfirm { get; set; }
     [Parameter] public IReadOnlyDictionary<Guid, DatabaseProviderType> Providers { get; set; } =
         new Dictionary<Guid, DatabaseProviderType>();

@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using SqlAgent.Core;
 using SqlAgent.Host.Components.Pages;
+using SqlAgent.Host.Components.Shared;
 using SqlAgent.Host.Components.Shared.Chat;
 using SqlAgent.Host.Web;
 using SqlAgent.Storage;
@@ -234,6 +235,24 @@ public class ChatPageTests : IDisposable
         var nav = _ctx.Services.GetRequiredService<FakeNavigationManager>();
         Assert.EndsWith("/sql", nav.Uri);
         Assert.Equal("SELECT id FROM orders", _ctx.Services.GetRequiredService<AppState>().TakePendingSql());
+    }
+
+    [Fact]
+    public async Task Editing_a_sql_block_opens_the_chat_scratchpad_with_the_same_sql()
+    {
+        await AddConnectionAsync("prod");
+        _gateway.NextResponse = LlmSqlResponse.Generated("SELECT id FROM orders");
+        _provider.NextResult = new QueryResultSet(["id"], [new object?[] { 1 }], false);
+
+        var page = _ctx.RenderComponent<ChatPage>();
+        await AttachAsync(page, "prod");
+        Type(page, "orders");
+        await ClickAsync(page.Find("[data-testid=send]"));
+
+        await ClickAsync(page.Find("[data-testid=sql-block-edit]"));
+
+        Assert.Single(page.FindAll("[data-testid=scratchpad]"));
+        Assert.Equal("SELECT id FROM orders", page.FindComponent<ScratchPad>().FindComponent<SqlEditor>().Instance.Value);
     }
 
     [Fact]
