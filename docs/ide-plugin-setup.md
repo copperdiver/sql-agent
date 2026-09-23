@@ -12,6 +12,10 @@ those behaviors and exposes the same three MCP tools to every supported host:
 - `query_database` - policy-validated SQL execution with row caps, elapsed time,
   and truncation metadata.
 
+`describe_schema` and `query_database` accept the connection name shown by
+`list_databases`. Existing clients may continue passing the returned GUID in
+`database_id`; names are the preferred form.
+
 ## Prerequisites
 
 - .NET 10 SDK when launching from source, or a published `SqlAgent.Api.Mcp`
@@ -118,7 +122,6 @@ All tool responses include `ok`. Failed calls return stable `error_code` and
 Common stable error codes:
 
 - `unauthorized`
-- `invalid_database_id`
 - `connection_not_found`
 - `connection_secret_missing`
 - `schema_extraction_error`

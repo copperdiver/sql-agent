@@ -72,7 +72,7 @@ public class McpToolServiceTests
     }
 
     [Fact]
-    public async Task DescribeSchema_invalid_id_returns_invalid_database_id()
+    public async Task DescribeSchema_unknown_name_returns_connection_not_found()
     {
         var (db, conn) = NewStore();
         var (tools, _, _) = Build(db, new ToolFakeProvider());
@@ -80,7 +80,26 @@ public class McpToolServiceTests
         var r = await tools.DescribeSchemaAsync("not-a-guid");
 
         Assert.False(r.Ok);
-        Assert.Equal("invalid_database_id", r.ErrorCode);
+        Assert.Equal("connection_not_found", r.ErrorCode);
+        conn.Dispose();
+    }
+
+    [Fact]
+    public async Task DescribeSchema_resolves_connection_name()
+    {
+        var (db, conn) = NewStore();
+        var schema = new DatabaseSchema([
+            new SchemaTable("public", "orders", [new SchemaColumn("id", "int", false)], ["id"], [], []),
+        ]);
+        var (tools, connections, _) = Build(db, new ToolFakeProvider(schema));
+        var created = await connections.CreateAsync(
+            new DatabaseConnectionInput("analytics", DatabaseProviderType.Postgres, IsReadOnly: true), "cs");
+
+        var r = await tools.DescribeSchemaAsync("analytics");
+
+        Assert.True(r.Ok);
+        Assert.Equal(created.Id.ToString(), r.DatabaseId);
+        Assert.Equal("orders", Assert.Single(r.Tables!).Name);
         conn.Dispose();
     }
 
@@ -182,7 +201,7 @@ public class McpToolServiceTests
     }
 
     [Fact]
-    public async Task QueryDatabase_invalid_id_returns_invalid_database_id()
+    public async Task QueryDatabase_unknown_name_returns_connection_not_found()
     {
         var (db, conn) = NewStore();
         var (tools, _, _) = Build(db, new ToolFakeProvider());
@@ -190,7 +209,24 @@ public class McpToolServiceTests
         var r = await tools.QueryDatabaseAsync("nope", "SELECT 1");
 
         Assert.False(r.Ok);
-        Assert.Equal("invalid_database_id", r.ErrorCode);
+        Assert.Equal("connection_not_found", r.ErrorCode);
+        conn.Dispose();
+    }
+
+    [Fact]
+    public async Task QueryDatabase_resolves_connection_name()
+    {
+        var (db, conn) = NewStore();
+        var result = new QueryResultSet(["id"], [new object?[] { 1 }], Truncated: false);
+        var (tools, connections, _) = Build(db, new ToolFakeProvider(result: result));
+        await connections.CreateAsync(
+            new DatabaseConnectionInput("analytics", DatabaseProviderType.Postgres, IsReadOnly: true), "cs");
+
+        var r = await tools.QueryDatabaseAsync("analytics", "SELECT id FROM orders");
+
+        Assert.True(r.Ok);
+        Assert.Equal(["id"], r.Columns);
+        Assert.Equal(1, r.RowCount);
         conn.Dispose();
     }
 

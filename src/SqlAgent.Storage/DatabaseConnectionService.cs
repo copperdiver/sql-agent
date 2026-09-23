@@ -51,6 +51,12 @@ public class DatabaseConnectionService(SqlAgentDbContext db, ISecretStore secret
         return e is null ? null : ToInfo(e);
     }
 
+    public async Task<DatabaseConnectionInfo?> GetByNameAsync(string name, CancellationToken ct = default)
+    {
+        var e = await db.DatabaseConnections.FirstOrDefaultAsync(x => x.Name == name, ct);
+        return e is null ? null : ToInfo(e);
+    }
+
     public async Task<IReadOnlyList<DatabaseConnectionInfo>> ListAsync(CancellationToken ct = default)
         => await db.DatabaseConnections.OrderBy(x => x.Name)
             .Select(e => ToInfo(e)).ToListAsync(ct);

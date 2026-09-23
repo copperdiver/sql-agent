@@ -73,7 +73,8 @@ public record QueryDatabaseResponse(
 /// and the behavior is unit-testable without a live MCP client or database server.
 /// </summary>
 /// <remarks>
-/// Error codes: <c>invalid_database_id</c>, <c>connection_not_found</c>, <c>connection_secret_missing</c>,
+/// Database selectors accept a connection name (the preferred form) or a legacy GUID returned by
+/// <c>list_databases</c>. Error codes: <c>connection_not_found</c>, <c>connection_secret_missing</c>,
 /// <c>schema_extraction_error</c> (describe_schema), and — passed through from T6 query validation/execution —
 /// <c>policy_denied_readonly</c>, <c>policy_denied_hidden_table</c>, <c>policy_denied_view_write</c>,
 /// <c>policy_denied_readonly_object</c>, <c>policy_denied_ddl</c>,
@@ -118,14 +119,14 @@ public class McpToolService(
         if (!await AuthorizedAsync(ct))
             return SchemaError(UnauthorizedCode, UnauthorizedMessage);
 
-        if (!Guid.TryParse(databaseId, out var id))
-            return SchemaError("invalid_database_id", $"'{databaseId}' is not a valid database id.");
+        var connection = await ResolveConnectionAsync(databaseId, ct);
+        if (connection is null)
+            return SchemaError("connection_not_found", "No such database connection.");
+
+        var id = connection.Id;
 
         // Existence is checked here (not left to the null SchemaService returns) so a missing connection
         // and a missing secret get distinct codes instead of collapsing into one.
-        if (await connections.GetAsync(id, ct) is null)
-            return SchemaError("connection_not_found", "No such database connection.");
-
         DatabaseSchema? schema;
         try
         {
@@ -148,17 +149,23 @@ public class McpToolService(
         if (!await AuthorizedAsync(ct))
             return new QueryDatabaseResponse(false, [], [], 0, false, 0, UnauthorizedCode, UnauthorizedMessage);
 
-        if (!Guid.TryParse(databaseId, out var id))
+        var connection = await ResolveConnectionAsync(databaseId, ct);
+        if (connection is null)
             return new QueryDatabaseResponse(false, [], [], 0, false, 0,
-                "invalid_database_id", $"'{databaseId}' is not a valid database id.");
+                "connection_not_found", "No such database connection.");
 
-        var r = await executor.ExecuteSqlAsync(id, sql, ct);
+        var r = await executor.ExecuteSqlAsync(connection.Id, sql, ct);
         return new QueryDatabaseResponse(
             r.Success, r.Columns, r.Rows, r.RowCount, r.Truncated, r.ElapsedMs, r.ErrorCode, r.ErrorMessage);
     }
 
     private static DescribeSchemaResponse SchemaError(string code, string message)
         => new(Ok: false, ErrorCode: code, ErrorMessage: message);
+
+    private async Task<DatabaseConnectionInfo?> ResolveConnectionAsync(string selector, CancellationToken ct)
+        => Guid.TryParse(selector, out var id)
+            ? await connections.GetAsync(id, ct)
+            : await connections.GetByNameAsync(selector, ct);
 
     private static TableDescription ToTable(SchemaTable t) => new(
         t.Schema, t.Name,

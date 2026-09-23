@@ -70,7 +70,7 @@ namespace SqlAgent.Api.Mcp
         [Description("Return the policy-filtered schema (tables, columns, primary keys, foreign keys) for a database. Tables hidden by policy are omitted.")]
         public static Task<DescribeSchemaResponse> DescribeSchema(
             McpToolService tools,
-            [Description("The database connection id, as returned by list_databases.")] string database_id,
+            [Description("The database connection name (preferred) or legacy id, as returned by list_databases.")] string database_id,
             CancellationToken ct)
             => tools.DescribeSchemaAsync(database_id, ct);
 
@@ -78,7 +78,7 @@ namespace SqlAgent.Api.Mcp
         [Description("Run a SQL query against a database. The query is policy-validated before execution: writes on read-only connections and access to hidden tables are denied. Results are row-capped.")]
         public static Task<QueryDatabaseResponse> QueryDatabase(
             McpToolService tools,
-            [Description("The database connection id, as returned by list_databases.")] string database_id,
+            [Description("The database connection name (preferred) or legacy id, as returned by list_databases.")] string database_id,
             [Description("The SQL query to execute.")] string sql,
             CancellationToken ct)
             => tools.QueryDatabaseAsync(database_id, sql, ct);
