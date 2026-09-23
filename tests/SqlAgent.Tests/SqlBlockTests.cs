@@ -13,8 +13,8 @@ public class SqlBlockTests
     [Fact]
     public void A_read_block_shows_dialect_run_and_result_rows()
     {
-        using var ctx = new Bunit.TestContext();
-        var block = ctx.RenderComponent<SqlBlock>(p => p
+        using var ctx = new Bunit.BunitContext();
+        var block = ctx.Render<SqlBlock>(p => p
             .Add(x => x.Result, Result("SELECT 1"))
             .Add(x => x.ProviderType, DatabaseProviderType.Postgres));
 
@@ -27,10 +27,10 @@ public class SqlBlockTests
     [Fact]
     public void A_pending_write_shows_operation_warning_and_runs_only_through_the_callback()
     {
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
         var pending = NlQueryResult.Confirmation("DROP TABLE orders", "DropTable");
         var runs = 0;
-        var block = ctx.RenderComponent<SqlBlock>(p => p
+        var block = ctx.Render<SqlBlock>(p => p
             .Add(x => x.Result, pending)
             .Add(x => x.ProviderType, DatabaseProviderType.Postgres)
             .Add(x => x.OnRun, () => runs++));

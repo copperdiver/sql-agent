@@ -25,7 +25,7 @@ namespace SqlAgent.Tests;
 public class ChatPageTests : IDisposable
 {
     private readonly SqliteConnection _conn = new("DataSource=:memory:");
-    private readonly Bunit.TestContext _ctx = new();
+    private readonly Bunit.BunitContext _ctx = new();
     private readonly ChatGatewayStub _gateway = new();
     private readonly TurnProviderStub _provider = new();
     private readonly string _fileRoot = Path.Combine(Path.GetTempPath(), $"sqlagent-chat-page-files-{Guid.NewGuid():N}");
@@ -74,7 +74,7 @@ public class ChatPageTests : IDisposable
     [Fact]
     public void A_new_chat_offers_the_composer_and_suggestions_rather_than_an_empty_transcript()
     {
-        var page = _ctx.RenderComponent<ChatPage>();
+        var page = _ctx.Render<ChatPage>();
 
         Assert.Contains("How can I help with your data?", page.Markup);
         Assert.NotEmpty(page.FindAll("[data-testid=suggestion]"));
@@ -86,7 +86,7 @@ public class ChatPageTests : IDisposable
     {
         // With no model configured, a chip that sent immediately would answer every click with an error
         // panel. Filling the box lets the question be edited first, which is the point of a suggestion.
-        var page = _ctx.RenderComponent<ChatPage>();
+        var page = _ctx.Render<ChatPage>();
 
         page.FindAll("[data-testid=suggestion]")[0].Click();
 
@@ -98,7 +98,7 @@ public class ChatPageTests : IDisposable
     public async Task Sending_the_first_message_creates_the_chat_and_moves_to_its_route()
     {
         var connection = await AddConnectionAsync("prod");
-        var page = _ctx.RenderComponent<ChatPage>();
+        var page = _ctx.Render<ChatPage>();
         await AttachAsync(page, "prod");
         Type(page, "how many orders");
 
@@ -106,7 +106,7 @@ public class ChatPageTests : IDisposable
 
         var chat = Assert.Single(await ListChatsAsync());
         Assert.Equal("how many orders", chat.Title);
-        var nav = _ctx.Services.GetRequiredService<FakeNavigationManager>();
+        var nav = _ctx.Services.GetRequiredService<BunitNavigationManager>();
         Assert.EndsWith($"/chat/{chat.Id}", nav.Uri);
 
         // The attachment reached the store as a snapshot: the live id, and the name it had at send time.
@@ -117,14 +117,14 @@ public class ChatPageTests : IDisposable
     }
 
     [Fact]
-    public void Opening_a_new_chat_and_leaving_without_sending_creates_no_row()
+    public async Task Opening_a_new_chat_and_leaving_without_sending_creates_no_row()
     {
         // The single most visible way a chat app accumulates junk. The row is written on first send, not
         // on first render.
-        _ctx.RenderComponent<ChatPage>();
-        _ctx.DisposeComponents();
+        _ctx.Render<ChatPage>();
+        await _ctx.Renderer.DisposeComponents();
 
-        Assert.Empty(ListChatsAsync().GetAwaiter().GetResult());
+        Assert.Empty(await ListChatsAsync());
     }
 
     [Fact]
@@ -137,14 +137,14 @@ public class ChatPageTests : IDisposable
         _gateway.NextResponse = LlmSqlResponse.Generated("SELECT id FROM orders");
         _provider.NextResult = new QueryResultSet(["id"], [new object?[] { 1 }], Truncated: false);
 
-        var page = _ctx.RenderComponent<ChatPage>();
+        var page = _ctx.Render<ChatPage>();
         await AttachAsync(page, "prod");
         Type(page, "how many orders");
         await ClickAsync(page.Find("[data-testid=send]"));
         var chatId = (await ListChatsAsync()).Single().Id;
 
         // A second component instance for the same route is what a reload actually is.
-        var reloaded = _ctx.RenderComponent<ChatPage>(p => p.Add(c => c.Id, chatId));
+        var reloaded = _ctx.Render<ChatPage>(p => p.Add(c => c.Id, chatId));
 
         Assert.Contains("how many orders", reloaded.Markup);
         Assert.Contains("SELECT id FROM orders", reloaded.Markup);
@@ -162,7 +162,7 @@ public class ChatPageTests : IDisposable
         // The guard lives in two places: Composer disables the send button, and SendAsync re-checks
         // string.IsNullOrWhiteSpace for the Enter-key path, which reaches SendFromEditor directly and
         // so never sees the button's disabled attribute at all. Both must hold for whitespace-only text.
-        var page = _ctx.RenderComponent<ChatPage>();
+        var page = _ctx.Render<ChatPage>();
         Type(page, "   ");
 
         Assert.True(page.Find("[data-testid=send]").HasAttribute("disabled"));
@@ -180,7 +180,7 @@ public class ChatPageTests : IDisposable
         // box for editing. It shows up here because it was sent and now sits in the transcript as its own
         // bubble, same as any other question; only the answer differs by explaining there was nothing to
         // ask.
-        var page = _ctx.RenderComponent<ChatPage>();
+        var page = _ctx.Render<ChatPage>();
         Type(page, "how many orders");
 
         await ClickAsync(page.Find("[data-testid=send]"));
@@ -196,7 +196,7 @@ public class ChatPageTests : IDisposable
         // Attachments are per message, but re-attaching on every turn would make a ten-question
         // conversation ten attachments. The chips carry over until they are removed.
         await AddConnectionAsync("prod");
-        var page = _ctx.RenderComponent<ChatPage>();
+        var page = _ctx.Render<ChatPage>();
         await AttachAsync(page, "prod");
         Type(page, "first");
         await ClickAsync(page.Find("[data-testid=send]"));
@@ -207,7 +207,7 @@ public class ChatPageTests : IDisposable
     [Fact]
     public async Task Sending_persists_pending_files_then_clears_the_pending_chips()
     {
-        var page = _ctx.RenderComponent<ChatPage>();
+        var page = _ctx.Render<ChatPage>();
         await UploadFileAsync(page, "report.txt", "hello");
         Type(page, "summarize the report");
 
@@ -224,7 +224,7 @@ public class ChatPageTests : IDisposable
     public async Task Sending_and_enter_are_blocked_while_a_file_upload_is_in_flight()
     {
         FileProvider.HoldUpload();
-        var page = _ctx.RenderComponent<ChatPage>();
+        var page = _ctx.Render<ChatPage>();
         var upload = Task.Run(() => UploadFileAsync(page, "busy.txt", "wait for upload"));
         await FileProvider.WaitForUploadStartAsync();
 
@@ -242,11 +242,11 @@ public class ChatPageTests : IDisposable
     {
         var chat = await CreateStoredChatAsync("existing chat");
         FileProvider.HoldUpload();
-        var page = _ctx.RenderComponent<ChatPage>();
+        var page = _ctx.Render<ChatPage>();
         var upload = Task.Run(() => UploadFileAsync(page, "route-race.txt", "clean me"));
         await FileProvider.WaitForUploadStartAsync();
 
-        var route = page.InvokeAsync(() => page.SetParametersAndRender(p => p.Add(c => c.Id, chat)));
+        var route = page.InvokeAsync(() => page.Render(p => p.Add(c => c.Id, chat)));
         await Task.Yield();
         Assert.False(FileProvider.DeleteStarted);
 
@@ -264,11 +264,11 @@ public class ChatPageTests : IDisposable
     public async Task Disposing_while_a_file_upload_is_in_flight_waits_then_cleans_the_uploaded_file()
     {
         FileProvider.HoldUpload();
-        var page = _ctx.RenderComponent<ChatPage>();
+        var page = _ctx.Render<ChatPage>();
         var upload = Task.Run(() => UploadFileAsync(page, "dispose-upload-race.txt", "clean me"));
         await FileProvider.WaitForUploadStartAsync();
 
-        _ctx.DisposeComponents();
+        await _ctx.Renderer.DisposeComponents();
         Assert.False(FileProvider.DeleteStarted);
         FileProvider.ReleaseUpload();
         await upload;
@@ -279,7 +279,7 @@ public class ChatPageTests : IDisposable
     [Fact]
     public async Task A_failed_send_keeps_pending_files_for_retry()
     {
-        var page = _ctx.RenderComponent<ChatPage>();
+        var page = _ctx.Render<ChatPage>();
         await UploadFileAsync(page, "retry.txt", "try again");
         Type(page, "send this later");
         _saveInterceptor = new ThrowCanceledOnFirstSaveInterceptor();
@@ -295,7 +295,7 @@ public class ChatPageTests : IDisposable
     {
         await AddConnectionAsync("prod");
         _gateway.Hold();
-        var page = _ctx.RenderComponent<ChatPage>();
+        var page = _ctx.Render<ChatPage>();
         await AttachAsync(page, "prod");
         await UploadFileAsync(page, "race.txt", "do not delete yet");
         Type(page, "send after the file is safe");
@@ -320,7 +320,7 @@ public class ChatPageTests : IDisposable
     [Fact]
     public async Task Removing_a_file_while_idle_deletes_pending_storage()
     {
-        var page = _ctx.RenderComponent<ChatPage>();
+        var page = _ctx.Render<ChatPage>();
         await UploadFileAsync(page, "remove.txt", "remove me");
 
         await ClickAsync(page.Find(".pending-file-remove"));
@@ -334,7 +334,7 @@ public class ChatPageTests : IDisposable
     {
         await AddConnectionAsync("prod");
         _gateway.Hold();
-        var page = _ctx.RenderComponent<ChatPage>();
+        var page = _ctx.Render<ChatPage>();
         await AttachAsync(page, "prod");
         await UploadFileAsync(page, "dispose-race.txt", "keep until send");
         Type(page, "send before disposal");
@@ -342,7 +342,7 @@ public class ChatPageTests : IDisposable
         var send = ClickAsync(page.Find("[data-testid=send]"));
         await WaitForConditionAsync(() => _gateway.CallCount == 1);
 
-        _ctx.DisposeComponents();
+        await _ctx.Renderer.DisposeComponents();
         Assert.NotEmpty(Directory.GetFiles(_fileRoot, "*", SearchOption.AllDirectories));
 
         _gateway.Release(LlmSqlResponse.Generated("SELECT 1"));
@@ -359,7 +359,7 @@ public class ChatPageTests : IDisposable
             ChatOutcomeKind.None, null, null, null, false, [], Files:
             [new ChatFileRef(fileId, "report.pdf", "application/pdf", 42, $"/files/{fileId}")]);
 
-        var rendered = _ctx.RenderComponent<UserMessage>(p => p.Add(c => c.Message, message));
+        var rendered = _ctx.Render<UserMessage>(p => p.Add(c => c.Message, message));
 
         var link = Assert.Single(rendered.FindAll(".file-chip"));
         Assert.Equal($"/files/{fileId}", link.GetAttribute("href"));
@@ -372,7 +372,7 @@ public class ChatPageTests : IDisposable
     {
         await AddConnectionAsync("prod");
         _gateway.Hold();
-        var page = _ctx.RenderComponent<ChatPage>();
+        var page = _ctx.Render<ChatPage>();
         await AttachAsync(page, "prod");
         Type(page, "first question");
 
@@ -398,14 +398,14 @@ public class ChatPageTests : IDisposable
         _gateway.NextResponse = LlmSqlResponse.Generated("SELECT id FROM orders");
         _provider.NextResult = new QueryResultSet(["id"], [new object?[] { 1 }], false);
 
-        var page = _ctx.RenderComponent<ChatPage>();
+        var page = _ctx.Render<ChatPage>();
         await AttachAsync(page, "prod");
         Type(page, "orders");
         await ClickAsync(page.Find("[data-testid=send]"));
 
         await ClickAsync(page.FindAll("button").First(b => b.TextContent.Trim() == "Open in editor"));
 
-        var nav = _ctx.Services.GetRequiredService<FakeNavigationManager>();
+        var nav = _ctx.Services.GetRequiredService<BunitNavigationManager>();
         Assert.EndsWith("/sql", nav.Uri);
         Assert.Equal("SELECT id FROM orders", _ctx.Services.GetRequiredService<AppState>().TakePendingSql());
     }
@@ -417,7 +417,7 @@ public class ChatPageTests : IDisposable
         _gateway.NextResponse = LlmSqlResponse.Generated("SELECT id FROM orders");
         _provider.NextResult = new QueryResultSet(["id"], [new object?[] { 1 }], false);
 
-        var page = _ctx.RenderComponent<ChatPage>();
+        var page = _ctx.Render<ChatPage>();
         await AttachAsync(page, "prod");
         Type(page, "orders");
         await ClickAsync(page.Find("[data-testid=send]"));
@@ -434,7 +434,7 @@ public class ChatPageTests : IDisposable
         await AddConnectionAsync("prod");
         _gateway.NextResponse = LlmSqlResponse.Generated("SELECT 1");
         _provider.NextResult = new QueryResultSet(["value"], [new object?[] { 1 }], false);
-        var page = _ctx.RenderComponent<ChatPage>();
+        var page = _ctx.Render<ChatPage>();
         await AttachAsync(page, "prod");
         Type(page, "orders");
         await ClickAsync(page.Find("[data-testid=send]"));
@@ -455,7 +455,7 @@ public class ChatPageTests : IDisposable
         await AddConnectionAsync("prod", readOnly: false);
         _gateway.NextResponse = LlmSqlResponse.Generated("UPDATE orders SET total = 0");
 
-        var page = _ctx.RenderComponent<ChatPage>();
+        var page = _ctx.Render<ChatPage>();
         await AttachAsync(page, "prod");
         Type(page, "zero out the orders");
         await ClickAsync(page.Find("[data-testid=send]"));
@@ -484,7 +484,7 @@ public class ChatPageTests : IDisposable
             new SchemaTable("public", "orders", [new SchemaColumn("id", "integer", false)], ["id"], [], []),
         ]);
 
-        var page = _ctx.RenderComponent<ChatPage>();
+        var page = _ctx.Render<ChatPage>();
         await AttachAsync(page, "prod");
         await ClickAsync(page.Find("[data-testid=chat-open-diagram]"));
 
@@ -496,7 +496,7 @@ public class ChatPageTests : IDisposable
         Assert.Equal(ChatOutcomeKind.SchemaDiagram, message.OutcomeKind);
         Assert.NotNull(message.SchemaDiagramConnectionId);
 
-        var reloaded = _ctx.RenderComponent<ChatPage>(p => p.Add(c => c.Id, chat.Id));
+        var reloaded = _ctx.Render<ChatPage>(p => p.Add(c => c.Id, chat.Id));
         Assert.Contains("Entity relationship diagram", reloaded.Markup);
         Assert.Contains("orders", reloaded.Markup);
     }
@@ -510,7 +510,7 @@ public class ChatPageTests : IDisposable
         var notified = 0;
         _ctx.Services.GetRequiredService<AppState>().ChatsChanged += () => notified++;
 
-        var page = _ctx.RenderComponent<ChatPage>();
+        var page = _ctx.Render<ChatPage>();
         await AttachAsync(page, "prod");
         Type(page, "orders");
         await ClickAsync(page.Find("[data-testid=send]"));
@@ -525,7 +525,7 @@ public class ChatPageTests : IDisposable
         // one question's grid under another's answer instead of its own — invisible in a test that only
         // sends once, which is why the earlier reload test alone did not cover this.
         await AddConnectionAsync("prod");
-        var page = _ctx.RenderComponent<ChatPage>();
+        var page = _ctx.Render<ChatPage>();
         await AttachAsync(page, "prod");
 
         _gateway.NextResponse = LlmSqlResponse.Generated("SELECT id FROM orders");
@@ -562,19 +562,19 @@ public class ChatPageTests : IDisposable
         var chatB = await CreateStoredChatAsync("already there");
         _gateway.Hold();
 
-        var page = _ctx.RenderComponent<ChatPage>();
+        var page = _ctx.Render<ChatPage>();
         await AttachAsync(page, "prod");
         Type(page, "new chat question");
         var send = ClickAsync(page.Find("[data-testid=send]"));
         await WaitForConditionAsync(() => _gateway.CallCount == 1);
 
         // The same instance being handed a different Id is exactly what the router does navigating from
-        // "/" to a stored chat — bUnit's SetParametersAndRender is that re-parameterization. Routed through
+        // "/" to a stored chat — bUnit's Render on the existing instance is that re-parameterization. Routed through
         // InvokeAsync so OnParametersSetAsync's own await (loading chat B) completes before we look at the
         // markup, the same way ClickAsync dispatches an event through the renderer's sync context.
-        await page.InvokeAsync(() => page.SetParametersAndRender(p => p.Add(c => c.Id, chatB)));
+        await page.InvokeAsync(() => page.Render(p => p.Add(c => c.Id, chatB)));
         Assert.Contains("already there", page.Markup);
-        var nav = _ctx.Services.GetRequiredService<FakeNavigationManager>();
+        var nav = _ctx.Services.GetRequiredService<BunitNavigationManager>();
         var uriBeforeRelease = nav.Uri;
 
         _gateway.Release(LlmSqlResponse.Generated("SELECT 1"));
@@ -603,9 +603,9 @@ public class ChatPageTests : IDisposable
         await AddConnectionAsync("prod");
         var missingId = Guid.NewGuid();
 
-        var page = _ctx.RenderComponent<ChatPage>(p => p.Add(c => c.Id, missingId));
+        var page = _ctx.Render<ChatPage>(p => p.Add(c => c.Id, missingId));
 
-        var nav = _ctx.Services.GetRequiredService<FakeNavigationManager>();
+        var nav = _ctx.Services.GetRequiredService<BunitNavigationManager>();
         Assert.Equal(nav.BaseUri, nav.Uri);
         Assert.Empty(page.FindAll(".message"));
 
@@ -630,7 +630,7 @@ public class ChatPageTests : IDisposable
         // has written anything.
         await AddConnectionAsync("prod");
         _saveInterceptor = new ThrowCanceledOnFirstSaveInterceptor();
-        var page = _ctx.RenderComponent<ChatPage>();
+        var page = _ctx.Render<ChatPage>();
         await AttachAsync(page, "prod");
         Type(page, "how many orders");
 
@@ -655,7 +655,7 @@ public class ChatPageTests : IDisposable
         var notified = 0;
         _ctx.Services.GetRequiredService<AppState>().ChatsChanged += () => notified++;
 
-        var page = _ctx.RenderComponent<ChatPage>();
+        var page = _ctx.Render<ChatPage>();
         await AttachAsync(page, "prod");
         Type(page, "new chat question");
         var send = ClickAsync(page.Find("[data-testid=send]"));
@@ -663,7 +663,7 @@ public class ChatPageTests : IDisposable
 
         // Same re-parameterization the router performs navigating "/" -> a stored chat, which is what
         // makes the in-flight send's eventual result stale.
-        await page.InvokeAsync(() => page.SetParametersAndRender(p => p.Add(c => c.Id, chatB)));
+        await page.InvokeAsync(() => page.Render(p => p.Add(c => c.Id, chatB)));
 
         // Snapshot here, not at the top: re-parameterizing to chat B already fired ChatsChanged through
         // SetActiveChat, so a test that asserted notified > 0 would pass with the production fix

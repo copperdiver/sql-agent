@@ -18,7 +18,7 @@ namespace SqlAgent.Tests;
 public class ShellTests : IDisposable
 {
     private readonly SqliteConnection _conn = new("DataSource=:memory:");
-    private readonly Bunit.TestContext _ctx = new();
+    private readonly Bunit.BunitContext _ctx = new();
     private readonly RecordingLoggerProvider _logs = new();
 
     public ShellTests()
@@ -35,7 +35,7 @@ public class ShellTests : IDisposable
     [Fact]
     public void The_sidebar_renders_the_product_mark_and_the_routes_that_exist()
     {
-        var sidebar = _ctx.RenderComponent<Sidebar>();
+        var sidebar = _ctx.Render<Sidebar>();
 
         Assert.Contains("SQL Agent", sidebar.Markup);
         // Phase B1 replaced the Workspace row: conversations are the front door now, and the SQL editor
@@ -49,7 +49,7 @@ public class ShellTests : IDisposable
     [Fact]
     public void Collapsing_the_sidebar_marks_it_collapsed_and_persists_the_choice()
     {
-        var sidebar = _ctx.RenderComponent<Sidebar>();
+        var sidebar = _ctx.Render<Sidebar>();
 
         sidebar.Find("[data-testid=collapse-toggle]").Click();
 
@@ -63,10 +63,10 @@ public class ShellTests : IDisposable
     {
         // Same reason as the theme: the class is applied to <html> pre-paint, so the component has to
         // ask rather than assume, or an expanded-looking sidebar renders inside a narrow shell.
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
         RegisterSidebarServices(ctx, new RecordingLoggerProvider(), "collapsed");
 
-        var sidebar = ctx.RenderComponent<Sidebar>();
+        var sidebar = ctx.Render<Sidebar>();
 
         Assert.Contains("collapsed", sidebar.Find("aside").ClassName);
     }
@@ -74,7 +74,7 @@ public class ShellTests : IDisposable
     [Fact]
     public void The_drawer_opens_and_closes_for_narrow_viewports()
     {
-        var sidebar = _ctx.RenderComponent<Sidebar>();
+        var sidebar = _ctx.Render<Sidebar>();
 
         sidebar.Find("[data-testid=drawer-open]").Click();
         Assert.Contains("drawer-open", sidebar.Find("aside").ClassName);
@@ -94,7 +94,7 @@ public class ShellTests : IDisposable
         // outside WorkArea's ErrorBoundary, so nothing else would catch it.
         _ctx.JSInterop.SetupVoid("sqlAgentUi.setSidebar", _ => true)
             .SetException(new JSException("Could not find 'sqlAgentUi.setSidebar'"));
-        var sidebar = _ctx.RenderComponent<Sidebar>();
+        var sidebar = _ctx.Render<Sidebar>();
 
         sidebar.Find("[data-testid=collapse-toggle]").Click();
 
@@ -113,7 +113,7 @@ public class ShellTests : IDisposable
         // hard-reloads the page, losing whatever the user had unsaved in the SQL editor.
         _ctx.JSInterop.SetupVoid("sqlAgentUi.setSidebar", _ => true)
             .SetException(new JSDisconnectedException("circuit gone"));
-        var sidebar = _ctx.RenderComponent<Sidebar>();
+        var sidebar = _ctx.Render<Sidebar>();
 
         sidebar.Find("[data-testid=collapse-toggle]").Click();
 
@@ -146,7 +146,7 @@ public class ShellTests : IDisposable
         // level is deliberate: an interop timeout is routine, unlike the missing-function case below.
         _ctx.JSInterop.SetupVoid("sqlAgentUi.setSidebar", _ => true)
             .SetException(new TaskCanceledException("JS interop call timed out"));
-        var sidebar = _ctx.RenderComponent<Sidebar>();
+        var sidebar = _ctx.Render<Sidebar>();
 
         sidebar.Find("[data-testid=collapse-toggle]").Click();
 
@@ -168,18 +168,18 @@ public class ShellTests : IDisposable
         // where it cannot drown the log every time a laptop sleeps.
         _ctx.JSInterop.SetupVoid("sqlAgentUi.setSidebar", _ => true)
             .SetException(new JSException("Could not find 'sqlAgentUi.setSidebar'"));
-        var sidebar = _ctx.RenderComponent<Sidebar>();
+        var sidebar = _ctx.Render<Sidebar>();
         sidebar.Find("[data-testid=collapse-toggle]").Click();
 
         Assert.Equal(LogLevel.Warning,
             _logs.Records.Single(r => r.Message.Contains("sqlAgentUi.setSidebar failed")).Level);
 
-        using var disconnected = new Bunit.TestContext();
+        using var disconnected = new Bunit.BunitContext();
         var otherLogs = new RecordingLoggerProvider();
         RegisterSidebarServices(disconnected, otherLogs, "expanded");
         disconnected.JSInterop.SetupVoid("sqlAgentUi.setSidebar", _ => true)
             .SetException(new JSDisconnectedException("circuit gone"));
-        disconnected.RenderComponent<Sidebar>().Find("[data-testid=collapse-toggle]").Click();
+        disconnected.Render<Sidebar>().Find("[data-testid=collapse-toggle]").Click();
 
         Assert.Equal(LogLevel.Debug,
             otherLogs.Records.Single(r => r.Message.Contains("sqlAgentUi.setSidebar failed")).Level);
@@ -196,7 +196,7 @@ public class ShellTests : IDisposable
         // seeds no connection and never selects one, so a restored rail would render only its <select> and
         // label and this assertion would stay green. <aside class="rail"> was SchemaRail's root element,
         // rendered on every render regardless of selection -- assert on that instead.
-        var sidebar = _ctx.RenderComponent<Sidebar>();
+        var sidebar = _ctx.Render<Sidebar>();
 
         Assert.DoesNotContain("class=\"rail\"", sidebar.Markup);
         Assert.Contains("Databases", sidebar.Markup);
@@ -211,7 +211,7 @@ public class ShellTests : IDisposable
         // while /settings 404'd into Routes.razor's "Not found." Task 7 makes the route real, so the row
         // belongs back -- this asserts the row exists AND that it targets /settings specifically, not
         // just that the word "Settings" appears somewhere in the sidebar's markup.
-        var sidebar = _ctx.RenderComponent<Sidebar>();
+        var sidebar = _ctx.Render<Sidebar>();
 
         var settingsLink = sidebar.Find("a[href='/settings']");
         Assert.Contains("Settings", settingsLink.TextContent);
@@ -340,11 +340,11 @@ public class ShellTests : IDisposable
         // still-open drawer and scrim, obscuring the very page the tap asked for. Mirrors WorkArea's own
         // LocationChanged subscription for the analogous problem (a tripped error boundary surviving
         // navigation).
-        var sidebar = _ctx.RenderComponent<Sidebar>();
+        var sidebar = _ctx.Render<Sidebar>();
         sidebar.Find("[data-testid=drawer-open]").Click();
         Assert.Contains("drawer-open", sidebar.Find("aside").ClassName);
 
-        var nav = _ctx.Services.GetRequiredService<FakeNavigationManager>();
+        var nav = _ctx.Services.GetRequiredService<BunitNavigationManager>();
         nav.NavigateTo("database");
 
         Assert.DoesNotContain("drawer-open", sidebar.Find("aside").ClassName);
@@ -356,7 +356,7 @@ public class ShellTests : IDisposable
         // The spec calls for the drawer to close on scrim click OR Escape; only the scrim was wired.
         // On a phone the scrim is a tap target, but on a narrow desktop window (the same sub-1024px
         // breakpoint) Escape is the reflex, and nothing answered it.
-        var sidebar = _ctx.RenderComponent<Sidebar>();
+        var sidebar = _ctx.Render<Sidebar>();
         sidebar.Find("[data-testid=drawer-open]").Click();
         Assert.Contains("drawer-open", sidebar.Find("aside").ClassName);
 
@@ -381,7 +381,7 @@ public class ShellTests : IDisposable
         // document's focused area is still the body, and the opening click has already focused the
         // hamburger. So the move is explicit, via ElementReference.FocusAsync, which is interop
         // underneath; asserting the invocation is the only observable bUnit offers.
-        var sidebar = _ctx.RenderComponent<Sidebar>();
+        var sidebar = _ctx.Render<Sidebar>();
 
         sidebar.Find("[data-testid=drawer-open]").Click();
 
@@ -410,7 +410,7 @@ public class ShellTests : IDisposable
         // event-handler frame carries a "blazor:onkeydown" marker attribute. That is not real HTML and
         // never reaches a browser, but it is exactly the fact under test -- whether the render tree
         // registered a listener on this element -- and it is the only place bUnit exposes it.
-        var sidebar = _ctx.RenderComponent<Sidebar>();
+        var sidebar = _ctx.Render<Sidebar>();
 
         Assert.False(sidebar.Find("aside").HasAttribute("blazor:onkeydown"),
             "A closed drawer must attach no keydown handler; every keystroke anywhere inside this <aside> would otherwise cost a round trip and a full Sidebar re-render.");
@@ -446,7 +446,7 @@ public class ShellTests : IDisposable
         // Opening the drawer moves focus into it (Phase A). Closing it without giving focus back leaves
         // the focus ring on an element that is now hidden, so the next Tab restarts from the top of the
         // document — the classic dialog-dismissal defect, and the other half of carry-forward item 3.
-        var sidebar = _ctx.RenderComponent<Sidebar>();
+        var sidebar = _ctx.Render<Sidebar>();
         sidebar.Find("[data-testid=drawer-open]").Click();
         var afterOpen = FocusInvocationCount();
 
@@ -471,7 +471,7 @@ public class ShellTests : IDisposable
         // Closing_the_drawer_returns_focus_to_the_hamburger_that_opened_it. The re-render used below
         // (collapsing the sidebar) is neither an open nor a close, so it is still a valid case where no
         // focus move should happen.
-        var sidebar = _ctx.RenderComponent<Sidebar>();
+        var sidebar = _ctx.Render<Sidebar>();
 
         Assert.Equal(0, FocusInvocationCount());
 
@@ -492,7 +492,7 @@ public class ShellTests : IDisposable
         // the focus path at all, so no keyboard event can reach it, bubbled or otherwise. -1 rather than
         // 0 keeps the aside out of the tab order, so Escape-to-close costs no phantom tab stop before
         // the brand link. Same shape as Menu.razor's .menu-root and Modal.razor's .modal-root.
-        var sidebar = _ctx.RenderComponent<Sidebar>();
+        var sidebar = _ctx.Render<Sidebar>();
 
         Assert.Equal("-1", sidebar.Find("aside").GetAttribute("tabindex"));
     }
@@ -507,7 +507,7 @@ public class ShellTests : IDisposable
         // asked to open. The nav row's own click on Search cannot exercise this: Modal's scrim covers
         // the whole viewport while a dialog is open, so that click path is never reachable to begin
         // with -- only the document-level shortcut can land here.
-        var sidebar = _ctx.RenderComponent<Sidebar>();
+        var sidebar = _ctx.Render<Sidebar>();
         var dialogs = _ctx.Services.GetRequiredService<DialogService>();
         var shortcuts = _ctx.Services.GetRequiredService<ShortcutService>();
         RenderFragment other = b => b.AddMarkupContent(0, "<div id=\"other-dialog\">mid-rename</div>");
@@ -523,7 +523,7 @@ public class ShellTests : IDisposable
     {
         // The other half of the guard above: it must not swallow the shortcut entirely, only defer to
         // whatever is already open.
-        var sidebar = _ctx.RenderComponent<Sidebar>();
+        var sidebar = _ctx.Render<Sidebar>();
         var dialogs = _ctx.Services.GetRequiredService<DialogService>();
         var shortcuts = _ctx.Services.GetRequiredService<ShortcutService>();
         Assert.Null(dialogs.Current);
@@ -536,8 +536,8 @@ public class ShellTests : IDisposable
     [Fact]
     public void Disposing_the_sidebar_unsubscribes_from_navigation_changes()
     {
-        var sidebar = _ctx.RenderComponent<Sidebar>();
-        var nav = _ctx.Services.GetRequiredService<FakeNavigationManager>();
+        var sidebar = _ctx.Render<Sidebar>();
+        var nav = _ctx.Services.GetRequiredService<BunitNavigationManager>();
 
         // Not pinned to a literal count: SidebarNav renders one NavLink per route (three as of Task 7,
         // was two before), and each NavLink subscribes to LocationChanged internally (to compute its own
@@ -551,7 +551,7 @@ public class ShellTests : IDisposable
 
         // bUnit disposes the whole rendered component tree here, the same as the real Blazor renderer
         // does when a component leaves the render tree.
-        _ctx.DisposeComponents();
+        _ctx.Renderer.DisposeComponents();
 
         // If Sidebar.Dispose() did not unsubscribe, this would still be at least 1 and the component
         // would keep itself alive for the rest of the circuit -- the same class of leak
@@ -569,7 +569,7 @@ public class ShellTests : IDisposable
     /// <summary>The registrations Sidebar needs to render at all: DatabaseSection's connection services,
     /// plus HostInfo and a theme read-back for the UserCard/ThemeToggle in its foot. Shared by the
     /// fixture's own context and by the tests that need a second, differently-configured one.</summary>
-    private void RegisterSidebarServices(Bunit.TestContext ctx, RecordingLoggerProvider logs, string sidebarState)
+    private void RegisterSidebarServices(Bunit.BunitContext ctx, RecordingLoggerProvider logs, string sidebarState)
     {
         ctx.Services.AddDbContext<SqlAgentDbContext>(o => o.UseSqlite(_conn));
         ctx.Services.AddSingleton<ISecretStore, InMemorySecretStore>();

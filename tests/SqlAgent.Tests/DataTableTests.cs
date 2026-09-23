@@ -14,8 +14,8 @@ public class DataTableTests
     [Fact]
     public void Renders_null_distinctly_and_pages_to_twenty_five_rows_by_default()
     {
-        using var ctx = new Bunit.TestContext();
-        var table = ctx.RenderComponent<DataTable>(p => p
+        using var ctx = new Bunit.BunitContext();
+        var table = ctx.Render<DataTable>(p => p
             .Add(x => x.Columns, Columns)
             .Add(x => x.Rows, Rows(30))
             .Add(x => x.TotalRowCount, 30));
@@ -28,8 +28,8 @@ public class DataTableTests
     [Fact]
     public void Page_size_and_next_page_change_the_visible_rows()
     {
-        using var ctx = new Bunit.TestContext();
-        var table = ctx.RenderComponent<DataTable>(p => p
+        using var ctx = new Bunit.BunitContext();
+        var table = ctx.Render<DataTable>(p => p
             .Add(x => x.Columns, Columns)
             .Add(x => x.Rows, Rows(60))
             .Add(x => x.TotalRowCount, 60));
@@ -45,10 +45,10 @@ public class DataTableTests
     [Fact]
     public void Long_values_expand_in_place_and_exports_use_the_visible_result()
     {
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
         var longValue = new string('x', 240);
-        var table = ctx.RenderComponent<DataTable>(p => p
+        var table = ctx.Render<DataTable>(p => p
             .Add(x => x.Columns, new[] { "value" })
             .Add(x => x.Rows, new[] { (IReadOnlyList<object?>)[longValue] })
             .Add(x => x.TotalRowCount, 1));

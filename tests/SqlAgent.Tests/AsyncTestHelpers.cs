@@ -1,14 +1,9 @@
 namespace SqlAgent.Tests;
 
 /// <summary>
-/// Shared bUnit polling helper. bunit 1.40.0 ships its own <c>WaitForStateAsync</c> in two assemblies
-/// (Bunit.Core.dll and Bunit.Web.dll), and since the <c>bunit</c> meta-package references both, the
-/// extension-method lookup is ambiguous and the compiler drops it from candidates entirely (confirmed
-/// with a throwaway diagnostic file: calling the type name directly gives CS0433 "exists in both ...
-/// Bunit.Core ... and ... Bunit.Web", while the extension-method call site just reports CS1061 "not
-/// found"). This is a minimal local stand-in — same non-blocking polling idea, no dependency on the
-/// ambiguous type. Originally written inline in <c>WorkspaceTests</c> (SQL tab cancel/re-run tests);
-/// hoisted here so other test files (<c>ChatPageTests</c> among them) do not need their own copy.
+/// Shared polling helper for tests that wait on application state rather than a bUnit render.
+/// Originally written inline in <c>WorkspaceTests</c> (SQL tab cancel/re-run tests); hoisted here so
+/// other test files (<c>ChatPageTests</c> among them) do not need their own copy.
 /// </summary>
 internal static class AsyncTestHelpers
 {

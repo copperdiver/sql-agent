@@ -11,9 +11,9 @@ namespace SqlAgent.Tests;
 
 public class ComposerTests
 {
-    private static Bunit.TestContext NewContext()
+    private static Bunit.BunitContext NewContext()
     {
-        var ctx = new Bunit.TestContext();
+        var ctx = new Bunit.BunitContext();
         ctx.Services.AddScoped<ShortcutService>();
         var provider = new LocalDiskFileStorageProvider(Path.Combine(Path.GetTempPath(), $"sqlagent-composer-{Guid.NewGuid():N}"));
         ctx.Services.AddSingleton(new FileStorageOptions());
@@ -26,7 +26,7 @@ public class ComposerTests
         // because one of them is an ElementReference the test cannot predict.
         ctx.JSInterop.SetupVoid("sqlAgentComposer.bind", _ => true);
         ctx.JSInterop.SetupVoid("sqlAgentComposer.unbind", _ => true);
-        // Any test that changes Value without going through a real DOM input event (SetParametersAndRender
+        // Any test that changes Value without going through a real DOM input event (Render on the existing component
         // with a new Value, exactly as a suggestion chip or a post-send clear would) makes Composer call
         // this; strict bUnit JSInterop needs it planned even for tests that don't care about it themselves.
         ctx.JSInterop.SetupVoid("sqlAgentComposer.resize", _ => true);
@@ -47,7 +47,7 @@ public class ComposerTests
         using var ctx = NewContext();
         var connections = TwoConnections();
 
-        var menu = ctx.RenderComponent<AttachmentMenu>(p => p.Add(m => m.Connections, connections));
+        var menu = ctx.Render<AttachmentMenu>(p => p.Add(m => m.Connections, connections));
         menu.Find(".menu-trigger").Click();
 
         Assert.Contains("analytics", menu.Markup);
@@ -63,7 +63,7 @@ public class ComposerTests
         var connections = TwoConnections();
         DatabaseConnectionInfo? chosen = null;
 
-        var menu = ctx.RenderComponent<AttachmentMenu>(p => p
+        var menu = ctx.Render<AttachmentMenu>(p => p
             .Add(m => m.Connections, connections)
             .Add(m => m.AttachedIds, new[] { connections[0].Id })
             .Add(m => m.OnAttach, EventCallback.Factory.Create<DatabaseConnectionInfo>(
@@ -84,7 +84,7 @@ public class ComposerTests
         // nothing and reads as a bug rather than as "you have not set up a database yet".
         using var ctx = NewContext();
 
-        var menu = ctx.RenderComponent<AttachmentMenu>(p => p.Add(m => m.Connections, Array.Empty<DatabaseConnectionInfo>()));
+        var menu = ctx.Render<AttachmentMenu>(p => p.Add(m => m.Connections, Array.Empty<DatabaseConnectionInfo>()));
         menu.Find(".menu-trigger").Click();
 
         Assert.Contains("No databases", menu.Markup);
@@ -102,7 +102,7 @@ public class ComposerTests
             new(Guid.NewGuid(), "billing"),
         };
 
-        var chips = ctx.RenderComponent<AttachmentChips>(p => p
+        var chips = ctx.Render<AttachmentChips>(p => p
             .Add(c => c.Databases, attached)
             .Add(c => c.OnRemove, EventCallback.Factory.Create<ChatDatabaseRef>(
                 new object(), d => removed = d)));
@@ -124,7 +124,7 @@ public class ComposerTests
         var removed = default(ChatDatabaseRef);
         var attached = new List<ChatDatabaseRef> { new(null, "deleted-connection") };
 
-        var chips = ctx.RenderComponent<AttachmentChips>(p => p
+        var chips = ctx.Render<AttachmentChips>(p => p
             .Add(c => c.Databases, attached)
             .Add(c => c.OnRemove, EventCallback.Factory.Create<ChatDatabaseRef>(
                 new object(), d => removed = d)));
@@ -142,7 +142,7 @@ public class ComposerTests
         // edited after the fact.
         using var ctx = NewContext();
 
-        var chips = ctx.RenderComponent<AttachmentChips>(p => p
+        var chips = ctx.Render<AttachmentChips>(p => p
             .Add(c => c.Databases, new List<ChatDatabaseRef> { new(Guid.NewGuid(), "analytics") })
             .Add(c => c.ReadOnly, true));
 
@@ -160,7 +160,7 @@ public class ComposerTests
             new("notes.txt", "text/plain", 5, "local-disk", "notes", "/files/notes"),
         };
 
-        var composer = ctx.RenderComponent<Composer>(p => p
+        var composer = ctx.Render<Composer>(p => p
             .Add(c => c.Files, pending)
             .Add(c => c.OnRemoveFile, EventCallback.Factory.Create<PendingFileAttachment>(
                 this, file => removed = file)));
@@ -177,13 +177,13 @@ public class ComposerTests
         using var ctx = NewContext();
         var sends = 0;
 
-        var composer = ctx.RenderComponent<Composer>(p => p
+        var composer = ctx.Render<Composer>(p => p
             .Add(c => c.Value, "   ")
             .Add(c => c.OnSend, EventCallback.Factory.Create(new object(), () => sends++)));
 
         Assert.True(composer.Find("[data-testid=send]").HasAttribute("disabled"));
 
-        composer.SetParametersAndRender(p => p.Add(c => c.Value, "how many orders"));
+        composer.Render(p => p.Add(c => c.Value, "how many orders"));
         composer.Find("[data-testid=send]").Click();
 
         Assert.Equal(1, sends);
@@ -197,7 +197,7 @@ public class ComposerTests
         // would, without a JS engine to press the key.
         using var ctx = NewContext();
         var sends = 0;
-        var composer = ctx.RenderComponent<Composer>(p => p
+        var composer = ctx.Render<Composer>(p => p
             .Add(c => c.Value, "how many orders")
             .Add(c => c.OnSend, EventCallback.Factory.Create(new object(), () => sends++)));
 
@@ -213,14 +213,14 @@ public class ComposerTests
         // to live in the component. Same shape as WorkspaceTests' Ctrl+Enter guards on the SQL page.
         using var ctx = NewContext();
         var sends = 0;
-        var composer = ctx.RenderComponent<Composer>(p => p
+        var composer = ctx.Render<Composer>(p => p
             .Add(c => c.Value, "   ")
             .Add(c => c.OnSend, EventCallback.Factory.Create(new object(), () => sends++)));
 
         await composer.InvokeAsync(() => composer.Instance.SendFromEditor());
         Assert.Equal(0, sends);
 
-        composer.SetParametersAndRender(p => p
+        composer.Render(p => p
             .Add(c => c.Value, "how many orders")
             .Add(c => c.Busy, true));
         await composer.InvokeAsync(() => composer.Instance.SendFromEditor());
@@ -233,7 +233,7 @@ public class ComposerTests
     {
         using var ctx = NewContext();
         var sends = 0;
-        var composer = ctx.RenderComponent<Composer>(p => p
+        var composer = ctx.Render<Composer>(p => p
             .Add(c => c.Value, "summarize the file")
             .Add(c => c.Uploading, true)
             .Add(c => c.OnSend, EventCallback.Factory.Create(new object(), () => sends++)));
@@ -253,8 +253,8 @@ public class ComposerTests
         // sqlAgentComposer.resize, or the box keeps whatever height the last keystroke left it at.
         using var ctx = NewContext();
 
-        var composer = ctx.RenderComponent<Composer>(p => p.Add(c => c.Value, "how many orders"));
-        composer.SetParametersAndRender(p => p.Add(c => c.Value, "select every order"));
+        var composer = ctx.Render<Composer>(p => p.Add(c => c.Value, "how many orders"));
+        composer.Render(p => p.Add(c => c.Value, "select every order"));
 
         ctx.JSInterop.VerifyInvoke("sqlAgentComposer.resize");
     }
@@ -270,10 +270,10 @@ public class ComposerTests
         // second, pointless JS round trip on top of the one composer.js already made live.
         using var ctx = NewContext();
         IRenderedComponent<Composer>? composerRef = null;
-        var composer = ctx.RenderComponent<Composer>(p => p
+        var composer = ctx.Render<Composer>(p => p
             .Add(c => c.Value, "")
             .Add(c => c.ValueChanged, EventCallback.Factory.Create<string>(new object(),
-                v => composerRef!.SetParametersAndRender(p2 => p2.Add(c => c.Value, v)))));
+                v => composerRef!.Render(p2 => p2.Add(c => c.Value, v)))));
         composerRef = composer;
 
         composer.Find("textarea").Input("how many orders");
@@ -288,7 +288,7 @@ public class ComposerTests
         using var ctx = NewContext();
         var stops = 0;
 
-        var composer = ctx.RenderComponent<Composer>(p => p
+        var composer = ctx.Render<Composer>(p => p
             .Add(c => c.Value, "how many orders")
             .Add(c => c.Busy, true)
             .Add(c => c.OnStop, EventCallback.Factory.Create(new object(), () => stops++)));

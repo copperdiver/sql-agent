@@ -30,7 +30,7 @@ sealed class ScratchProvider : IDatabaseProvider
 public class ScratchPadTests : IDisposable
 {
     private readonly SqliteConnection _conn = new("DataSource=:memory:");
-    private readonly Bunit.TestContext _ctx = new();
+    private readonly Bunit.BunitContext _ctx = new();
     private readonly ScratchProvider _provider = new();
 
     public ScratchPadTests()
@@ -59,7 +59,7 @@ public class ScratchPadTests : IDisposable
         var id = (await scope.ServiceProvider.GetRequiredService<DatabaseConnectionService>().CreateAsync(
             new DatabaseConnectionInput("prod", DatabaseProviderType.Postgres, false), "cs")).Id;
 
-        var pad = _ctx.RenderComponent<ScratchPad>(p => p
+        var pad = _ctx.Render<ScratchPad>(p => p
             .Add(x => x.ConnectionId, id)
             .Add(x => x.InitialSql, "UPDATE orders SET total = 0"));
 

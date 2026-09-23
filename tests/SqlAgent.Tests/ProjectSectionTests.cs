@@ -13,7 +13,7 @@ namespace SqlAgent.Tests;
 public class ProjectSectionTests : IDisposable
 {
     private readonly SqliteConnection _conn = new("DataSource=:memory:");
-    private readonly Bunit.TestContext _ctx = new();
+    private readonly Bunit.BunitContext _ctx = new();
 
     public ProjectSectionTests()
     {
@@ -36,7 +36,7 @@ public class ProjectSectionTests : IDisposable
     {
         // "No projects yet" tells the user nothing they cannot already see, and the history section
         // below already covers the genuinely empty case.
-        var section = _ctx.RenderComponent<ProjectSection>();
+        var section = _ctx.Render<ProjectSection>();
 
         Assert.Empty(section.FindAll(".project-row"));
         Assert.Single(section.FindAll("[data-testid=project-add]"));
@@ -48,7 +48,7 @@ public class ProjectSectionTests : IDisposable
     {
         await SeedProjectAsync("quarterly", "first", "second");
 
-        var section = _ctx.RenderComponent<ProjectSection>();
+        var section = _ctx.Render<ProjectSection>();
 
         Assert.Contains("quarterly", section.Markup);
         Assert.Contains("2", section.Find(".project-count").TextContent);
@@ -60,7 +60,7 @@ public class ProjectSectionTests : IDisposable
         // Expanding every project on load would bury the history section under everything the user has
         // ever filed.
         var id = await SeedProjectAsync("quarterly", "first");
-        var section = _ctx.RenderComponent<ProjectSection>();
+        var section = _ctx.Render<ProjectSection>();
 
         Assert.Empty(section.FindAll(".chat-row"));
 
@@ -75,7 +75,7 @@ public class ProjectSectionTests : IDisposable
     public async Task Creating_a_project_goes_through_a_dialog_and_appears_in_the_list()
     {
         var dialogs = _ctx.Services.GetRequiredService<DialogService>();
-        var section = _ctx.RenderComponent<ProjectSection>();
+        var section = _ctx.Render<ProjectSection>();
 
         section.Find("[data-testid=project-add]").Click();
         var dialog = _ctx.Render(dialogs.Current!);
@@ -93,7 +93,7 @@ public class ProjectSectionTests : IDisposable
         // button is broken.
         await SeedProjectAsync("quarterly");
         var dialogs = _ctx.Services.GetRequiredService<DialogService>();
-        var section = _ctx.RenderComponent<ProjectSection>();
+        var section = _ctx.Render<ProjectSection>();
 
         section.Find("[data-testid=project-add]").Click();
         var dialog = _ctx.Render(dialogs.Current!);
@@ -118,8 +118,8 @@ public class ProjectSectionTests : IDisposable
         // exactly the bug this test exists to catch.
         await SeedProjectAsync("quarterly");
         var dialogs = _ctx.Services.GetRequiredService<DialogService>();
-        var section = _ctx.RenderComponent<ProjectSection>();
-        var host = _ctx.RenderComponent<DialogHost>();
+        var section = _ctx.Render<ProjectSection>();
+        var host = _ctx.Render<DialogHost>();
 
         section.Find("[data-testid=project-add]").Click();
         host.Find("input").Change("quarterly");
@@ -141,7 +141,7 @@ public class ProjectSectionTests : IDisposable
     {
         var id = await SeedProjectAsync("quarterly", "kept");
         var dialogs = _ctx.Services.GetRequiredService<DialogService>();
-        var section = _ctx.RenderComponent<ProjectSection>();
+        var section = _ctx.Render<ProjectSection>();
 
         section.Find(".project-row .menu-trigger").Click();
         section.FindAll(".menu-item-action").First(r => r.TextContent.Contains("Delete")).Click();
@@ -161,7 +161,7 @@ public class ProjectSectionTests : IDisposable
     {
         await SeedProjectAsync("quarterly", "doomed");
         var dialogs = _ctx.Services.GetRequiredService<DialogService>();
-        var section = _ctx.RenderComponent<ProjectSection>();
+        var section = _ctx.Render<ProjectSection>();
         section.Find(".project-row .menu-trigger").Click();
         section.FindAll(".menu-item-action").First(r => r.TextContent.Contains("Delete")).Click();
 
@@ -181,7 +181,7 @@ public class ProjectSectionTests : IDisposable
         // user has open, not one collapsed elsewhere in the list.
         await SeedProjectAsync("quarterly", "kept");
         var dialogs = _ctx.Services.GetRequiredService<DialogService>();
-        var section = _ctx.RenderComponent<ProjectSection>();
+        var section = _ctx.Render<ProjectSection>();
 
         await section.Find(".project-open").ClickAsync(new MouseEventArgs());
         Assert.Single(section.FindAll(".chat-row"));
@@ -204,7 +204,7 @@ public class ProjectSectionTests : IDisposable
         // it already left.
         await SeedProjectAsync("quarterly", "wandering");
         var dialogs = _ctx.Services.GetRequiredService<DialogService>();
-        var section = _ctx.RenderComponent<ProjectSection>();
+        var section = _ctx.Render<ProjectSection>();
 
         await section.Find(".project-open").ClickAsync(new MouseEventArgs());
         Assert.Single(section.FindAll(".chat-row"));
@@ -226,7 +226,7 @@ public class ProjectSectionTests : IDisposable
         // consuming side of that handshake -- the section that actually reads the request and opens the
         // project a search hit pointed at, since there is no project route to navigate to instead.
         var id = await SeedProjectAsync("quarterly", "first");
-        var section = _ctx.RenderComponent<ProjectSection>();
+        var section = _ctx.Render<ProjectSection>();
         Assert.Empty(section.FindAll(".chat-row"));
 
         await section.InvokeAsync(() =>
@@ -240,7 +240,7 @@ public class ProjectSectionTests : IDisposable
     {
         // A chat moved into a project from the history section's own row has to change this section's
         // counts, and the two are siblings that only meet through AppState.
-        var section = _ctx.RenderComponent<ProjectSection>();
+        var section = _ctx.Render<ProjectSection>();
         await SeedProjectAsync("brand new");
 
         await section.InvokeAsync(_ctx.Services.GetRequiredService<AppState>().NotifyChatsChanged);

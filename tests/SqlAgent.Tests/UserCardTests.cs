@@ -8,9 +8,9 @@ namespace SqlAgent.Tests;
 
 public class UserCardTests
 {
-    private static Bunit.TestContext NewContext()
+    private static Bunit.BunitContext NewContext()
     {
-        var ctx = new Bunit.TestContext();
+        var ctx = new Bunit.BunitContext();
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
@@ -33,7 +33,7 @@ public class UserCardTests
         // launch token. Showing the OS account is true without inventing an identity.
         using var ctx = NewContext();
 
-        var card = ctx.RenderComponent<UserCard>();
+        var card = ctx.Render<UserCard>();
 
         Assert.Contains(Environment.UserName, card.Markup);
         Assert.Contains(Environment.MachineName, card.Markup);
@@ -45,7 +45,7 @@ public class UserCardTests
         // Nothing to sign out of. An item that appears to end a session but cannot would be a lie about
         // the security model.
         using var ctx = NewContext();
-        var card = ctx.RenderComponent<UserCard>();
+        var card = ctx.Render<UserCard>();
 
         card.Find(".user-card-trigger").Click();
 
@@ -56,7 +56,7 @@ public class UserCardTests
     public void The_menu_offers_settings_theme_and_about()
     {
         using var ctx = NewContext();
-        var card = ctx.RenderComponent<UserCard>();
+        var card = ctx.Render<UserCard>();
 
         card.Find(".user-card-trigger").Click();
 
@@ -69,7 +69,7 @@ public class UserCardTests
     public void About_reports_the_port_and_store_location_from_configuration()
     {
         using var ctx = NewContext();
-        var card = ctx.RenderComponent<UserCard>();
+        var card = ctx.Render<UserCard>();
         card.Find(".user-card-trigger").Click();
 
         // Not .menu-item (the row's own outer div): MenuItem's onclick lives on the nested
@@ -94,7 +94,7 @@ public class UserCardTests
         // control but landing on the label would see the whole menu vanish with no theme change and no
         // feedback (Task 6 review finding).
         using var ctx = NewContext();
-        var card = ctx.RenderComponent<UserCard>();
+        var card = ctx.Render<UserCard>();
         card.Find(".user-card-trigger").Click();
 
         card.FindAll(".menu-item-action").Single(i => i.TextContent.Contains("Theme")).Click();

@@ -14,7 +14,7 @@ namespace SqlAgent.Tests;
 public class HistorySectionTests : IDisposable
 {
     private readonly SqliteConnection _conn = new("DataSource=:memory:");
-    private readonly Bunit.TestContext _ctx = new();
+    private readonly Bunit.BunitContext _ctx = new();
 
     public HistorySectionTests()
     {
@@ -51,7 +51,7 @@ public class HistorySectionTests : IDisposable
         await SeedAsync("this morning", DateTime.UtcNow);
         await SeedAsync("last month", DateTime.UtcNow.AddDays(-20));
 
-        var section = _ctx.RenderComponent<HistorySection>();
+        var section = _ctx.Render<HistorySection>();
 
         var headings = section.FindAll(".history-heading").Select(h => h.TextContent.Trim()).ToList();
         Assert.Equal("Today", headings[0]);
@@ -62,7 +62,7 @@ public class HistorySectionTests : IDisposable
     [Fact]
     public async Task Nothing_but_an_explanation_shows_when_there_is_no_history()
     {
-        var section = _ctx.RenderComponent<HistorySection>();
+        var section = _ctx.Render<HistorySection>();
 
         Assert.Empty(section.FindAll(".chat-row"));
         Assert.Contains("No chats yet", section.Markup);
@@ -77,7 +77,7 @@ public class HistorySectionTests : IDisposable
         var id = await SeedAsync("open one", DateTime.UtcNow);
         _ctx.Services.GetRequiredService<AppState>().SetActiveChat(id);
 
-        var section = _ctx.RenderComponent<HistorySection>();
+        var section = _ctx.Render<HistorySection>();
 
         Assert.Contains("active", section.Find(".chat-row").ClassName);
     }
@@ -88,7 +88,7 @@ public class HistorySectionTests : IDisposable
         // HistorySection and the chat page are siblings under MainLayout, so a chat created on the page
         // reaches this component only through AppState. Without the subscription the sidebar would show
         // whatever existed when the tab was opened, which is exactly the defect SchemaRail already had.
-        var section = _ctx.RenderComponent<HistorySection>();
+        var section = _ctx.Render<HistorySection>();
         Assert.Contains("No chats yet", section.Markup);
 
         await SeedAsync("brand new", DateTime.UtcNow);
@@ -101,7 +101,7 @@ public class HistorySectionTests : IDisposable
     public async Task Cancelling_the_rename_dialog_keeps_the_title()
     {
         var id = await SeedAsync("keep me", DateTime.UtcNow);
-        var section = _ctx.RenderComponent<HistorySection>();
+        var section = _ctx.Render<HistorySection>();
         var dialogs = _ctx.Services.GetRequiredService<DialogService>();
 
         section.Find(".chat-row .menu-trigger").Click();
@@ -125,7 +125,7 @@ public class HistorySectionTests : IDisposable
         // isolation, but neither composes them: this is the only test that drives a delete through the
         // row's own menu inside a rendered HistorySection and checks the row actually disappears from it.
         var id = await SeedAsync("throwaway", DateTime.UtcNow);
-        var section = _ctx.RenderComponent<HistorySection>();
+        var section = _ctx.Render<HistorySection>();
         var dialogs = _ctx.Services.GetRequiredService<DialogService>();
 
         section.Find(".chat-row .menu-trigger").Click();
@@ -150,12 +150,12 @@ public class HistorySectionTests : IDisposable
         // on the first render of "/"), and calling AppState by hand would not exercise that guard at all.
         var chatB = await SeedAsync("already there", DateTime.UtcNow);
 
-        var page = _ctx.RenderComponent<ChatPage>(p => p.Add(c => c.Id, chatB));
-        var history = _ctx.RenderComponent<HistorySection>();
+        var page = _ctx.Render<ChatPage>(p => p.Add(c => c.Id, chatB));
+        var history = _ctx.Render<HistorySection>();
         Assert.Contains("active", history.Find(".chat-row").ClassName);
 
         // The same re-parameterization the router performs navigating from a stored chat back to "/".
-        await page.InvokeAsync(() => page.SetParametersAndRender(p => p.Add(c => c.Id, (Guid?)null)));
+        await page.InvokeAsync(() => page.Render(p => p.Add(c => c.Id, (Guid?)null)));
 
         Assert.DoesNotContain(history.FindAll(".chat-row"), r => r.ClassName!.Contains("active"));
     }

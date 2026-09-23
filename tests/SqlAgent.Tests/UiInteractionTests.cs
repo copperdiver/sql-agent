@@ -12,10 +12,10 @@ public class UiInteractionTests
     [Fact]
     public void A_menu_is_closed_until_its_trigger_is_clicked()
     {
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
         ctx.Services.AddScoped<ShortcutService>();
 
-        var menu = ctx.RenderComponent<Menu>(p => p
+        var menu = ctx.Render<Menu>(p => p
             .Add(m => m.Trigger, (RenderFragment)(b => b.AddMarkupContent(0, "<span>open me</span>")))
             .AddChildContent("<div id=\"body\">contents</div>"));
 
@@ -32,9 +32,9 @@ public class UiInteractionTests
         // .menu-root's Escape handler only fires via bubbling from whatever element currently has
         // focus. KeyDown() below invokes it directly and would pass even if nothing were focusable, so
         // it cannot catch a regression to a plain <div> trigger — this test pins the tag name instead.
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
         ctx.Services.AddScoped<ShortcutService>();
-        var menu = ctx.RenderComponent<Menu>(p => p
+        var menu = ctx.Render<Menu>(p => p
             .Add(m => m.Trigger, (RenderFragment)(b => b.AddMarkupContent(0, "<span>t</span>")))
             .AddChildContent("<div id=\"body\">contents</div>"));
 
@@ -51,9 +51,9 @@ public class UiInteractionTests
         // conveyed: that the trigger opens something. aria-haspopup says so honestly, and aria-expanded
         // has to track the actual state — a trigger permanently stuck on "false" is worse than no
         // attribute, because it actively tells the user nothing opened.
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
         ctx.Services.AddScoped<ShortcutService>();
-        var menu = ctx.RenderComponent<Menu>(p => p
+        var menu = ctx.Render<Menu>(p => p
             .Add(m => m.Trigger, (RenderFragment)(b => b.AddMarkupContent(0, "<span>t</span>")))
             .AddChildContent("<div id=\"body\">contents</div>"));
 
@@ -78,9 +78,9 @@ public class UiInteractionTests
         // role="menu" present, NVDA and JAWS switch into menu mode and expose only the owned menu items,
         // so arrow-key navigation skips those three buttons and the theme control cannot be reached from
         // the menu that contains it. Plain buttons in a popover is what this component actually is.
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
         ctx.Services.AddScoped<ShortcutService>();
-        var menu = ctx.RenderComponent<Menu>(p => p
+        var menu = ctx.Render<Menu>(p => p
             .Add(m => m.Trigger, (RenderFragment)(b => b.AddMarkupContent(0, "<span>t</span>")))
             .AddChildContent<MenuItem>(ip => ip
                 .AddChildContent("Theme")
@@ -99,9 +99,9 @@ public class UiInteractionTests
         // Without a backdrop the only way out of an open menu is re-clicking the trigger, which is not
         // how any menu on any platform behaves. It is a plain element rather than a document-level JS
         // listener so it works in the static first render too.
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
         ctx.Services.AddScoped<ShortcutService>();
-        var menu = ctx.RenderComponent<Menu>(p => p
+        var menu = ctx.Render<Menu>(p => p
             .Add(m => m.Trigger, (RenderFragment)(b => b.AddMarkupContent(0, "<span>t</span>")))
             .AddChildContent("<div id=\"body\">contents</div>"));
         menu.Find(".menu-trigger").Click();
@@ -114,9 +114,9 @@ public class UiInteractionTests
     [Fact]
     public void Escape_closes_the_menu()
     {
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
         ctx.Services.AddScoped<ShortcutService>();
-        var menu = ctx.RenderComponent<Menu>(p => p
+        var menu = ctx.Render<Menu>(p => p
             .Add(m => m.Trigger, (RenderFragment)(b => b.AddMarkupContent(0, "<span>t</span>")))
             .AddChildContent("<div id=\"body\">contents</div>"));
         menu.Find(".menu-trigger").Click();
@@ -129,10 +129,10 @@ public class UiInteractionTests
     [Fact]
     public void Choosing_a_menu_item_invokes_its_callback_and_closes_the_menu()
     {
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
         ctx.Services.AddScoped<ShortcutService>();
         var clicked = false;
-        var menu = ctx.RenderComponent<Menu>(p => p
+        var menu = ctx.Render<Menu>(p => p
             .Add(m => m.Trigger, (RenderFragment)(b => b.AddMarkupContent(0, "<span>t</span>")))
             .AddChildContent<MenuItem>(ip => ip
                 .Add(i => i.OnClick, EventCallback.Factory.Create(new object(), () => clicked = true))
@@ -152,10 +152,10 @@ public class UiInteractionTests
         // does the actual work, like UserCard's Theme row -- should not dismiss the menu just because
         // the user's click landed on the label rather than the widget. CloseOnClick=false is how that
         // row opts out of MenuItem's default close-on-activate behavior.
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
         ctx.Services.AddScoped<ShortcutService>();
         var clicked = false;
-        var menu = ctx.RenderComponent<Menu>(p => p
+        var menu = ctx.Render<Menu>(p => p
             .Add(m => m.Trigger, (RenderFragment)(b => b.AddMarkupContent(0, "<span>t</span>")))
             .AddChildContent<MenuItem>(ip => ip
                 .Add(i => i.CloseOnClick, false)
@@ -177,9 +177,9 @@ public class UiInteractionTests
         // invalid HTML — the parser silently closes the outer one, fragmenting the row and moving the
         // trailing content outside the element meant to contain it. bUnit's renderer does not warn
         // about this, so this test has to look at the actual element structure.
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
         ctx.Services.AddScoped<ShortcutService>();
-        var menu = ctx.RenderComponent<Menu>(p => p
+        var menu = ctx.Render<Menu>(p => p
             .Add(m => m.Trigger, (RenderFragment)(b => b.AddMarkupContent(0, "<span>t</span>")))
             .AddChildContent<MenuItem>(ip => ip
                 .AddChildContent("Theme")
@@ -195,9 +195,9 @@ public class UiInteractionTests
     [Fact]
     public void A_segmented_control_marks_the_selected_option_and_reports_changes()
     {
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
         var chosen = "system";
-        var segmented = ctx.RenderComponent<Segmented>(p => p
+        var segmented = ctx.Render<Segmented>(p => p
             .Add(s => s.Options, new List<SegmentedOption>
             {
                 new("system", "System", "monitor"),
@@ -219,11 +219,11 @@ public class UiInteractionTests
     [Fact]
     public void A_modal_renders_its_title_and_closes_on_escape_and_on_the_scrim()
     {
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
         ctx.Services.AddScoped<ShortcutService>();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
         var closes = 0;
-        var modal = ctx.RenderComponent<Modal>(p => p
+        var modal = ctx.Render<Modal>(p => p
             .Add(m => m.Title, "About SQL Agent")
             .Add(m => m.OnClose, EventCallback.Factory.Create(new object(), () => closes++))
             .AddChildContent("<p>body</p>"));
@@ -251,10 +251,10 @@ public class UiInteractionTests
         // OnKeyDown path below and the ability to tab straight into the dialog's other controls. bUnit has
         // no focus model, so this can only prove the interop call was issued, the same limit
         // SearchDialogTests documents for its own input.
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
         ctx.Services.AddScoped<ShortcutService>();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
-        var modal = ctx.RenderComponent<Modal>(p => p
+        var modal = ctx.Render<Modal>(p => p
             .Add(m => m.Title, "t")
             .AddChildContent("<p>body</p>"));
 
@@ -273,10 +273,10 @@ public class UiInteractionTests
         // exception (the previous version of this test) is a statement about bUnit's internals, not
         // about this component, and would break for reasons unrelated to the regression it exists to
         // catch. If someone later nests the panel inside the scrim, this fails immediately.
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
         ctx.Services.AddScoped<ShortcutService>();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
-        var modal = ctx.RenderComponent<Modal>(p => p
+        var modal = ctx.Render<Modal>(p => p
             .Add(m => m.Title, "t")
             .AddChildContent("<p>body</p>"));
 
@@ -291,16 +291,16 @@ public class UiInteractionTests
     {
         // The footer is the slot Phase D's confirm dialog will fill. It must be genuinely optional, or
         // every plain modal (About, for one) grows an empty bordered strip.
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
         ctx.Services.AddScoped<ShortcutService>();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
 
-        var plain = ctx.RenderComponent<Modal>(p => p
+        var plain = ctx.Render<Modal>(p => p
             .Add(m => m.Title, "About")
             .AddChildContent("<p>body</p>"));
         Assert.Empty(plain.FindAll(".modal-foot"));
 
-        var withFooter = ctx.RenderComponent<Modal>(p => p
+        var withFooter = ctx.Render<Modal>(p => p
             .Add(m => m.Title, "About")
             .Add(m => m.Footer, (RenderFragment)(b => b.AddMarkupContent(0, "<button>OK</button>")))
             .AddChildContent("<p>body</p>"));

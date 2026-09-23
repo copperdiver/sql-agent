@@ -17,7 +17,7 @@ public sealed class AttachmentMenuTests : IDisposable
     public void Files_menu_has_an_empty_state_until_a_file_is_picked()
     {
         using var ctx = NewContext();
-        var menu = ctx.RenderComponent<AttachmentMenu>();
+        var menu = ctx.Render<AttachmentMenu>();
 
         menu.Find(".menu-trigger").Click();
 
@@ -30,7 +30,7 @@ public sealed class AttachmentMenuTests : IDisposable
     {
         using var ctx = NewContext();
         IReadOnlyList<PendingFileAttachment>? pending = null;
-        var menu = ctx.RenderComponent<AttachmentMenu>(p => p
+        var menu = ctx.Render<AttachmentMenu>(p => p
             .Add(m => m.FileStorage, ctx.Services.GetRequiredService<FileStorageService>())
             .Add(m => m.OnFilesChanged, EventCallback.Factory.Create<IReadOnlyList<PendingFileAttachment>>(
                 this, files => pending = files)));
@@ -47,7 +47,7 @@ public sealed class AttachmentMenuTests : IDisposable
     public async Task A_file_over_25_mib_shows_stable_size_copy_without_provider_text()
     {
         using var ctx = NewContext();
-        var menu = ctx.RenderComponent<AttachmentMenu>(p => p
+        var menu = ctx.Render<AttachmentMenu>(p => p
             .Add(m => m.FileStorage, ctx.Services.GetRequiredService<FileStorageService>()));
         var content = new byte[(25 * 1024 * 1024) + 1];
         menu.Find(".menu-trigger").Click();
@@ -65,7 +65,7 @@ public sealed class AttachmentMenuTests : IDisposable
     {
         using var ctx = NewContext();
         IReadOnlyList<PendingFileAttachment> pending = [];
-        var menu = ctx.RenderComponent<AttachmentMenu>(p => p
+        var menu = ctx.Render<AttachmentMenu>(p => p
             .Add(m => m.FileStorage, ctx.Services.GetRequiredService<FileStorageService>())
             .Add(m => m.OnFilesChanged, EventCallback.Factory.Create<IReadOnlyList<PendingFileAttachment>>(
                 this, files => pending = files)));
@@ -75,7 +75,7 @@ public sealed class AttachmentMenuTests : IDisposable
             .ToArray();
 
         menu.FindComponent<InputFile>().UploadFiles(files);
-        menu.SetParametersAndRender(p => p.Add(m => m.Files, pending));
+        menu.Render(p => p.Add(m => m.Files, pending));
         menu.FindComponent<InputFile>().UploadFiles(
             InputFileContent.CreateFromBinary([11], "file-11.txt", contentType: "text/plain"));
 
@@ -91,7 +91,7 @@ public sealed class AttachmentMenuTests : IDisposable
         provider.HoldUpload();
         var states = new List<bool>();
         IReadOnlyList<PendingFileAttachment> pending = [];
-        var menu = ctx.RenderComponent<AttachmentMenu>(p => p
+        var menu = ctx.Render<AttachmentMenu>(p => p
             .Add(m => m.FileStorage, ctx.Services.GetRequiredService<FileStorageService>())
             .Add(m => m.OnUploadingChanged, EventCallback.Factory.Create<bool>(
                 this, uploading => states.Add(uploading)))
@@ -114,12 +114,12 @@ public sealed class AttachmentMenuTests : IDisposable
         Assert.Equal("first.txt", pending[0].FileName);
     }
 
-    private Bunit.TestContext NewContext()
+    private Bunit.BunitContext NewContext()
     {
         Directory.CreateDirectory(_root);
         var provider = new GatedFileStorageProvider(_root);
         var options = new FileStorageOptions();
-        var ctx = new Bunit.TestContext();
+        var ctx = new Bunit.BunitContext();
         ctx.Services.AddSingleton(options);
         ctx.Services.AddSingleton<IFileStorageProvider>(provider);
         ctx.Services.AddSingleton<IFileStorageProviderRegistry>(new FileStorageProviderRegistry([provider]));

@@ -18,11 +18,11 @@ public class SqlEditorTests
     [Fact]
     public void First_render_creates_the_editor_with_the_initial_value()
     {
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
         ctx.JSInterop.SetupVoid("sqlAgentEditor.create", _ => true);
         ctx.JSInterop.SetupVoid("sqlAgentEditor.destroy", _ => true); // fires when ctx disposes the component below
 
-        ctx.RenderComponent<SqlEditor>(p => p.Add(e => e.Value, "SELECT 1"));
+        ctx.Render<SqlEditor>(p => p.Add(e => e.Value, "SELECT 1"));
 
         var invocation = ctx.JSInterop.VerifyInvoke("sqlAgentEditor.create");
         Assert.Equal("SELECT 1", invocation.Arguments[2]);
@@ -34,13 +34,13 @@ public class SqlEditorTests
         // This is the path a future "open in editor" action (parent sets Value programmatically) relies
         // on: the editor is already mounted, so OnAfterRenderAsync's non-first-render branch must call
         // sqlAgentEditor.setValue with the new text.
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
         ctx.JSInterop.SetupVoid("sqlAgentEditor.create", _ => true);
         ctx.JSInterop.SetupVoid("sqlAgentEditor.setValue", _ => true);
         ctx.JSInterop.SetupVoid("sqlAgentEditor.destroy", _ => true);
 
-        var editor = ctx.RenderComponent<SqlEditor>(p => p.Add(e => e.Value, "SELECT 1"));
-        editor.SetParametersAndRender(p => p.Add(e => e.Value, "SELECT 2"));
+        var editor = ctx.Render<SqlEditor>(p => p.Add(e => e.Value, "SELECT 1"));
+        editor.Render(p => p.Add(e => e.Value, "SELECT 2"));
 
         var invocation = ctx.JSInterop.VerifyInvoke("sqlAgentEditor.setValue");
         Assert.Equal("SELECT 2", invocation.Arguments[1]);
@@ -51,11 +51,11 @@ public class SqlEditorTests
     {
         // OnEditorChanged is what the browser calls on every keystroke (see sql-editor.js's 'change'
         // listener). If this fed back into setValue, every keystroke would fight the user's own caret.
-        using var ctx = new Bunit.TestContext();
+        using var ctx = new Bunit.BunitContext();
         ctx.JSInterop.SetupVoid("sqlAgentEditor.create", _ => true);
         ctx.JSInterop.SetupVoid("sqlAgentEditor.destroy", _ => true);
 
-        var editor = ctx.RenderComponent<SqlEditor>(p => p.Add(e => e.Value, ""));
+        var editor = ctx.Render<SqlEditor>(p => p.Add(e => e.Value, ""));
         await editor.InvokeAsync(() => editor.Instance.OnEditorChanged("SELECT 1"));
         editor.Render();
 

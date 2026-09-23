@@ -26,9 +26,9 @@ public class SettingsPageTests
             throw new NotSupportedException("No LLM provider is configured on this server.");
     }
 
-    private static Bunit.TestContext NewContext(ILlmSqlGateway gateway)
+    private static Bunit.BunitContext NewContext(ILlmSqlGateway gateway)
     {
-        var ctx = new Bunit.TestContext();
+        var ctx = new Bunit.BunitContext();
         ctx.Services.AddSingleton<IConfiguration>(new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?> { ["SqlAgent:Web:Port"] = "5150" })
             .Build());
@@ -47,7 +47,7 @@ public class SettingsPageTests
         // that does not exist.
         using var ctx = NewContext(new UnconfiguredGatewayStub());
 
-        var page = ctx.RenderComponent<Settings>();
+        var page = ctx.Render<Settings>();
 
         Assert.Contains("No model configured", page.Markup);
         Assert.Contains("runbook", page.Markup, StringComparison.OrdinalIgnoreCase);
@@ -64,7 +64,7 @@ public class SettingsPageTests
         // says "Configured" and sends the user to the runbook is the failure this pair rules out.
         using var ctx = NewContext(new ConfiguredGatewayStub());
 
-        var page = ctx.RenderComponent<Settings>();
+        var page = ctx.Render<Settings>();
 
         Assert.Contains("Configured", page.Markup);
         Assert.DoesNotContain("No model configured", page.Markup);
@@ -87,7 +87,7 @@ public class SettingsPageTests
     {
         using var ctx = NewContext(new UnconfiguredGatewayStub());
 
-        var page = ctx.RenderComponent<Settings>();
+        var page = ctx.Render<Settings>();
 
         Assert.Contains("5150", page.Markup);
         Assert.Contains("Store", page.Markup);
@@ -99,7 +99,7 @@ public class SettingsPageTests
     {
         using var ctx = NewContext(new UnconfiguredGatewayStub());
 
-        var page = ctx.RenderComponent<Settings>();
+        var page = ctx.Render<Settings>();
 
         Assert.Contains("System", page.Markup);
         Assert.Contains("Light", page.Markup);

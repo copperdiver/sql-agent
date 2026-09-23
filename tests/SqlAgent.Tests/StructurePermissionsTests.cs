@@ -14,7 +14,7 @@ namespace SqlAgent.Tests;
 public class StructurePermissionsTests : IDisposable
 {
     private readonly SqliteConnection _conn = new("DataSource=:memory:");
-    private readonly Bunit.TestContext _ctx = new();
+    private readonly Bunit.BunitContext _ctx = new();
 
     public StructurePermissionsTests()
     {
@@ -42,7 +42,7 @@ public class StructurePermissionsTests : IDisposable
     }
 
     private IRenderedComponent<StructurePermissions> Render(Guid id) =>
-        _ctx.RenderComponent<StructurePermissions>(p => p.Add(x => x.ConnectionId, id));
+        _ctx.Render<StructurePermissions>(p => p.Add(x => x.ConnectionId, id));
 
     [Fact]
     public async Task All_six_structure_operations_are_off_by_default_and_unsupported_operations_are_explained()
